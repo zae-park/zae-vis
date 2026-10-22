@@ -27,7 +27,7 @@
 | GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite) |
 | GET / POST | `/api/index` | 색인 상태 · 색인 갱신 시작 (`{ force?: true }`) |
 
-설정은 `~/.worklog-kit/config.json`이고, 환경변수 `WORKLOG_DIR`, `AUTORAG_CONFIG`, `WORKLOG_PORT`, `WORKLOG_WEB_DIR`로 덮어쓸 수 있습니다.
+설정은 `~/.zaevis/config.json`이고, 환경변수 `WORKLOG_DIR`, `AUTORAG_CONFIG`, `ZAEVIS_PORT`, `ZAEVIS_WEB_DIR`로 덮어쓸 수 있습니다.
 
 AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSearch()`가 흔한 필드 이름을 모두 받아 정규화합니다. AutoRAG를 올린 뒤 결과가 비어 보이면 이 함수부터 확인하세요.
 
@@ -44,3 +44,8 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 - 저장소에는 개인 데이터가 없습니다. 받는 사람은 `kit/setup.sh`만 실행하면 자기 경로·이메일로 채워진 worklog가 생깁니다.
 - 회사 저장소를 담은 폴더 안에 worklog를 만들면 `setup.sh`가 그 저장소의 `.git/info/exclude`에 등록해 커밋을 막습니다.
 - 색인 범위는 worklog 폴더 하나입니다. 회사 코드나 메일을 색인하려면 각자 회사 정책을 먼저 확인하세요.
+
+## CLI 명령 추가
+
+`bin/zaevis`(bash)가 명령을 나누고, 서버 API를 쓰는 명령은 `server/src/cli.ts`의 `run()`으로 넘깁니다.
+새 조회 명령은 `run()`에 case를 추가하고, `bin/zaevis`의 `search|s|log|…` 목록에 이름을 더하면 됩니다.

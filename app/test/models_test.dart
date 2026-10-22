@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:worklog_app/models.dart';
-import 'package:worklog_app/widgets/markdown_view.dart';
+import 'package:zaevis/models.dart';
+import 'package:zaevis/widgets/markdown_view.dart';
 
 void main() {
   test('LogEntry.fromJson', () {

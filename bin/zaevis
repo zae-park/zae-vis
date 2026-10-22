@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# zaevis — personal work log & knowledge base (worklog + AutoRAG + Flutter app)
+set -euo pipefail
+
+# ── locate the repo, following the ~/.local/bin symlink ─────────────────────
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" == /* ]] || SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+SERVER="$ROOT/server"
+APP="$ROOT/app"
+STATE="${ZAEVIS_HOME:-$HOME/.zaevis}"
+PID_FILE="$STATE/server.pid"
+LOG_FILE="$STATE/server.log"
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then B=$'\e[1m'; D=$'\e[2m'; R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; N=$'\e[0m'; else B= D= R= G= Y= N=; fi
+say()  { printf '%s\n' "$*"; }
+info() { printf '%s›%s %s\n' "$D" "$N" "$*"; }
+warn() { printf '%s!%s %s\n' "$Y" "$N" "$*" >&2; }
+die()  { printf '%s✗%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+
+usage() {
+  cat <<EOF
+${B}zaevis${N} — 작업 기록 · 지식 관리
+
+${B}실행${N}
+  zaevis run cli              터미널에서 검색·로그 보기 (대화형)
+  zaevis run web [--rebuild]  브라우저로 열기 (필요하면 웹 앱을 빌드)
+  zaevis run app [--release]  데스크톱 앱 실행 (기본: flutter 개발 모드, --release: 빌드 후 실행)
+  zaevis run server           API 서버를 이 터미널에서 실행 (foreground)
+
+${B}바로 쓰기${N}
+  zaevis search <검색어>      검색           zaevis log [YYYY-MM]     월별 로그
+  zaevis projects             프로젝트 목록  zaevis summary [YYYY-MM] 월간 정리
+  zaevis index [--refresh]    색인 상태 / 갱신 (--force: 처음부터)
+
+${B}관리${N}
+  zaevis install              'zaevis' 명령을 PATH에 등록 (~/.local/bin)
+  zaevis setup [옵션]         worklog 폴더·Claude 지침·AutoRAG 초기 설정 (kit/setup.sh)
+  zaevis build web|app        앱 빌드만
+  zaevis start | stop | status | logs   백그라운드 서버 관리
+  zaevis doctor               필요한 도구 점검
+EOF
+}
+
+# ── config ───────────────────────────────────────────────────────────────────
+port() {
+  if [[ -n "${ZAEVIS_PORT:-}" ]]; then echo "$ZAEVIS_PORT"; return; fi
+  if [[ -f "$STATE/config.json" ]] && command -v node >/dev/null; then
+    node -e 'try{const p=require(process.argv[1]).port;console.log(p||4710)}catch{console.log(4710)}' "$STATE/config.json"
+  else
+    echo 4710
+  fi
+}
+url() { echo "http://127.0.0.1:$(port)"; }
+
+need_node() {
+  command -v node >/dev/null || die "Node.js 24 이상이 필요합니다: brew install node@24"
+  local major; major="$(node -p 'process.versions.node.split(".")[0]')"
+  [[ "$major" -ge 24 ]] || die "Node.js 24 이상이 필요합니다 (현재 $(node -v)): brew install node@24"
+  if [[ ! -d "$SERVER/node_modules" ]]; then
+    info "서버 의존성 설치 중…"
+    (cd "$SERVER" && npm install --no-fund --no-audit --silent)
+  fi
+}
+need_flutter() { command -v flutter >/dev/null || die "Flutter가 필요합니다: brew install --cask flutter"; }
+
+host_device() {
+  case "$(uname -s)" in
+    Darwin) echo macos ;;
+    Linux) echo linux ;;
+    MINGW*|MSYS*|CYGWIN*) echo windows ;;
+    *) die "지원하지 않는 OS: $(uname -s)" ;;
+  esac
+}
+
+open_url() {
+  if command -v open >/dev/null; then open "$1"
+  elif command -v xdg-open >/dev/null; then xdg-open "$1" >/dev/null 2>&1 &
+  else say "브라우저에서 여세요: $1"; fi
+}
+
+# ── server lifecycle ─────────────────────────────────────────────────────────
+server_up() { curl -sf -m 2 "$(url)/api/health" >/dev/null 2>&1; }
+
+server_start() {
+  if server_up; then return 0; fi
+  need_node
+  mkdir -p "$STATE"
+  info "서버 시작 ($(url))"
+  (
+    cd "$SERVER" || exit 1
+    nohup node src/main.ts >>"$LOG_FILE" 2>&1 &
+    echo $! >"$PID_FILE"
+  )
+  for _ in $(seq 1 40); do
+    server_up && return 0
+    if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      tail -n 20 "$LOG_FILE" >&2
+      die "서버가 시작되지 않았습니다. 처음이라면 'zaevis setup'을 먼저 실행하세요. (로그: $LOG_FILE)"
+    fi
+    sleep 0.25
+  done
+  die "서버 응답이 없습니다 (로그: $LOG_FILE)"
+}
+
+server_stop() {
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    kill "$(cat "$PID_FILE")" && rm -f "$PID_FILE"
+    say "${G}●${N} 서버를 멈췄습니다."
+  elif server_up; then
+    warn "zaevis가 띄우지 않은 서버가 $(url)에서 돌고 있습니다. 직접 종료하세요."
+  else
+    say "실행 중인 서버가 없습니다."
+  fi
+}
+
+server_status() {
+  if server_up; then say "${G}●${N} 서버 실행 중: $(url)"; else say "${D}○${N} 서버 꺼짐 ($(url))"; fi
+}
+
+# ── flutter ──────────────────────────────────────────────────────────────────
+ensure_platform() { # ensure_platform web|macos|linux|windows
+  [[ -d "$APP/$1" ]] || { info "$1 플랫폼 폴더 생성"; "$APP/tool/setup_platforms.sh" "$1"; }
+}
+
+web_stale() {
+  local index="$APP/build/web/index.html"
+  [[ ! -f "$index" ]] && return 0
+  [[ -n "$(find "$APP/lib" "$APP/pubspec.yaml" "$APP/web" -newer "$index" -print -quit 2>/dev/null)" ]]
+}
+
+build_web() {
+  need_flutter; ensure_platform web
+  info "웹 앱 빌드 중…"
+  (cd "$APP" && flutter build web --release)
+}
+
+build_app() {
+  need_flutter
+  local dev; dev="$(host_device)"; ensure_platform "$dev"
+  info "$dev 앱 빌드 중…"
+  (cd "$APP" && flutter build "$dev" --release)
+}
+
+open_built_app() {
+  local dev; dev="$(host_device)"
+  case "$dev" in
+    macos) open "$APP/build/macos/Build/Products/Release/zaevis.app" ;;
+    linux) "$APP"/build/linux/*/release/bundle/zaevis & ;;
+    windows) "$APP/build/windows/x64/runner/Release/zaevis.exe" & ;;
+  esac
+}
+
+# ── install ──────────────────────────────────────────────────────────────────
+cmd_install() {
+  local bin_dir="${ZAEVIS_BIN_DIR:-$HOME/.local/bin}"
+  mkdir -p "$bin_dir"
+  ln -sf "$ROOT/bin/zaevis" "$bin_dir/zaevis"
+  say "${G}✓${N} $bin_dir/zaevis → $ROOT/bin/zaevis"
+  case ":$PATH:" in
+    *":$bin_dir:"*) say "이제 어디서든 'zaevis'를 쓸 수 있습니다." ;;
+    *)
+      local rc="$HOME/.zshrc"; [[ "${SHELL:-}" == */bash ]] && rc="$HOME/.bashrc"
+      if ! grep -qs "# zaevis" "$rc"; then
+        printf '\nexport PATH="%s:$PATH"  # zaevis\n' "$bin_dir" >>"$rc"
+        say "${G}✓${N} $rc 에 PATH를 추가했습니다."
+      fi
+      say "새 터미널을 열거나 'source $rc' 후 'zaevis'를 쓰세요." ;;
+  esac
+}
+
+cmd_doctor() {
+  local ok=1
+  check() { if command -v "$1" >/dev/null; then say "${G}✓${N} $1  ${D}$($2 2>/dev/null | head -1)${N}"; else say "${R}✗${N} $1  ${D}$3${N}"; ok=0; fi; }
+  check node "node -v" "brew install node@24 (24 이상)"
+  check flutter "flutter --version" "brew install --cask flutter"
+  check cargo "cargo --version" "https://rustup.rs (MinSync 빌드용)"
+  check protoc "protoc --version" "brew install protobuf (MinSync 빌드용)"
+  check minsync "minsync --version" "zaevis setup이 빌드합니다"
+  [[ -f "$STATE/config.json" ]] && say "${G}✓${N} 설정  ${D}$STATE/config.json${N}" || { say "${R}✗${N} 설정  ${D}zaevis setup 필요${N}"; ok=0; }
+  server_status
+  [[ $ok -eq 1 ]]
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+cli() { need_node; exec node "$SERVER/src/cli.ts" "$@"; }
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    run)
+      local target="${1:-}"; shift || true
+      case "$target" in
+        cli) server_start; cli repl ;;
+        web)
+          if [[ "${1:-}" == "--rebuild" ]] || web_stale; then build_web; fi
+          server_start
+          say "${G}●${N} $(url)"; open_url "$(url)" ;;
+        app)
+          server_start
+          if [[ "${1:-}" == "--release" ]]; then
+            build_app; open_built_app
+          else
+            need_flutter
+            local dev; dev="$(host_device)"; ensure_platform "$dev"
+            cd "$APP" && exec flutter run -d "$dev" "$@"
+          fi ;;
+        server) need_node; cd "$SERVER" && exec node src/main.ts ;;
+        *) die "사용법: zaevis run cli|web|app|server" ;;
+      esac ;;
+    build)
+      case "${1:-}" in
+        web) build_web ;;
+        app) build_app ;;
+        *) die "사용법: zaevis build web|app" ;;
+      esac ;;
+    search|s|log|l|projects|p|project|summary|index)
+      server_start; cli "$cmd" "$@" ;;
+    start) server_start; server_status ;;
+    stop) server_stop ;;
+    status) server_status ;;
+    logs) touch "$LOG_FILE" 2>/dev/null || true; exec tail -n 50 -f "$LOG_FILE" ;;
+    setup) exec "$ROOT/kit/setup.sh" "$@" ;;
+    install) cmd_install ;;
+    doctor) cmd_doctor ;;
+    help|-h|--help) usage ;;
+    *) usage; die "알 수 없는 명령: $cmd" ;;
+  esac
+}
+
+main "$@"

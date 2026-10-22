@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Entry point: `node src/main.ts` (Node >= 24 runs TypeScript directly).
 //
-// Settings come from ~/.worklog-kit/config.json (written by kit/setup.sh) and can be
-// overridden with env vars: WORKLOG_DIR, AUTORAG_CONFIG, WORKLOG_PORT, WORKLOG_WEB_DIR.
+// Settings come from ~/.zaevis/config.json (written by kit/setup.sh) and can be
+// overridden with env vars: WORKLOG_DIR, AUTORAG_CONFIG, ZAEVIS_PORT, ZAEVIS_WEB_DIR.
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,16 +17,16 @@ type FileConfig = { worklogDir?: string; autoragConfig?: string; port?: number }
 const expand = (p: string) => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 
 function loadConfig(): Required<FileConfig> & { webDir: string | null } {
-  const file = join(homedir(), ".worklog-kit", "config.json");
+  const file = join(process.env.ZAEVIS_HOME ?? join(homedir(), ".zaevis"), "config.json");
   const fc: FileConfig = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   const worklogDir = expand(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog");
   const here = dirname(fileURLToPath(import.meta.url));
   const bundledWeb = resolve(here, "..", "..", "app", "build", "web");
-  const webDir = process.env.WORKLOG_WEB_DIR ?? (existsSync(bundledWeb) ? bundledWeb : null);
+  const webDir = process.env.ZAEVIS_WEB_DIR ?? bundledWeb; // may not exist yet; built later by `zaevis run web`
   return {
     worklogDir: resolve(worklogDir),
     autoragConfig: expand(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? "~/.autorag/config.json"),
-    port: Number(process.env.WORKLOG_PORT ?? fc.port ?? 4710),
+    port: Number(process.env.ZAEVIS_PORT ?? fc.port ?? 4710),
     webDir,
   };
 }
@@ -41,10 +41,10 @@ const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.workl
 const server = createApp({ worklog: new Worklog(cfg.worklogDir), search, webDir: cfg.webDir });
 
 server.listen(cfg.port, "127.0.0.1", () => {
-  console.log(`worklog-kit server  http://127.0.0.1:${cfg.port}`);
+  console.log(`zaevis server  http://127.0.0.1:${cfg.port}`);
   console.log(`  worklog : ${cfg.worklogDir}`);
   console.log(`  autorag : ${cfg.autoragConfig}`);
-  console.log(`  web app : ${cfg.webDir ?? "(not built — run: cd app && flutter build web)"}`);
+  console.log(`  web app : ${cfg.webDir && existsSync(join(cfg.webDir, "index.html")) ? cfg.webDir : "(not built — run: zaevis run web)"}`);
 });
 
 const shutdown = async () => {

@@ -117,3 +117,13 @@ test("normalizeSearch handles the AutoRAG 2.11 Lite shape (source string + conte
   assert.equal(r.hits[0].score, 3.2);
   assert.ok(r.hits[0].snippet.length <= 601 && r.hits[0].snippet.endsWith("…"));
 });
+
+test("AutoRAGMcp without a config explains how to set it up instead of crashing", async () => {
+  const { AutoRAGMcp } = await import("../src/autorag.ts");
+  const m = new AutoRAGMcp({ configPath: "/nonexistent/config.json", roots: [] });
+  const r = await m.search("q", 5);
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "not-configured");
+  assert.equal(((await m.status()) as { state: string }).state, "not-configured");
+  await assert.rejects(m.refresh(), /zaevis setup/);
+});

@@ -91,6 +91,11 @@ export function createApp(opts: AppOptions): Server {
     try {
       if (parts[0] !== "api") {
         if (req.method === "GET" && opts.webDir && (await serveStatic(opts.webDir, url.pathname, res))) return;
+        if (req.method === "GET" && url.pathname === "/") {
+          res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+          res.end("웹 앱이 아직 빌드되지 않았습니다. 터미널에서 `zaevis run web`을 실행하세요.\n");
+          return;
+        }
         return notFound(res);
       }
 

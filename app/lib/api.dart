@@ -6,8 +6,8 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 
 /// Server address. Override at build time with
-/// `--dart-define=WORKLOG_API=http://127.0.0.1:4710`.
-const _definedBase = String.fromEnvironment('WORKLOG_API');
+/// `--dart-define=ZAEVIS_API=http://127.0.0.1:4710`.
+const _definedBase = String.fromEnvironment('ZAEVIS_API');
 const defaultDesktopBase = 'http://127.0.0.1:4710';
 
 String defaultBaseUrl() {

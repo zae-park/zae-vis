@@ -85,6 +85,13 @@ export function normalizeSearch(query: string, data: unknown, roots: string[] = 
   return { ok: true, query, hits };
 }
 
+function friendly(err: unknown): string {
+  const msg = String((err as Error)?.message ?? err);
+  return /Connection closed|ENOENT|spawn/.test(msg)
+    ? `AutoRAG MCP 서버를 실행하지 못했습니다 (${msg}). 'zaevis logs'에서 원인을 확인하세요.`
+    : msg;
+}
+
 function defaultMcpBin(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const local = join(here, "..", "node_modules", ".bin", "autorag-mcp");
@@ -113,7 +120,7 @@ export class AutoRAGMcp implements SearchBackend {
           env: { ...(process.env as Record<string, string>), AUTORAG_CONFIG: this.configPath },
           stderr: "inherit",
         });
-        const client = new Client({ name: "worklog-kit", version: "0.1.0" });
+        const client = new Client({ name: "zaevis", version: "0.1.0" });
         transport.onclose = () => {
           this.client = null;
         };
@@ -133,17 +140,37 @@ export class AutoRAGMcp implements SearchBackend {
     return payload(result);
   }
 
-  status(): Promise<unknown> {
-    return this.call("autorag.status", {});
+  private notConfigured(): string | null {
+    return existsSync(this.configPath)
+      ? null
+      : `AutoRAG가 설정되지 않았습니다 (${this.configPath} 없음). 'zaevis setup'을 --no-autorag 없이 실행하세요.`;
   }
 
-  refresh(force = false): Promise<unknown> {
+  async status(): Promise<unknown> {
+    const missing = this.notConfigured();
+    if (missing) return { state: "not-configured", stale: false, lastError: missing, diagnostics: [] };
+    try {
+      return await this.call("autorag.status", {});
+    } catch (err) {
+      return { state: "unavailable", stale: false, lastError: friendly(err), diagnostics: [] };
+    }
+  }
+
+  async refresh(force = false): Promise<unknown> {
+    const missing = this.notConfigured();
+    if (missing) throw new Error(missing);
     // First refresh builds embeddings and can take minutes.
     return this.call("autorag.refresh", force ? { force: true } : {}, 30 * 60_000);
   }
 
   async search(query: string, topK: number): Promise<SearchResponse> {
-    return normalizeSearch(query, await this.call("autorag.search", { query, topK }), this.roots);
+    const missing = this.notConfigured();
+    if (missing) return { ok: false, query, hits: [], error: { code: "not-configured", message: missing } };
+    try {
+      return normalizeSearch(query, await this.call("autorag.search", { query, topK }), this.roots);
+    } catch (err) {
+      return { ok: false, query, hits: [], error: { code: "search-failed", message: friendly(err) } };
+    }
   }
 
   async close(): Promise<void> {

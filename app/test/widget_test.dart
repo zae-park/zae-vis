@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:worklog_app/api.dart';
-import 'package:worklog_app/main.dart';
+import 'package:zaevis/api.dart';
+import 'package:zaevis/main.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -47,7 +47,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(WorklogApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
     await tester.enterText(find.byType(TextField), 'GA4 매핑');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
@@ -61,7 +61,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(WorklogApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
     await tester.tap(find.text('로그').first);
     await tester.pumpAndSettle();
 
@@ -80,7 +80,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(WorklogApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
   });

@@ -116,6 +116,8 @@ class _IndexSheetState extends State<IndexSheet> {
         'failed' => '실패',
         'never' || '' => '아직 색인 안 함',
         'idle' => '대기',
+        'not-configured' => 'AutoRAG 미설정',
+        'unavailable' => '연결 실패',
         'running' || 'refreshing' => '색인 중…',
         _ => state,
       };

@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PLATFORMS="${1:-web,macos,windows,linux}"
 
-flutter create --platforms="$PLATFORMS" --project-name worklog_app --org io.github.zaepark .
+flutter create --platforms="$PLATFORMS" --project-name zaevis --org io.github.zaepark .
 
 # The macOS app runs sandboxed; it needs the outgoing-network entitlement to reach
 # the local worklog server at http://127.0.0.1:4710.

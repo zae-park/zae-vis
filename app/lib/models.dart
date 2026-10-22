@@ -1,4 +1,4 @@
-// JSON models for the worklog-kit server API (server/src/app.ts).
+// JSON models for the zaevis server API (server/src/app.ts).
 
 typedef Json = Map<String, dynamic>;
 

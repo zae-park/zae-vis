@@ -1,4 +1,4 @@
-# 작업 기록 남기기 (worklog-kit)
+# 작업 기록 남기기 (zaevis)
 
 이 폴더 아래 저장소에서 코드 작업을 마치면(사용자가 마무리하거나, 의미 있는 단위의 작업이 끝났을 때),
 `{{WORKLOG_DIR}}/inbox/claude-sessions/YYYY-MM-DD_<저장소>.md`에 세션 노트를 남긴다.

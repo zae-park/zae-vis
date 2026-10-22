@@ -7,10 +7,10 @@ import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/summaries_screen.dart';
 
-void main() => runApp(WorklogApp(api: WorklogApi()));
+void main() => runApp(ZaevisApp(api: WorklogApi()));
 
-class WorklogApp extends StatelessWidget {
-  const WorklogApp({super.key, required this.api});
+class ZaevisApp extends StatelessWidget {
+  const ZaevisApp({super.key, required this.api});
   final WorklogApi api;
 
   @override
@@ -20,7 +20,7 @@ class WorklogApp extends StatelessWidget {
           visualDensity: VisualDensity.standard,
         );
     return MaterialApp(
-      title: 'worklog',
+      title: 'zaevis',
       debugShowCheckedModeBanner: false,
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),

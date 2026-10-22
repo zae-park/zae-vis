@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# worklog-kit setup — creates your personal worklog folder and wires Claude + AutoRAG to it.
+# zaevis setup — creates your personal worklog folder and wires Claude + AutoRAG to it.
 # Safe to re-run: existing files are never overwritten.
 #
 #   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR] [--no-autorag] [--yes]
@@ -8,7 +8,7 @@ set -euo pipefail
 
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$KIT_DIR/.." && pwd)"
-STATE_DIR="$HOME/.worklog-kit"
+STATE_DIR="${ZAEVIS_HOME:-$HOME/.zaevis}"
 
 WORKLOG_DIR=""
 REPOS_ROOT=""
@@ -63,7 +63,7 @@ MONTH="$(date +%Y-%m)"
 [[ -e "$WORKLOG_DIR/.state.md" ]] || printf 'last_weekly: %s\n' "$(date -v-7d +%F 2>/dev/null || date -d '7 days ago' +%F)" > "$WORKLOG_DIR/.state.md"
 
 echo "2) Claude 세션 노트 지침: $REPOS_ROOT/CLAUDE.md"
-if [[ -e "$REPOS_ROOT/CLAUDE.md" ]] && ! grep -q "worklog-kit" "$REPOS_ROOT/CLAUDE.md"; then
+if [[ -e "$REPOS_ROOT/CLAUDE.md" ]] && ! grep -q "zaevis" "$REPOS_ROOT/CLAUDE.md"; then
   echo "  ! 기존 CLAUDE.md가 있어 덮어쓰지 않습니다. 아래 파일 내용을 직접 붙여 넣으세요:"
   render "$KIT_DIR/claude/CLAUDE.md" "$STATE_DIR/CLAUDE.snippet.md"
 else
@@ -132,8 +132,9 @@ fi
 cat <<DONE
 
 완료.
-- 서버 실행:      cd "$ROOT_DIR/server" && npm start      → http://127.0.0.1:4710
-- 웹 앱 빌드:     cd "$ROOT_DIR/app" && flutter build web   (서버가 같은 주소로 제공)
-- 데스크톱 앱:    cd "$ROOT_DIR/app" && flutter run -d macos
+- 명령 등록:   $ROOT_DIR/bin/zaevis install   (이미 했다면 생략)
+- 터미널:      zaevis run cli
+- 브라우저:    zaevis run web
+- 데스크톱 앱: zaevis run app
 - 주간 정리 예약: Claude에서 "$STATE_DIR/weekly-task-prompt.md" 내용으로 매주 월요일 예약 작업을 만드세요.
 DONE

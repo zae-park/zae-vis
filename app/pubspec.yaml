@@ -1,5 +1,5 @@
-name: worklog_app
-description: worklog-kit front-end — search, logs, projects and monthly summaries (desktop + web).
+name: zaevis
+description: zaevis front-end — search, logs, projects and monthly summaries (desktop + web).
 publish_to: none
 version: 0.1.0+1
 

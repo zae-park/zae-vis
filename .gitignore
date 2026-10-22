@@ -1,7 +1,7 @@
 # personal data never belongs in this repo
 /worklog/
 .autorag/
-.worklog-kit/
+.zaevis/
 
 # node
 server/node_modules/
