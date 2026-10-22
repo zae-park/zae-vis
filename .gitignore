@@ -1,0 +1,19 @@
+# personal data never belongs in this repo
+/worklog/
+.autorag/
+.worklog-kit/
+
+# node
+server/node_modules/
+
+# flutter
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/**/Flutter/ephemeral/
+app/**/Pods/
+app/**/xcuserdata/
+
+.DS_Store
+*.log

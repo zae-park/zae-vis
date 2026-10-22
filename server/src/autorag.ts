@@ -1,0 +1,153 @@
+// Talks to AutoRAG Lite through its stdio MCP server (`autorag-mcp`).
+// Lite mode needs no chat model or API key: search is BM25 + local MinSync vectors.
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export type SearchHit = {
+  number: number;
+  title: string;
+  path: string;      // path relative to the worklog root when possible
+  snippet: string;
+  score: number | null;
+};
+
+export type SearchResponse = {
+  ok: boolean;
+  query: string;
+  hits: SearchHit[];
+  error?: { code: string; message: string };
+};
+
+/** What the HTTP layer needs. A fake implements this in tests. */
+export interface SearchBackend {
+  status(): Promise<unknown>;
+  refresh(force?: boolean): Promise<unknown>;
+  search(query: string, topK: number): Promise<SearchResponse>;
+  close(): Promise<void>;
+}
+
+type ToolResult = { structuredContent?: unknown; content?: Array<{ type: string; text?: string }>; isError?: boolean };
+
+function payload(result: ToolResult): unknown {
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  const text = result.content?.find((c) => c.type === "text")?.text;
+  if (text === undefined) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { text };
+  }
+}
+
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Strip AutoRAG's virtual root ("/worklog/…" for a search path named worklog) and absolute roots. */
+export function displayPath(raw: string, roots: string[]): string {
+  for (const r of roots) {
+    if (raw.startsWith(r + "/")) return raw.slice(r.length + 1);
+  }
+  return raw.replace(/^\/[^/]+\//, "");
+}
+
+/**
+ * Normalises an `autorag.search` payload. The Lite result shape is not a published contract,
+ * so this accepts the common field names and keeps going when some are missing.
+ */
+export function normalizeSearch(query: string, data: unknown, roots: string[] = []): SearchResponse {
+  const d = (data ?? {}) as Record<string, unknown>;
+  if (d.ok === false) {
+    return {
+      ok: false,
+      query,
+      hits: [],
+      error: { code: str(d.errorCode) || "error", message: str(d.message) || "AutoRAG returned an error" },
+    };
+  }
+  const list = (Array.isArray(d.results) ? d.results : Array.isArray(d.hits) ? d.hits : Array.isArray(d.chunks) ? d.chunks : []) as Array<Record<string, unknown>>;
+  const hits = list.map((r, i): SearchHit => {
+    const src = (r.source && typeof r.source === "object" ? r.source : {}) as Record<string, unknown>;
+    const rawPath = str(r.path) || str(r.virtualPath) || str(r.sourcePath) || str(src.path) || str(src.virtualPath) || str(r.source) || str(r.file);
+    const path = displayPath(rawPath, roots);
+    return {
+      number: num(r.number) ?? num(r.rank) ?? i + 1,
+      title: str(r.title) || str(src.title) || path.split("/").pop() || `#${i + 1}`,
+      path,
+      snippet: clip((str(r.snippet) || str(r.summary) || str(r.text) || str(r.content) || str(r.chunk)).trim(), 600),
+      score: num(r.score) ?? num(r.relevance),
+    };
+  });
+  return { ok: true, query, hits };
+}
+
+function defaultMcpBin(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const local = join(here, "..", "node_modules", ".bin", "autorag-mcp");
+  return existsSync(local) ? local : "autorag-mcp";
+}
+
+export class AutoRAGMcp implements SearchBackend {
+  private client: Client | null = null;
+  private connecting: Promise<Client> | null = null;
+  private readonly configPath: string;
+  private readonly roots: string[];
+  private readonly bin: string;
+
+  constructor(opts: { configPath: string; roots: string[]; bin?: string }) {
+    this.configPath = opts.configPath;
+    this.roots = opts.roots;
+    this.bin = opts.bin ?? defaultMcpBin();
+  }
+
+  private async connect(): Promise<Client> {
+    if (this.client) return this.client;
+    if (!this.connecting) {
+      this.connecting = (async () => {
+        const transport = new StdioClientTransport({
+          command: this.bin,
+          env: { ...(process.env as Record<string, string>), AUTORAG_CONFIG: this.configPath },
+          stderr: "inherit",
+        });
+        const client = new Client({ name: "worklog-kit", version: "0.1.0" });
+        transport.onclose = () => {
+          this.client = null;
+        };
+        await client.connect(transport);
+        this.client = client;
+        return client;
+      })().finally(() => {
+        this.connecting = null;
+      });
+    }
+    return this.connecting;
+  }
+
+  private async call(name: string, args: Record<string, unknown>, timeoutMs = 120_000): Promise<unknown> {
+    const client = await this.connect();
+    const result = (await client.callTool({ name, arguments: args }, undefined, { timeout: timeoutMs })) as ToolResult;
+    return payload(result);
+  }
+
+  status(): Promise<unknown> {
+    return this.call("autorag.status", {});
+  }
+
+  refresh(force = false): Promise<unknown> {
+    // First refresh builds embeddings and can take minutes.
+    return this.call("autorag.refresh", force ? { force: true } : {}, 30 * 60_000);
+  }
+
+  async search(query: string, topK: number): Promise<SearchResponse> {
+    return normalizeSearch(query, await this.call("autorag.search", { query, topK }), this.roots);
+  }
+
+  async close(): Promise<void> {
+    await this.client?.close();
+    this.client = null;
+  }
+}
