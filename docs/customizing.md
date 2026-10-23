@@ -26,6 +26,14 @@
 | GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` |
 | GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite) |
 | GET / POST | `/api/index` | 색인 상태 · 색인 갱신 시작 (`{ force?: true }`) |
+| POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
+| GET | `/api/inbox` | inbox 파일과 전사 작업 |
+| POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
+| GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
+| GET / POST | `/api/collect` | 수집 상태 · 수집 시작 (`{ sources?: [], index?: false }`) |
+| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인 |
+
+GET이 아닌 요청은 `x-zaevis: 1` 헤더가 있어야 하고, 다른 사이트(Origin)나 다른 호스트 이름에서 온 요청은 거절합니다. 사용자 커넥터가 명령을 실행하기 때문에 넣은 보호 장치입니다.
 
 설정은 `~/.zaevis/config.json`이고, 환경변수 `WORKLOG_DIR`, `AUTORAG_CONFIG`, `ZAEVIS_PORT`, `ZAEVIS_WEB_DIR`로 덮어쓸 수 있습니다.
 
@@ -49,3 +57,17 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 
 `bin/zaevis`(bash)가 명령을 나누고, 서버 API를 쓰는 명령은 `server/src/cli.ts`의 `run()`으로 넘깁니다.
 새 조회 명령은 `run()`에 case를 추가하고, `bin/zaevis`의 `search|s|log|…` 목록에 이름을 더하면 됩니다.
+
+## 데이터소스 커넥터 추가
+
+**명령어로 (코드 수정 없이)**: 앱의 수집 화면 → 커넥터 추가, 또는 `~/.zaevis/sources.json`의 `custom`에 추가합니다.
+
+```json
+{ "custom": [ { "name": "calendar", "command": "python3 ~/bin/cal_export.py --since {from} --until {to}" } ] }
+```
+
+명령은 Markdown을 출력하면 됩니다. 날짜별로 나누려면 `<!-- zaevis:date 2026-10-23 -->` 줄을 넣습니다.
+
+**내장 커넥터로**: `server/src/sources/`에 `Source`(`types.ts`)를 구현하고 `sources/index.ts`의 `BUILTIN`에 추가합니다.
+`collect()`는 수집 구간의 날짜별 Markdown을 돌려주고, 수집기가 `sources/<이름>/<날짜>.md`에 씁니다.
+매번 하루 전체를 다시 만들어 덮어쓰는 방식이라 같은 날 여러 번 돌려도 중복이 생기지 않습니다(이벤트형은 `append: true`).

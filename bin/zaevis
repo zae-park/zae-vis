@@ -37,11 +37,23 @@ ${B}바로 쓰기${N}
   zaevis projects             프로젝트 목록  zaevis summary [YYYY-MM] 월간 정리
   zaevis index [--refresh]    색인 상태 / 갱신 (--force: 처음부터)
 
+${B}기록 넣기 (실시간)${N}
+  zaevis add "#decision [[프로젝트]] 무엇을, 왜"   한 줄 기록
+  zaevis ingest <파일…>       전사본(.txt .md .vtt .srt)은 inbox로, 녹음은 whisperX로 바로 전사
+  zaevis inbox                inbox와 전사 작업 보기
+
+${B}수집 (배치)${N}
+  zaevis collect [이름…]      지금 수집하고 색인 (--no-index: 색인 생략)
+  zaevis sources [on|off 이름]  데이터소스 상태 / 켜기·끄기
+  zaevis schedule [install [HH:MM]|remove]   매일 수집·색인 예약 (기본 18:30, launchd)
+  zaevis daily [--if-stale]   예약이 실행하는 명령 (수집 + 색인)
+
 ${B}관리${N}
   zaevis install              'zaevis' 명령을 PATH에 등록 (~/.local/bin)
   zaevis setup [옵션]         worklog 폴더·Claude 지침·AutoRAG 초기 설정 (kit/setup.sh)
   zaevis build web|app        앱 빌드만
   zaevis start | stop | status | logs   백그라운드 서버 관리
+  zaevis ext install whisperx  녹음 전사 확장 설치 (~/.zaevis/ext/whisperx)
   zaevis doctor               필요한 도구 점검
 EOF
 }
@@ -173,6 +185,22 @@ cmd_install() {
   esac
 }
 
+ext_install_whisperx() {
+  local py="" v
+  for v in python3.12 python3.11 python3.10 python3; do
+    if command -v "$v" >/dev/null; then py="$(command -v "$v")"; break; fi
+  done
+  [[ -n "$py" ]] || die "Python 3.10~3.12가 필요합니다: brew install python@3.12"
+  local venv="$STATE/ext/whisperx"
+  info "whisperX 설치 ($py → $venv). 수 분 걸리고 1~2GB를 씁니다."
+  "$py" -m venv "$venv"
+  "$venv/bin/pip" install --quiet --upgrade pip
+  "$venv/bin/pip" install whisperx
+  command -v ffmpeg >/dev/null || warn "ffmpeg가 필요합니다: brew install ffmpeg"
+  say "${G}✓${N} whisperX 설치 완료. 녹음을 worklog/inbox/audio 에 넣거나 'zaevis ingest 녹음.m4a'."
+  say "  화자 구분이 필요하면 HF_TOKEN 환경변수를 설정하세요 (pyannote 모델 동의 필요)."
+}
+
 cmd_doctor() {
   local ok=1
   check() { if command -v "$1" >/dev/null; then say "${G}✓${N} $1  ${D}$($2 2>/dev/null | head -1)${N}"; else say "${R}✗${N} $1  ${D}$3${N}"; ok=0; fi; }
@@ -181,8 +209,11 @@ cmd_doctor() {
   check cargo "cargo --version" "https://rustup.rs (MinSync 빌드용)"
   check protoc "protoc --version" "brew install protobuf (MinSync 빌드용)"
   check minsync "minsync --version" "zaevis setup이 빌드합니다"
+  check ffmpeg "ffmpeg -version" "brew install ffmpeg (녹음 전사용, 선택)"
+  if [[ -x "$STATE/ext/whisperx/bin/whisperx" ]] || command -v whisperx >/dev/null; then say "${G}✓${N} whisperx"; else say "${D}○${N} whisperx  ${D}선택: zaevis ext install whisperx${N}"; fi
   [[ -f "$STATE/config.json" ]] && say "${G}✓${N} 설정  ${D}$STATE/config.json${N}" || { say "${R}✗${N} 설정  ${D}zaevis setup 필요${N}"; ok=0; }
   server_status
+  command -v node >/dev/null && node "$SERVER/src/cli.ts" schedule status 2>/dev/null | head -1
   [[ $ok -eq 1 ]]
 }
 
@@ -218,8 +249,22 @@ main() {
         app) build_app ;;
         *) die "사용법: zaevis build web|app" ;;
       esac ;;
-    search|s|log|l|projects|p|project|summary|index)
+    search|s|log|l|projects|p|project|summary|index|add|inbox)
       server_start; cli "$cmd" "$@" ;;
+    sources|schedule|ingest)
+      cli "$cmd" "$@" ;;
+    daily)
+      need_node; exec node "$SERVER/src/daily.ts" "$@" ;;
+    collect)
+      need_node
+      local args=() a
+      for a in "$@"; do if [[ "$a" == --* ]]; then args+=("$a"); else args+=(--source "$a"); fi; done
+      exec node "$SERVER/src/daily.ts" ${args[@]+"${args[@]}"} ;;
+    ext)
+      case "${1:-} ${2:-}" in
+        "install whisperx") ext_install_whisperx ;;
+        *) die "사용법: zaevis ext install whisperx" ;;
+      esac ;;
     start) server_start; server_status ;;
     stop) server_stop ;;
     status) server_status ;;

@@ -143,3 +143,176 @@ class IndexStatus {
   final List<String> messages;
   final String? lastError;
 }
+
+bool? _boolOrNull(Object? v) => v is bool ? v : null;
+String? _strOrNull(Object? v) => v is String && v.isNotEmpty ? v : null;
+
+class SourceOption {
+  const SourceOption({required this.key, required this.label, required this.kind});
+  factory SourceOption.fromJson(Json j) =>
+      SourceOption(key: _str(j['key']), label: _str(j['label']), kind: _str(j['kind']));
+  final String key;
+  final String label;
+  final String kind; // text | path | paths | number
+}
+
+class SourceInfo {
+  const SourceInfo({
+    required this.name,
+    required this.title,
+    required this.description,
+    required this.builtin,
+    required this.enabled,
+    required this.settings,
+    required this.options,
+    this.lastRun,
+    this.lastOk,
+    this.lastError,
+    this.lastNote,
+  });
+
+  factory SourceInfo.fromJson(Json j) => SourceInfo(
+        name: _str(j['name']),
+        title: _str(j['title']),
+        description: _str(j['description']),
+        builtin: j['builtin'] == true,
+        enabled: j['enabled'] != false,
+        settings: j['settings'] is Json ? j['settings'] as Json : const <String, dynamic>{},
+        options: (j['options'] is List ? j['options'] as List : const <Object?>[])
+            .whereType<Json>()
+            .map(SourceOption.fromJson)
+            .toList(),
+        lastRun: _strOrNull(j['lastRun']) == null ? null : DateTime.tryParse(j['lastRun'] as String),
+        lastOk: _boolOrNull(j['lastOk']),
+        lastError: _strOrNull(j['lastError']),
+        lastNote: _strOrNull(j['lastNote']),
+      );
+
+  final String name;
+  final String title;
+  final String description;
+  final bool builtin;
+  final bool enabled;
+  final Json settings;
+  final List<SourceOption> options;
+  final DateTime? lastRun;
+  final bool? lastOk;
+  final String? lastError;
+  final String? lastNote;
+
+  /// Value of an option as editable text ("paths" become one path per line).
+  String optionText(SourceOption o) {
+    final v = settings[o.key];
+    if (v is List) return v.whereType<String>().join('\n');
+    return v == null ? '' : '$v';
+  }
+}
+
+class SourcesState {
+  const SourcesState({required this.sources, required this.collecting, this.lastCollectAt, this.lastCollectError});
+  factory SourcesState.fromJson(Json j) {
+    final last = j['lastCollect'];
+    return SourcesState(
+      sources: (j['sources'] is List ? j['sources'] as List : const <Object?>[])
+          .whereType<Json>()
+          .map(SourceInfo.fromJson)
+          .toList(),
+      collecting: j['collecting'] == true,
+      lastCollectAt: last is Json ? DateTime.tryParse(_str(last['finishedAt'])) : null,
+      lastCollectError: last is Json ? _strOrNull(last['error']) : null,
+    );
+  }
+  final List<SourceInfo> sources;
+  final bool collecting;
+  final DateTime? lastCollectAt;
+  final String? lastCollectError;
+}
+
+class InboxFile {
+  const InboxFile({required this.name, required this.size, this.modified});
+  factory InboxFile.fromJson(Json j) => InboxFile(
+        name: _str(j['name']),
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        modified: DateTime.tryParse(_str(j['modified'])),
+      );
+  final String name;
+  final int size;
+  final DateTime? modified;
+}
+
+class TranscribeJob {
+  const TranscribeJob({required this.file, required this.state, this.result, this.error});
+  factory TranscribeJob.fromJson(Json j) => TranscribeJob(
+        file: _str(j['file']),
+        state: _str(j['state']),
+        result: _strOrNull(j['result']),
+        error: _strOrNull(j['error']),
+      );
+  final String file;
+  final String state; // queued | running | done | failed
+  final String? result;
+  final String? error;
+}
+
+class Inbox {
+  const Inbox({required this.transcripts, required this.sessions, required this.audio, required this.jobs});
+  factory Inbox.fromJson(Json j) {
+    List<InboxFile> files(String k) =>
+        (j[k] is List ? j[k] as List : const <Object?>[]).whereType<Json>().map(InboxFile.fromJson).toList();
+    return Inbox(
+      transcripts: files('transcripts'),
+      sessions: files('sessions'),
+      audio: files('audio'),
+      jobs: (j['jobs'] is List ? j['jobs'] as List : const <Object?>[])
+          .whereType<Json>()
+          .map(TranscribeJob.fromJson)
+          .toList(),
+    );
+  }
+  final List<InboxFile> transcripts;
+  final List<InboxFile> sessions;
+  final List<InboxFile> audio;
+  final List<TranscribeJob> jobs;
+
+  bool get transcribing => jobs.any((j) => j.state == 'queued' || j.state == 'running');
+}
+
+class AppSettings {
+  const AppSettings({
+    required this.dailyAt,
+    required this.indexOnInject,
+    required this.worklogDir,
+    required this.scheduleSupported,
+    required this.scheduleInstalled,
+    required this.scheduleLoaded,
+    required this.whisperx,
+    this.scheduleHint,
+    this.lastDaily,
+  });
+
+  factory AppSettings.fromJson(Json j) {
+    final s = j['schedule'] is Json ? j['schedule'] as Json : const <String, dynamic>{};
+    final d = j['lastDaily'];
+    return AppSettings(
+      dailyAt: _str(j['dailyAt']).isEmpty ? '18:30' : _str(j['dailyAt']),
+      indexOnInject: j['indexOnInject'] == true,
+      worklogDir: _str(j['worklogDir']),
+      scheduleSupported: s['supported'] == true,
+      scheduleInstalled: s['installed'] == true,
+      scheduleLoaded: s['loaded'] == true,
+      scheduleHint: _strOrNull(s['hint']),
+      whisperx: j['whisperx'] == true,
+      lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
+    );
+  }
+
+  final String dailyAt;
+  final bool indexOnInject;
+  final String worklogDir;
+  final bool scheduleSupported;
+  final bool scheduleInstalled;
+  final bool scheduleLoaded;
+  final String? scheduleHint;
+  final bool whisperx;
+  final DateTime? lastDaily;
+}

@@ -13,11 +13,13 @@ http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       headers: {'content-type': 'application/json; charset=utf-8'},
     );
 
+final posted = <http.Request>[];
+
 WorklogApi _fakeApi() => WorklogApi(
       baseUrl: 'http://127.0.0.1:4710',
       client: MockClient((req) async {
         switch (req.url.path) {
-          case '/api/logs':
+          case '/api/logs' when req.method == 'GET':
             return _json({'months': ['2026-10']});
           case '/api/logs/2026-10':
             return _json({
@@ -35,6 +37,26 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'number': 1, 'title': 'ROAS 주간회의', 'path': 'processed/transcripts/2026-10-09_회의.txt', 'snippet': 'GA4 캠페인 매핑이 빠져서', 'score': 1.2},
               ],
             });
+          case '/api/sources':
+            return _json({
+              'collecting': false,
+              'sources': [
+                {'name': 'git', 'title': 'git 커밋', 'description': 'd', 'builtin': true, 'enabled': true, 'settings': {'reposRoot': '~/jaepark'}, 'options': [{'key': 'reposRoot', 'label': '저장소 상위 폴더', 'kind': 'path'}], 'lastRun': '2026-10-23T09:00:00Z', 'lastOk': true, 'lastNote': '커밋 3개'},
+                {'name': 'shell-history', 'title': '셸 명령 이력', 'description': 'd', 'builtin': true, 'enabled': true, 'settings': {}, 'options': [], 'lastOk': false, 'lastError': 'EXTENDED_HISTORY 필요'},
+              ],
+            });
+          case '/api/inbox':
+            return _json({
+              'transcripts': [{'name': '2026-10-23_회의.txt', 'size': 2048, 'modified': '2026-10-23T09:00:00Z'}],
+              'sessions': <Object>[],
+              'audio': <Object>[],
+              'jobs': <Object>[],
+            });
+          case '/api/projects':
+            return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
+          case '/api/logs' when req.method == 'POST':
+            posted.add(req);
+            return _json({'month': '2026-10', 'line': '- 10-23 #done x'}, 201);
           default:
             return _json({'error': 'not_found'}, 404);
         }
@@ -83,5 +105,48 @@ void main() {
     await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
+  });
+
+  testWidgets('collect tab shows sources with status and the inbox', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.tap(find.text('수집').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('git 커밋'), findsOneWidget);
+    expect(find.textContaining('커밋 3개'), findsOneWidget);
+    expect(find.text('EXTENDED_HISTORY 필요'), findsOneWidget);
+    expect(find.text('지금 수집'), findsOneWidget);
+    expect(find.text('전사본 (1)'), findsOneWidget);
+  });
+
+  testWidgets('log tab FAB adds a line with tag and project', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.tap(find.text('로그').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('한 줄 기록'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, 'README 정리');
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('결정')));
+    await tester.tap(find.widgetWithText(ActionChip, 'roas'));
+    await tester.pump();
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('저장')));
+    await tester.pumpAndSettle();
+
+    expect(posted, hasLength(1));
+    final body = jsonDecode(posted.single.body) as Map<String, dynamic>;
+    expect(body['text'], 'README 정리');
+    expect(body['tags'], ['decision']);
+    expect(body['projects'], ['roas']);
+    expect(posted.single.headers['x-zaevis'], '1');
   });
 }

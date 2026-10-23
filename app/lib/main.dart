@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
 import 'screens/log_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/settings_screen.dart';
 import 'screens/summaries_screen.dart';
+import 'widgets/input_dialogs.dart';
 
 void main() => runApp(ZaevisApp(api: WorklogApi()));
 
@@ -41,6 +44,7 @@ const _dests = [
   _Dest('로그', Icons.list_alt_outlined, Icons.list_alt),
   _Dest('프로젝트', Icons.folder_outlined, Icons.folder),
   _Dest('월간 정리', Icons.calendar_month_outlined, Icons.calendar_month),
+  _Dest('수집', Icons.input_outlined, Icons.input),
 ];
 
 class HomeShell extends StatefulWidget {
@@ -59,37 +63,29 @@ class _HomeShellState extends State<HomeShell> {
 
   void _openProject(String slug) => openProject(context, api, slug);
 
-  Future<void> _editServer() async {
-    final controller = TextEditingController(text: api.baseUrl);
-    final next = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('서버 주소'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: defaultDesktopBase),
-          onSubmitted: (v) => Navigator.pop(context, v),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('저장')),
-        ],
-      ),
-    );
-    // Not disposed here: the dialog's TextField still uses it during the close animation.
-    if (next == null || next.trim().isEmpty) return;
-    setState(() {
-      api.baseUrl = next.trim();
-      _generation++;
-    });
+  void _openSettings() => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(api: api, onServerChanged: () => setState(() => _generation++)),
+      ));
+
+  Future<void> _addLog() async {
+    List<String> projects = const [];
+    try {
+      projects = (await api.projects()).map((p) => p.slug).toList();
+    } catch (_) {}
+    if (!mounted) return;
+    if (await showAddLogDialog(context, api, projects: projects)) {
+      if (!mounted) return;
+      toast(context, '로그에 추가했습니다');
+      setState(() => _generation++);
+    }
   }
 
   Widget _screen() => switch (_index) {
         0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api)),
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
-        _ => SummariesScreen(api: api, onOpenProject: _openProject),
+        3 => SummariesScreen(api: api, onOpenProject: _openProject),
+        _ => CollectScreen(api: api),
       };
 
   @override
@@ -102,12 +98,16 @@ class _HomeShellState extends State<HomeShell> {
         icon: const Icon(Icons.storage_outlined),
         onPressed: () => IndexSheet.show(context, api),
       ),
-      IconButton(tooltip: '서버 주소', icon: const Icon(Icons.settings_outlined), onPressed: _editServer),
+      IconButton(tooltip: '설정', icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
     ];
+    final fab = _index == 1
+        ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: const Text('한 줄 기록'))
+        : null;
 
     if (wide) {
       return Scaffold(
         appBar: AppBar(title: Text(_dests[_index].label), actions: actions),
+        floatingActionButton: fab,
         body: Row(children: [
           NavigationRail(
             selectedIndex: _index,
@@ -125,6 +125,7 @@ class _HomeShellState extends State<HomeShell> {
     }
     return Scaffold(
       appBar: AppBar(title: Text(_dests[_index].label), actions: actions),
+      floatingActionButton: fab,
       body: body,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,

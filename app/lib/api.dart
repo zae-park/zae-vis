@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -51,9 +52,20 @@ class WorklogApi {
 
   Json _decode(http.Response res) {
     final body = utf8.decode(res.bodyBytes);
-    if (res.statusCode == 404) throw ApiException(404, '찾을 수 없습니다');
-    if (res.statusCode >= 400) throw ApiException(res.statusCode, '요청이 실패했습니다');
-    final decoded = jsonDecode(body);
+    if (res.statusCode >= 400) {
+      String? message;
+      try {
+        final j = jsonDecode(body);
+        if (j is Json && j['message'] is String) message = j['message'] as String;
+      } catch (_) {}
+      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'));
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException {
+      throw ApiException(res.statusCode, '응답 형식이 올바르지 않습니다');
+    }
     if (decoded is! Json) throw ApiException(res.statusCode, '응답 형식이 올바르지 않습니다');
     return decoded;
   }
@@ -95,17 +107,84 @@ class WorklogApi {
 
   Future<IndexStatus> indexStatus() async => IndexStatus.fromJson(await _get('/index'));
 
-  Future<void> refreshIndex({bool force = false}) async {
+  static const _mutating = {'content-type': 'application/json', 'x-zaevis': '1'};
+
+  Future<Json> _send(String method, String path, [Object? body]) async {
     final http.Response res;
     try {
-      res = await _client.post(
-        _uri('/index'),
-        headers: {'content-type': 'application/json'},
-        body: jsonEncode({'force': force}),
-      );
+      final req = http.Request(method, _uri(path))
+        ..headers.addAll(_mutating)
+        ..body = jsonEncode(body ?? const <String, dynamic>{});
+      res = await http.Response.fromStream(await _client.send(req));
     } catch (_) {
       throw ApiException(0, '서버에 연결할 수 없습니다: $baseUrl');
     }
-    _decode(res);
+    return _decode(res);
   }
+
+  Future<void> refreshIndex({bool force = false}) async {
+    await _send('POST', '/index', {'force': force});
+  }
+
+  // ── input (real time) ────────────────────────────────────────────────────
+  Future<String> addLog(String text, {List<String> tags = const [], List<String> projects = const []}) async =>
+      ((await _send('POST', '/logs', {'text': text, 'tags': tags, 'projects': projects}))['line'] as String?) ?? '';
+
+  Future<Inbox> inbox() async => Inbox.fromJson(await _get('/inbox'));
+
+  Future<String> pasteTranscript(String name, String text) async =>
+      ((await _send('POST', '/inbox/transcripts', {'name': name, 'text': text}))['file'] as String?) ?? name;
+
+  /// Uploads a recording; the server queues it for whisperX. Pass [bytes] (web) or [stream] (desktop).
+  Future<String> uploadAudio({required String name, required int size, List<int>? bytes, Stream<List<int>>? stream}) async {
+    final req = http.StreamedRequest('POST', _uri('/inbox/audio', {'name': name}))
+      ..headers['x-zaevis'] = '1'
+      ..headers['content-type'] = 'application/octet-stream'
+      ..contentLength = size;
+    final http.Response res;
+    try {
+      final sending = _client.send(req);
+      unawaited(sending.then((_) {}, onError: (Object _) {})); // errors are surfaced by the await below
+      if (bytes != null) {
+        req.sink.add(bytes);
+      } else if (stream != null) {
+        await req.sink.addStream(stream);
+      }
+      unawaited(req.sink.close()); // completes only once the body is read; don't block on it
+      res = await http.Response.fromStream(await sending);
+    } catch (_) {
+      throw ApiException(0, '업로드에 실패했습니다: $baseUrl');
+    }
+    return (_decode(res)['file'] as String?) ?? name;
+  }
+
+  // ── data sources (batch) ─────────────────────────────────────────────────
+  Future<SourcesState> sources() async => SourcesState.fromJson(await _get('/sources'));
+
+  Future<void> setSourceEnabled(String name, bool enabled) async {
+    await _send('PUT', '/sources/${Uri.encodeComponent(name)}', {'enabled': enabled});
+  }
+
+  Future<void> saveSourceSettings(String name, Map<String, Object?> settings) async {
+    await _send('PUT', '/sources/${Uri.encodeComponent(name)}', {'settings': settings});
+  }
+
+  Future<void> addSource(String name, String command, {String? description}) async {
+    await _send('POST', '/sources', {'name': name, 'command': command, if (description != null) 'description': description});
+  }
+
+  Future<void> removeSource(String name) async {
+    await _send('DELETE', '/sources/${Uri.encodeComponent(name)}');
+  }
+
+  Future<void> collect({List<String>? only}) async {
+    await _send('POST', '/collect', {if (only != null) 'sources': only});
+  }
+
+  // ── settings ─────────────────────────────────────────────────────────────
+  Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
+
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject}) async => AppSettings.fromJson(
+        await _send('PUT', '/settings', {if (dailyAt != null) 'dailyAt': dailyAt, if (indexOnInject != null) 'indexOnInject': indexOnInject}),
+      );
 }

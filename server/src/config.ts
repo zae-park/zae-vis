@@ -1,0 +1,133 @@
+// Shared settings: ~/.zaevis/config.json (written by kit/setup.sh), ~/.zaevis/sources.json
+// (data-source connectors) and ~/.zaevis/state.json (last collection per source).
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const stateDir = (): string => process.env.ZAEVIS_HOME ?? join(homedir(), ".zaevis");
+
+export const expandHome = (p: string): string => (p === "~" ? homedir() : p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
+
+function readJson<T>(file: string, fallback: T): T {
+  if (!existsSync(file)) return fallback;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch (err) {
+    throw new Error(`${file} 을(를) 읽을 수 없습니다: ${(err as Error).message}`);
+  }
+}
+
+export function writeJson(file: string, value: unknown): void {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
+}
+
+export type AppConfig = {
+  dailyAt: string;        // "18:30" — daily collect + index (launchd)
+  indexOnInject: boolean; // re-index right after a log line / transcript is added
+  worklogDir: string;
+  reposRoot: string;
+  authorEmail: string;
+  autoragConfig: string;
+  port: number;
+  webDir: string;
+};
+
+type FileConfig = Partial<Omit<AppConfig, "webDir">>;
+
+export function loadConfig(): AppConfig {
+  const fc = readJson<FileConfig>(join(stateDir(), "config.json"), {});
+  const here = dirname(fileURLToPath(import.meta.url));
+  return {
+    dailyAt: /^\d{2}:\d{2}$/.test(String(fc.dailyAt)) ? String(fc.dailyAt) : "18:30",
+    indexOnInject: fc.indexOnInject === true,
+    worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
+    reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
+    authorEmail: fc.authorEmail ?? "",
+    autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
+    port: Number(process.env.ZAEVIS_PORT ?? fc.port ?? 4710),
+    // may not exist yet; built later by `zaevis run web`
+    webDir: process.env.ZAEVIS_WEB_DIR ?? resolve(here, "..", "..", "app", "build", "web"),
+  };
+}
+
+// ── data sources ──────────────────────────────────────────────────────────────
+
+export type SourceSettings = { enabled: boolean; [key: string]: unknown };
+export type CustomSource = { name: string; command: string; enabled?: boolean; description?: string };
+export type SourcesConfig = Record<string, SourceSettings> & { custom?: CustomSource[] };
+
+export const sourcesFile = (): string => join(stateDir(), "sources.json");
+
+/** Built-in defaults; ~/.zaevis/sources.json overrides per key. */
+export function defaultSources(cfg: AppConfig): SourcesConfig {
+  return {
+    git: { enabled: true, reposRoot: cfg.reposRoot, authorEmail: cfg.authorEmail, depth: 3 },
+    "claude-code": { enabled: true, projectsDir: "~/.claude/projects" },
+    "shell-history": { enabled: true, historyFile: "~/.zsh_history" },
+    transcripts: {
+      enabled: true,
+      audioDir: join(cfg.worklogDir, "inbox", "audio"),
+      importDirs: [],
+      language: "ko",
+      model: "large-v3-turbo",
+    },
+  } as SourcesConfig;
+}
+
+export function loadSources(cfg: AppConfig): SourcesConfig {
+  const user = readJson<Partial<SourcesConfig>>(sourcesFile(), {});
+  const merged = defaultSources(cfg) as Record<string, unknown>;
+  for (const [k, v] of Object.entries(user)) {
+    if (k === "custom") continue;
+    const base = (merged[k] ?? {}) as Record<string, unknown>;
+    merged[k] = { ...base, ...(v as Record<string, unknown>) };
+  }
+  merged.custom = Array.isArray(user.custom) ? user.custom : [];
+  return merged as SourcesConfig;
+}
+
+/** Merge `patch` into one source's settings in ~/.zaevis/sources.json (built-in or custom). */
+export function saveSourceSettings(name: string, patch: Record<string, unknown>): void {
+  const user = readJson<Record<string, any>>(sourcesFile(), {});
+  const custom = Array.isArray(user.custom) ? (user.custom as CustomSource[]) : [];
+  const c = custom.find((x) => x.name === name);
+  if (c) Object.assign(c, patch);
+  else user[name] = { ...(user[name] ?? {}), ...patch };
+  user.custom = custom;
+  writeJson(sourcesFile(), user);
+}
+
+export function addCustomSource(src: CustomSource): void {
+  const user = readJson<Record<string, any>>(sourcesFile(), {});
+  const custom = Array.isArray(user.custom) ? (user.custom as CustomSource[]) : [];
+  if (custom.some((x) => x.name === src.name)) throw new Error(`이미 있는 이름입니다: ${src.name}`);
+  custom.push({ enabled: true, ...src });
+  user.custom = custom;
+  writeJson(sourcesFile(), user);
+}
+
+export function removeCustomSource(name: string): boolean {
+  const user = readJson<Record<string, any>>(sourcesFile(), {});
+  const custom = Array.isArray(user.custom) ? (user.custom as CustomSource[]) : [];
+  const next = custom.filter((x) => x.name !== name);
+  if (next.length === custom.length) return false;
+  user.custom = next;
+  writeJson(sourcesFile(), user);
+  return true;
+}
+
+/** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject">>): void {
+  const file = join(stateDir(), "config.json");
+  writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
+}
+
+export type SourceState = { lastRun?: string; lastOk?: boolean; lastError?: string; lastErrorAt?: string; lastNote?: string };
+export type CollectState = { sources: Record<string, SourceState>; daily?: { lastRun: string; ok: boolean; index: string } };
+
+export const stateFile = (): string => join(stateDir(), "state.json");
+export const loadState = (): CollectState => readJson<CollectState>(stateFile(), { sources: {} });
+export const saveState = (s: CollectState): void => writeJson(stateFile(), s);

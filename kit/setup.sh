@@ -55,7 +55,7 @@ render() { # render SRC DEST — replaces {{PLACEHOLDERS}}; skips existing DEST
 }
 
 echo "1) worklog 폴더: $WORKLOG_DIR"
-mkdir -p "$WORKLOG_DIR"/{inbox/transcripts,inbox/claude-sessions,processed/transcripts,processed/claude-sessions,log,projects,summaries}
+mkdir -p "$WORKLOG_DIR"/{inbox/transcripts,inbox/claude-sessions,inbox/audio,processed/transcripts,processed/claude-sessions,processed/audio,log,projects,summaries,sources}
 render "$KIT_DIR/templates/worklog/README.md" "$WORKLOG_DIR/README.md"
 render "$KIT_DIR/templates/worklog/projects/_template.md" "$WORKLOG_DIR/projects/_template.md"
 MONTH="$(date +%Y-%m)"
@@ -88,16 +88,22 @@ render "$KIT_DIR/claude/weekly-task-prompt.md" "$STATE_DIR/weekly-task-prompt.md
 
 AUTORAG_CONFIG="$STATE_DIR/autorag/config.json"
 mkdir -p "$STATE_DIR"
-cat > "$STATE_DIR/config.json" <<JSON
+if [[ -e "$STATE_DIR/config.json" ]]; then
+  echo "  = $STATE_DIR/config.json (있음, 건너뜀 — 바꾸려면 앱 설정 화면이나 파일을 직접 수정)"
+else
+  cat > "$STATE_DIR/config.json" <<JSON
 {
   "worklogDir": "$WORKLOG_DIR",
   "reposRoot": "$REPOS_ROOT",
   "authorEmail": "$AUTHOR_EMAIL",
   "autoragConfig": "$AUTORAG_CONFIG",
-  "port": 4710
+  "port": 4710,
+  "dailyAt": "18:30",
+  "indexOnInject": false
 }
 JSON
-echo "  + $STATE_DIR/config.json"
+  echo "  + $STATE_DIR/config.json"
+fi
 
 if [[ $WITH_AUTORAG -eq 1 ]]; then
   echo "4) AutoRAG Lite (검색 색인, 모델·API 키 불필요)"
@@ -129,6 +135,12 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
   AUTORAG_CONFIG="$AUTORAG_CONFIG" "$ROOT_DIR/server/node_modules/.bin/autorag" lite refresh
 fi
 
+if [[ "$(uname -s)" == "Darwin" ]] && command -v node >/dev/null && [[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 24 ]]; then
+  echo "5) 매일 수집·색인 예약 (launchd)"
+  [[ -d "$ROOT_DIR/server/node_modules" ]] || (cd "$ROOT_DIR/server" && npm install --no-fund --no-audit --silent)
+  ZAEVIS_HOME="$STATE_DIR" node "$ROOT_DIR/server/src/cli.ts" schedule install || echo "  ! 예약 등록 실패 — 나중에 'zaevis schedule install'"
+fi
+
 cat <<DONE
 
 완료.
@@ -136,5 +148,7 @@ cat <<DONE
 - 터미널:      zaevis run cli
 - 브라우저:    zaevis run web
 - 데스크톱 앱: zaevis run app
+- 지금 수집:   zaevis collect          (매일 자동: zaevis schedule)
+- 녹음 전사:   zaevis ext install whisperx
 - 주간 정리 예약: Claude에서 "$STATE_DIR/weekly-task-prompt.md" 내용으로 매주 월요일 예약 작업을 만드세요.
 DONE

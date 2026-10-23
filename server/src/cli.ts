@@ -10,6 +10,13 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
+import { copyFile, mkdir } from "node:fs/promises";
+import { basename, extname } from "node:path";
+import { loadConfig, loadSources, saveSourceSettings } from "./config.ts";
+import { installSchedule, removeSchedule, scheduleStatus } from "./schedule.ts";
+import { listSources } from "./sources/index.ts";
+import { AUDIO_EXT, TEXT_EXT, transcribeFile, whisperxBin } from "./transcribe.ts";
+import { freePath, safeStem } from "./worklog.ts";
 
 // ── colours ────────────────────────────────────────────────────────────────
 const useColor = stdout.isTTY && !process.env.NO_COLOR;
@@ -65,7 +72,7 @@ export class Api {
   async post(path: string, body: unknown): Promise<J> {
     const res = await fetch(this.base + "/api" + path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-zaevis": "1" },
       body: JSON.stringify(body),
     });
     return (await res.json().catch(() => ({}))) as J;
@@ -127,6 +134,90 @@ export function formatIndex(s: J): string {
   return out.join("\n");
 }
 
+/** `#decision [[roas]] 매핑을 수동으로` → { tags, projects, text } */
+export function parseAdd(args: string[]): { text: string; tags: string[]; projects: string[] } {
+  const tags: string[] = [];
+  const projects: string[] = [];
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "-t" || a === "--tag") && args[i + 1]) tags.push(args[++i].replace(/^#/, ""));
+    else if ((a === "-p" || a === "--project") && args[i + 1]) projects.push(args[++i]);
+    else words.push(a);
+  }
+  const rest: string[] = [];
+  for (const w of words.join(" ").split(/\s+/)) {
+    const tag = /^#([\p{L}\p{N}_-]+)$/u.exec(w);
+    const link = /^\[\[([^\]]+)\]\]$/.exec(w);
+    if (tag) tags.push(tag[1]);
+    else if (link) projects.push(link[1]);
+    else if (w) rest.push(w);
+  }
+  return { text: rest.join(" "), tags, projects };
+}
+
+export function formatSources(list: Array<Record<string, any>>): string {
+  return list
+    .map((s) => {
+      const dot = !s.enabled ? c.dim("○") : s.lastOk === false ? c.red("●") : c.green("●");
+      const when = s.lastRun ? c.dim(new Date(s.lastRun).toLocaleString("sv-SE").slice(0, 16)) : c.dim("수집 전");
+      const tail = s.lastOk === false ? c.red(` ${s.lastError}`) : s.lastNote ? c.dim(` ${s.lastNote}`) : "";
+      return `${dot} ${c.bold(s.name.padEnd(14))} ${when}${tail}`;
+    })
+    .join("\n");
+}
+
+// Commands that work on local files directly (no server needed).
+export async function runLocal(cmd: string, args: string[]): Promise<string | null> {
+  const cfg = loadConfig();
+  switch (cmd) {
+    case "sources": {
+      const [action, name] = args;
+      if ((action === "on" || action === "off") && name) {
+        saveSourceSettings(name, { enabled: action === "on" });
+        return `${name}: ${action === "on" ? "켬" : "끔"}`;
+      }
+      return formatSources(listSources(cfg) as Array<Record<string, any>>);
+    }
+    case "schedule": {
+      const action = args[0] ?? "status";
+      const st = action === "install" ? await installSchedule(args[1] ?? cfg.dailyAt) : action === "remove" ? await removeSchedule() : await scheduleStatus();
+      if (!st.supported) return c.yellow(`macOS가 아니라 launchd를 쓸 수 없습니다. ${st.hint ?? ""}`);
+      if (!st.installed) return `예약 없음. 'zaevis schedule install' 로 매일 ${cfg.dailyAt}에 수집·색인합니다.`;
+      return `${st.loaded ? c.green("●") : c.yellow("●")} 매일 ${st.dailyAt} 수집·색인 ${st.loaded ? "" : "(등록됐지만 아직 로드되지 않음)"}\n${c.dim(st.plist)}`;
+    }
+    case "ingest": {
+      if (!args.length) throw new CliError("파일을 지정하세요: zaevis ingest <전사본.txt | 녹음.m4a> …");
+      const ts = loadSources(cfg).transcripts ?? { enabled: true };
+      const out: string[] = [];
+      for (const f of args) {
+        const ext = extname(f).toLowerCase();
+        if (TEXT_EXT.has(ext)) {
+          const dir = join(cfg.worklogDir, "inbox", "transcripts");
+          await mkdir(dir, { recursive: true });
+          const dest = freePath(dir, safeStem(basename(f)), ext);
+          await copyFile(f, dest);
+          out.push(`${c.green("✓")} ${basename(dest)}`);
+        } else if (AUDIO_EXT.has(ext)) {
+          if (!whisperxBin(ts.whisperxBin as string | undefined)) throw new CliError("whisperX가 없습니다: zaevis ext install whisperx");
+          console.log(c.dim(`전사 중… ${basename(f)} (길이에 따라 수 분)`));
+          const audioDir = String(ts.audioDir ?? join(cfg.worklogDir, "inbox", "audio"));
+          await mkdir(audioDir, { recursive: true });
+          const staged = freePath(audioDir, safeStem(basename(f)), ext);
+          await copyFile(f, staged); // the original stays where it was
+          const dest = await transcribeFile(staged, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo") });
+          out.push(`${c.green("✓")} ${basename(dest)}`);
+        } else {
+          out.push(c.yellow(`건너뜀 (지원하지 않는 형식): ${f}`));
+        }
+      }
+      return out.join("\n") + c.dim("\n검색에 잡히려면 다음 색인 후입니다 (지금 하려면 zaevis index --refresh).");
+    }
+    default:
+      return null;
+  }
+}
+
 // ── commands ─────────────────────────────────────────────────────────────────
 async function latest(api: Api, kind: "logs" | "summaries"): Promise<string> {
   const months = ((await api.get(`/${kind}`)).months ?? []) as string[];
@@ -164,6 +255,19 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
         return "색인 갱신을 시작했습니다. `zaevis index`로 진행 상태를 확인하세요.";
       }
       return formatIndex(await api.get("/index"));
+    case "add": {
+      const { text, tags, projects } = parseAdd(args);
+      if (!text) throw new CliError('내용을 입력하세요: zaevis add "#decision [[프로젝트]] 무엇을, 왜"');
+      const r = await api.post("/logs", { text, tags, projects });
+      if (r.error) throw new CliError(r.message ?? r.error);
+      return `${c.green("✓")} log/${r.month}.md\n${r.line}`;
+    }
+    case "inbox": {
+      const r = await api.get("/inbox");
+      const sec = (title: string, files: J[]) => `${c.bold(title)} ${c.dim(`(${files.length})`)}${files.slice(0, 10).map((f) => `\n  ${f.name}`).join("")}`;
+      const jobs = ((r.jobs ?? []) as J[]).map((j) => `\n  ${j.state === "failed" ? c.red(j.state) : j.state} ${j.file}${j.error ? c.dim(" " + j.error) : ""}`).join("");
+      return [sec("전사본", r.transcripts ?? []), sec("세션 노트", r.sessions ?? []), sec("전사 대기 녹음", r.audio ?? []), jobs ? c.bold("전사 작업") + jobs : ""].filter(Boolean).join("\n");
+    }
     case "health": {
       const h = await api.get("/health");
       return `${c.green("●")} ${api.base}  worklog: ${h.worklog}`;
@@ -177,6 +281,8 @@ const REPL_HELP = `${c.bold("zaevis")} — 그냥 입력하면 검색합니다.
   :log [YYYY-MM]      월별 로그          :projects        프로젝트 목록
   :project <slug>     프로젝트 상세      :summary [YYYY-MM] 월간 정리
   :index              색인 상태          :refresh         색인 갱신
+  :add <내용>         한 줄 기록 (#태그 [[프로젝트]])
+  :inbox              inbox 보기         :sources         데이터소스 상태
   :help               도움말             :quit            종료`;
 
 async function repl(api: Api): Promise<void> {
@@ -200,7 +306,7 @@ async function repl(api: Api): Promise<void> {
           const [cmd, ...rest] = line.slice(1).split(/\s+/);
           const mapped = cmd === "refresh" ? "index" : cmd;
           const args = cmd === "refresh" ? ["--refresh"] : rest;
-          console.log(await run(api, mapped, args));
+          console.log((await runLocal(mapped, args)) ?? (await run(api, mapped, args)));
         } else {
           console.log(await run(api, "search", [line]));
         }
@@ -219,7 +325,8 @@ async function main(): Promise<void> {
   const api = new Api(baseUrl());
   try {
     if (cmd === "repl") return await repl(api);
-    console.log(await run(api, cmd, args));
+    const local = await runLocal(cmd, args);
+    console.log(local ?? (await run(api, cmd, args)));
   } catch (err) {
     const msg = err instanceof CliError ? err.message : (err as Error)?.cause ? `서버에 연결할 수 없습니다: ${api.base}` : String((err as Error)?.message ?? err);
     console.error(c.red(msg));

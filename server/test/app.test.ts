@@ -74,7 +74,7 @@ test("search validates and clamps topK", async () => {
 });
 
 test("index refresh runs once in the background", async () => {
-  const r = await get("/api/index", { method: "POST", body: "{}" });
+  const r = await get("/api/index", { method: "POST", body: "{}", headers: { "x-zaevis": "1" } });
   assert.equal(r.status, 202);
   await new Promise((res) => setTimeout(res, 20));
   const s = await get("/api/index");

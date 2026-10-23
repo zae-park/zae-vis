@@ -1,17 +1,27 @@
 # zaevis
 
-코드 작업과 회의 전사본으로 **개인 작업 기록과 지식 베이스**를 만드는 키트입니다.
-정리는 Claude가 하고, 검색은 [AutoRAG](https://github.com/Marker-Inc-Korea/AutoRAG) Lite(로컬, 무료, 한국어 형태소 검색)가 하고,
-열람은 이 저장소의 Flutter 앱(데스크톱 + 브라우저)으로 합니다. 추가 유료 서비스는 쓰지 않습니다.
+어디서 무슨 작업을 하든 기록을 모아 **개인 작업 기록과 지식 베이스**를 만드는 키트입니다.
+
+- **수집 (매일, 자동)**: git 커밋, Claude Code 세션, 셸 명령, 회의 전사본, 직접 만든 커넥터를 `worklog/sources/`에 모읍니다. 매일 18:30(launchd)에 돌고, 언제든 수동으로도 돌릴 수 있습니다.
+- **주입 (실시간)**: 한 줄 기록, 전사본 붙여넣기, 녹음 업로드(whisperX 자동 전사)는 넣는 즉시 worklog에 저장됩니다.
+- **색인**: [AutoRAG](https://github.com/Marker-Inc-Korea/AutoRAG) Lite(로컬, 무료, 한국어 형태소 검색). 매일 수집 직후 + 수동 + (선택) 주입 즉시.
+- **정리**: Claude가 매주 원본을 읽어 로그·프로젝트·월간 요약을 씁니다.
+- **front**: Flutter 앱(데스크톱 + 브라우저)과 `zaevis` CLI에서 검색·열람·주입·데이터소스 설정을 모두 합니다. 추가 유료 서비스는 쓰지 않습니다.
 
 ```
- 입력                         정리 (Claude, 매주)              열람·검색
- ─────────────────────        ────────────────────────        ──────────────────────────
- 회의 전사본  ─┐                                               Flutter 앱 (macOS/Win/Linux/웹)
- Claude 세션 노트 ─┼──▶ worklog/ ──▶ log/  projects/  summaries/ ──▶       │  HTTP (127.0.0.1)
- git 커밋     ─┘        (내 폴더)                                       server/ (Node)
- 내 한 줄 로그 ─┘                                                       ├─ worklog 파일 읽기
-                                                                        └─ AutoRAG Lite (MCP)
+ 데이터소스 (매일 18:30 + 수동)          실시간 주입 (앱 · CLI)
+ git · Claude Code · 셸 · 전사본 폴더     한 줄 기록 · 전사본 · 녹음(whisperX)
+ · 사용자 커넥터(명령어)                          │
+            │ zaevis collect                        │
+            ▼                                       ▼
+ worklog/sources/<이름>/날짜.md          worklog/log · inbox/
+            └───────────────┬───────────────────────┘
+                            ▼
+              AutoRAG Lite 색인 (매일 · 수동 · 선택: 주입 즉시)
+                            ▼
+        server (127.0.0.1:4710) ── Flutter 앱 · 웹 · zaevis CLI
+                            ▲
+        Claude 주간 정리 → log/ · projects/ · summaries/
 ```
 
 - **내 데이터는 이 저장소에 들어오지 않습니다.** `worklog/` 폴더는 `setup.sh`가 원하는 위치에 만들고, 저장소 안에 두더라도 `.gitignore`로 막혀 있습니다.
@@ -56,7 +66,7 @@ zaevis run app --release   # 릴리스 빌드 후 앱 실행
 
 API 서버(`127.0.0.1:4710`)는 필요할 때 백그라운드로 자동 실행됩니다. 직접 관리하려면 `zaevis start | stop | status | logs`, 이 터미널에서 띄우려면 `zaevis run server`.
 
-바로 쓰는 명령:
+바로 쓰는 명령 (전체 목록은 `zaevis help`):
 
 ```bash
 zaevis search GA4 캠페인 매핑
@@ -64,7 +74,27 @@ zaevis log                # 이번 달 로그 (zaevis log 2026-09)
 zaevis projects
 zaevis summary            # 최근 월간 정리
 zaevis index --refresh    # 검색 색인 갱신 (처음 한 번은 꼭)
+
+zaevis add "#decision [[roas]] 매핑 테이블을 수동으로 채우기로"   # 한 줄 기록
+zaevis ingest 회의.txt 녹음.m4a      # 전사본은 inbox로, 녹음은 whisperX로 바로 전사
+zaevis collect                      # 지금 수집 + 색인 (zaevis collect git: 하나만)
+zaevis sources                      # 데이터소스 상태 (zaevis sources off shell-history)
+zaevis schedule install 18:30       # 매일 실행 시각 바꾸기
+zaevis ext install whisperx         # 녹음 전사 확장 (ffmpeg 필요: brew install ffmpeg)
 ```
+
+## 데이터소스
+
+| 이름 | 수집 내용 | 설정 |
+|---|---|---|
+| `git` | 저장소 상위 폴더 아래 모든 저장소의 내 커밋 | 폴더, 작성자 이메일, 탐색 깊이 |
+| `claude-code` | `~/.claude/projects` 세션 기록: 요청, 수정한 파일, 실행한 명령, 마지막 응답 | 기록 폴더 |
+| `shell-history` | zsh 명령 이력 (`setopt EXTENDED_HISTORY` 필요) | 히스토리 파일 |
+| `transcripts` | 전사 서비스 내보내기 폴더에서 가져오기 + `inbox/audio` 녹음을 whisperX로 전사 | 가져올 폴더, 언어, 모델 |
+| 사용자 커넥터 | Markdown을 출력하는 아무 명령 (`{from}`, `{to}` 치환) | 명령 |
+
+모든 원본은 기록 전에 토큰·비밀번호·API 키를 가립니다. 설정은 앱의 **수집** 화면이나 `~/.zaevis/sources.json`에서 바꿉니다.
+Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 않습니다. 필요하면 내보낸 대화를 전사본처럼 넣거나 사용자 커넥터를 만드세요.
 
 ### 주간·월간 정리 예약
 

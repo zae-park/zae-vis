@@ -1,7 +1,8 @@
 // Reads the worklog folder (log/, projects/, summaries/) and turns it into JSON.
 // The folder layout and line format are defined in kit/templates/worklog/README.md.
 
-import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type LogEntry = {
@@ -158,6 +159,35 @@ export class Worklog {
     return { ...parseProject(slug, text), markdown: parseFrontMatter(text).body };
   }
 
+  async appendLog(e: NewLogLine): Promise<{ month: string; line: string }> {
+    const line = formatLogLine(e);
+    const d = e.date ?? new Date();
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const file = join(this.root, "log", `${month}.md`);
+    await mkdir(join(this.root, "log"), { recursive: true });
+    if (!existsSync(file)) await writeFile(file, `# ${month} 로그\n\n`);
+    const cur = await readFile(file, "utf8");
+    await appendFile(file, (cur.endsWith("\n") ? "" : "\n") + line + "\n");
+    return { month, line };
+  }
+
+  async inbox(): Promise<Record<"transcripts" | "sessions" | "audio", InboxFile[]>> {
+    return {
+      transcripts: await listDir(join(this.root, "inbox", "transcripts")),
+      sessions: await listDir(join(this.root, "inbox", "claude-sessions")),
+      audio: await listDir(join(this.root, "inbox", "audio")),
+    };
+  }
+
+  async saveTranscript(name: string, text: string, date = new Date()): Promise<string> {
+    if (!text.trim()) throw new Error("전사본 내용이 비어 있습니다.");
+    const dir = join(this.root, "inbox", "transcripts");
+    await mkdir(dir, { recursive: true });
+    const file = freePath(dir, safeStem(name, date), ".txt");
+    await writeFile(file, text.endsWith("\n") ? text : text + "\n");
+    return file;
+  }
+
   private async read(rel: string): Promise<string | null> {
     try {
       return await readFile(join(this.root, rel), "utf8");
@@ -166,4 +196,54 @@ export class Worklog {
       throw err;
     }
   }
+}
+
+// ── real-time input ──────────────────────────────────────────────────────────
+
+export type NewLogLine = { text: string; tags?: string[]; projects?: string[]; date?: Date };
+
+const TAG_OK = /^[\p{L}\p{N}_-]{1,30}$/u;
+
+export function formatLogLine(e: NewLogLine): string {
+  const text = e.text.replace(/\s+/g, " ").trim();
+  if (!text) throw new Error("내용이 비어 있습니다.");
+  if (text.length > 500) throw new Error("한 줄은 500자 이내로 써 주세요.");
+  const d = e.date ?? new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const projects = (e.projects ?? []).map((x) => x.trim()).filter(Boolean);
+  const tags = (e.tags ?? []).map((x) => x.replace(/^#/, "").trim()).filter(Boolean);
+  for (const s of projects) if (!SLUG_RE.test(s) || s.includes("..")) throw new Error(`프로젝트 이름이 올바르지 않습니다: ${s}`);
+  for (const t of tags) if (!TAG_OK.test(t)) throw new Error(`태그가 올바르지 않습니다: ${t}`);
+  return ["-", `${p(d.getMonth() + 1)}-${p(d.getDate())}`, ...projects.map((x) => `[[${x}]]`), ...tags.map((t) => `#${t}`), text].join(" ");
+}
+
+export type InboxFile = { name: string; size: number; modified: string };
+
+export async function listDir(dir: string): Promise<InboxFile[]> {
+  try {
+    const names = (await readdir(dir)).filter((n) => !n.startsWith("."));
+    const out: InboxFile[] = [];
+    for (const name of names) {
+      const st = await stat(join(dir, name));
+      if (st.isFile()) out.push({ name, size: st.size, modified: st.mtime.toISOString() });
+    }
+    return out.sort((a, b) => b.modified.localeCompare(a.modified));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+/** "주간 회의" → "2026-10-23_주간_회의" (keeps an existing date prefix). */
+export function safeStem(name: string, date = new Date()): string {
+  const stem = name.replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/[^\p{L}\p{N}._-]+/gu, "_").replace(/^[._]+/, "").slice(0, 80) || "memo";
+  if (/^\d{4}-\d{2}-\d{2}/.test(stem)) return stem;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}_${stem}`;
+}
+
+export function freePath(dir: string, stem: string, ext: string): string {
+  let p = join(dir, stem + ext);
+  for (let i = 2; existsSync(p); i++) p = join(dir, `${stem}_${i}${ext}`);
+  return p;
 }
