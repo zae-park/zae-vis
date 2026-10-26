@@ -98,8 +98,12 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -R "$APP_SRC" "$STAGE/zaevis.app"
 cp -R "$PAYLOAD" "$STAGE/zaevis.app/Contents/Resources/zaevis"
+# Nested code first, then the app itself with its entitlements: a plain `--deep` re-sign would drop
+# them (sandbox off, microphone, network) and the mic prompt would never appear.
 codesign --force --deep --sign - "$STAGE/zaevis.app"
-codesign --verify --deep "$STAGE/zaevis.app"
+codesign --force --sign - --entitlements "$ROOT/app/macos/Runner/Release.entitlements" "$STAGE/zaevis.app"
+codesign --verify --deep --strict "$STAGE/zaevis.app"
+codesign -d --entitlements - "$STAGE/zaevis.app" 2>&1 | grep -q 'device.audio-input' || die "entitlements가 서명에 들어가지 않았습니다."
 
 ln -s /Applications "$STAGE/Applications"
 cat > "$STAGE/처음 열 때 읽어주세요.txt" <<'TXT'
