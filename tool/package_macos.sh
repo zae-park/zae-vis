@@ -4,8 +4,8 @@
 #
 #   tool/package_macos.sh [--skip-minsync]
 #
-# Needs on THIS (build) Mac only: Flutter, Rust (cargo) + protobuf (for MinSync), curl.
-#   brew install --cask flutter && brew install protobuf && curl https://sh.rustup.rs -sSf | sh
+# Needs on THIS (build) Mac only: Flutter, Rust (cargo) + protobuf + cmake (for MinSync), curl.
+#   brew install --cask flutter && brew install protobuf cmake && curl https://sh.rustup.rs -sSf | sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +23,8 @@ command -v flutter >/dev/null || die "Flutter가 필요합니다: brew install -
 if [[ $SKIP_MINSYNC -eq 0 ]]; then
   command -v cargo >/dev/null || die "Rust가 필요합니다: curl https://sh.rustup.rs -sSf | sh  (검색 없이 만들려면 --skip-minsync)"
   command -v protoc >/dev/null || die "protobuf가 필요합니다: brew install protobuf"
+  # minsync 의존성(protobuf-src)이 protobuf를 소스에서 다시 빌드하므로 cmake도 필요하다.
+  command -v cmake >/dev/null || die "cmake가 필요합니다: brew install cmake"
 fi
 
 ARCH="$(uname -m)"                       # arm64 | x86_64

@@ -51,7 +51,7 @@ Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·�
 ### DMG 만들기 (배포하는 사람만)
 
 ```bash
-brew install --cask flutter && brew install protobuf
+brew install --cask flutter && brew install protobuf cmake
 curl https://sh.rustup.rs -sSf | sh          # MinSync(검색 임베딩 엔진) 빌드용, 처음 한 번
 tool/package_macos.sh                         # → dist/zaevis-<버전>-arm64.dmg
 ```
@@ -61,7 +61,7 @@ Node 24 공식 배포본(체크섬 확인), 서버 의존성, MinSync, 웹·macO
 ### 개발용으로 소스에서 바로 쓰기
 
 ```bash
-brew install node@24 flutter protobuf
+brew install node@24 flutter protobuf cmake
 curl https://sh.rustup.rs -sSf | sh
 git clone https://github.com/zae-park/zaevis.git && cd zaevis
 bin/zaevis install && zaevis setup && zaevis doctor

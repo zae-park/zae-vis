@@ -229,6 +229,7 @@ cmd_doctor() {
   check flutter "flutter --version" "brew install --cask flutter"
   check cargo "cargo --version" "https://rustup.rs (MinSync 빌드용)"
   check protoc "protoc --version" "brew install protobuf (MinSync 빌드용)"
+  check cmake "cmake --version" "brew install cmake (MinSync 빌드용)"
   check minsync "minsync --version" "zaevis setup이 빌드합니다"
   if [[ -x "$STATE/ext/whisperx/bin/whisperx" ]] || command -v whisperx >/dev/null; then say "${G}✓${N} whisperx"; else say "${D}○${N} whisperx  ${D}선택: zaevis ext install whisperx${N}"; fi
   [[ -f "$STATE/config.json" ]] && say "${G}✓${N} 설정  ${D}$STATE/config.json${N}" || { say "${R}✗${N} 설정  ${D}zaevis setup 필요${N}"; ok=0; }

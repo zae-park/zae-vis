@@ -137,10 +137,10 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
     exit 1
   fi
   if ! command -v minsync >/dev/null; then
-    if ! command -v cargo >/dev/null || ! command -v protoc >/dev/null; then
-      echo "  ! 임베딩 엔진 MinSync를 빌드하려면 Rust(cargo)와 protoc가 필요합니다:"
+    if ! command -v cargo >/dev/null || ! command -v protoc >/dev/null || ! command -v cmake >/dev/null; then
+      echo "  ! 임베딩 엔진 MinSync를 빌드하려면 Rust(cargo), protoc, cmake가 필요합니다:"
       echo "      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-      echo "      brew install protobuf"
+      echo "      brew install protobuf cmake"
       echo "    설치 후 다시 실행하세요. (검색 없이 쓰려면 --no-autorag)"
       exit 1
     fi
