@@ -2,7 +2,7 @@
 # zaevis setup — creates your personal worklog folder and wires Claude + AutoRAG to it.
 # Safe to re-run: existing files are never overwritten.
 #
-#   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR | --any-author] [--daily-at HH:MM] [--disable SOURCE]...
+#   kit/setup.sh [--worklog DIR] [--repos DIR] [--daily-at HH:MM] [--disable SOURCE]...
 #                [--claude-md] [--no-autorag] [--skip-refresh] [--no-schedule] [--yes]
 #
 # The zaevis app runs this from its first-run wizard with --yes and explicit values.
@@ -14,13 +14,11 @@ STATE_DIR="${ZAEVIS_HOME:-$HOME/.zaevis}"
 
 WORKLOG_DIR=""
 REPOS_ROOT=""
-AUTHOR_EMAIL=""
 WITH_AUTORAG=1
 ASSUME_YES=0
 SKIP_REFRESH=0
 WITH_SCHEDULE=1
 WITH_CLAUDE_MD=0
-ANY_AUTHOR=0   # git: collect every author, not only AUTHOR_EMAIL
 DAILY_AT="18:30"
 DISABLED=()
 
@@ -28,8 +26,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --worklog) WORKLOG_DIR="$2"; shift 2 ;;
     --repos) REPOS_ROOT="$2"; shift 2 ;;
-    --email) AUTHOR_EMAIL="$2"; shift 2 ;;
-    --any-author) ANY_AUTHOR=1; shift ;;
+    --email) shift 2 ;;        # no longer used: git collects every author
+    --any-author) shift ;;
     --no-autorag) WITH_AUTORAG=0; shift ;;
     --skip-refresh) SKIP_REFRESH=1; shift ;;
     --no-schedule) WITH_SCHEDULE=0; shift ;;
@@ -54,7 +52,6 @@ expand() { local p="$1"; [[ "$p" == "~/"* ]] && p="$HOME/${p:2}"; printf '%s' "$
 
 ask WORKLOG_DIR "worklog 폴더 위치" "$HOME/worklog"
 ask REPOS_ROOT "코드 저장소들이 있는 상위 폴더" "$HOME"
-[[ $ANY_AUTHOR -eq 1 ]] || ask AUTHOR_EMAIL "git 작성자 이메일 (비우면 모든 작성자)" "$(git config --global user.email 2>/dev/null || echo "")"
 WORKLOG_DIR="$(expand "$WORKLOG_DIR")"
 REPOS_ROOT="$(expand "$REPOS_ROOT")"
 
@@ -62,8 +59,8 @@ render() { # render SRC DEST — replaces {{PLACEHOLDERS}}; skips existing DEST
   local src=$1 dest=$2
   if [[ -e "$dest" ]]; then echo "  = $dest (있음, 건너뜀)"; return; fi
   mkdir -p "$(dirname "$dest")"
-  WL="$WORKLOG_DIR" RR="$REPOS_ROOT" AE="$AUTHOR_EMAIL" perl -pe \
-    's/\{\{WORKLOG_DIR\}\}/$ENV{WL}/g; s/\{\{REPOS_ROOT\}\}/$ENV{RR}/g; s/\{\{AUTHOR_EMAIL\}\}/$ENV{AE}/g' \
+  WL="$WORKLOG_DIR" RR="$REPOS_ROOT" perl -pe \
+    's/\{\{WORKLOG_DIR\}\}/$ENV{WL}/g; s/\{\{REPOS_ROOT\}\}/$ENV{RR}/g' \
     "$src" > "$dest"
   echo "  + $dest"
 }
@@ -113,7 +110,6 @@ else
 {
   "worklogDir": "$WORKLOG_DIR",
   "reposRoot": "$REPOS_ROOT",
-  "authorEmail": "$AUTHOR_EMAIL",
   "autoragConfig": "$AUTORAG_CONFIG",
   "port": 4710,
   "dailyAt": "$DAILY_AT",

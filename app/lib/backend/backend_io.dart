@@ -42,17 +42,6 @@ class IoBackend implements Backend {
     return null;
   }
 
-  @override
-  String gitEmail() {
-    try {
-      final text = File('$home/.gitconfig').readAsStringSync();
-      final m = RegExp(r'^\s*email\s*=\s*(\S+)\s*$', multiLine: true).firstMatch(text);
-      return m?.group(1) ?? '';
-    } catch (_) {
-      return '';
-    }
-  }
-
   Map<String, String> get _env {
     final p = payload!;
     final path = Platform.environment['PATH'] ?? '';

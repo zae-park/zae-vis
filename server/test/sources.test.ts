@@ -27,7 +27,7 @@ test("parseGitLog reads subject and shortstat", () => {
   assert.deepEqual([c[0].files, c[0].ins, c[0].del, c[1].files], [3, 40, 2, 0]);
 });
 
-test("git source collects my commits from a real repo, grouped by day", async () => {
+test("git source collects every author's commits from a real repo, grouped by day", async () => {
   const root = await mkdtemp(join(tmpdir(), "zv-git-"));
   const repo = join(root, "proj-a");
   await mkdir(repo);
@@ -40,10 +40,12 @@ test("git source collects my commits from a real repo, grouped by day", async ()
   g("commit", "-qm", "feat: 첫 커밋 token=abcd1234secret");
   g("-c", "user.email=other@x.io", "commit", "-q", "--allow-empty", "-m", "남의 커밋", "--author", "o <other@x.io>");
   const { gitSource } = await import("../src/sources/git.ts");
-  const r = await gitSource.collect({ from: new Date("2026-10-20T00:00:00"), to: new Date("2026-10-22T00:00:00"), settings: { enabled: true, reposRoot: root, authorEmail: "me@x.io", depth: 2 }, config: {} as never, log: () => {} });
+  const r = await gitSource.collect({ from: new Date("2026-10-20T00:00:00"), to: new Date("2026-10-22T00:00:00"), settings: { enabled: true, reposRoot: root, depth: 2 }, config: {} as never, log: () => {} });
   assert.deepEqual(Object.keys(r.days), ["2026-10-21"]);
-  assert.match(r.days["2026-10-21"], /## proj-a\n\n- 10:00 `[0-9a-f]{7}` feat: 첫 커밋 token=\*\*\* \(1 files, \+1 −0\)/);
-  assert.doesNotMatch(r.days["2026-10-21"], /남의 커밋/);
+  assert.match(r.days["2026-10-21"], /^## proj-a\n/);
+  assert.match(r.days["2026-10-21"], /^- 10:00 `[0-9a-f]{7}` feat: 첫 커밋 token=\*\*\* \(1 files, \+1 −0\) — me$/m);
+  assert.match(r.days["2026-10-21"], /^- 10:00 `[0-9a-f]{7}` 남의 커밋 — o$/m);
+  assert.match(r.note ?? "", /작성자 2명/);
 });
 
 const cc = (o: Record<string, unknown>) => ({ sessionId: "s1234567890", cwd: "/Users/me/jaepark/roas", gitBranch: "main", ...o });
@@ -137,7 +139,7 @@ test("collect(): writes day files, appends for event sources, records state; whi
   process.env.ZAEVIS_HOME = join(home, ".zaevis");
   process.env.ZAEVIS_WHISPERX = fake;
   await mkdir(process.env.ZAEVIS_HOME);
-  await writeFile(join(process.env.ZAEVIS_HOME, "config.json"), JSON.stringify({ worklogDir: worklog, reposRoot: home, authorEmail: "me@x.io" }));
+  await writeFile(join(process.env.ZAEVIS_HOME, "config.json"), JSON.stringify({ worklogDir: worklog, reposRoot: home }));
   await writeFile(
     join(process.env.ZAEVIS_HOME, "sources.json"),
     JSON.stringify({

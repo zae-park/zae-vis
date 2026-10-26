@@ -43,7 +43,7 @@
 1. `zaevis-<버전>-arm64.dmg`를 열고 **zaevis**를 Applications로 끌어다 놓습니다.
 2. Applications에서 zaevis를 엽니다. 서명되지 않은 앱이라 처음 한 번은 경고가 뜹니다:
    **시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"** (또는 터미널에서 `xattr -dr com.apple.quarantine /Applications/zaevis.app`).
-3. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 이메일, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다.
+3. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다.
 
 Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)는 앱 설정에서 버튼 한 번으로 설치합니다.
 터미널 명령이 필요하면 앱 설정 → **터미널에서 zaevis 명령 쓰기**를 누르세요.
@@ -101,7 +101,7 @@ zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지
 
 | 이름 | 수집 내용 | 설정 |
 |---|---|---|
-| `git` | 저장소 상위 폴더 아래 모든 저장소의 커밋 (이메일을 비우면 모든 작성자, 작성자 이름 표시) | 폴더, 작성자 이메일, 탐색 깊이 |
+| `git` | 저장소 상위 폴더 아래 모든 저장소의 모든 커밋, 줄마다 작성자 표시 | 폴더, 탐색 깊이 |
 | `claude-code` | `~/.claude/projects` 세션 기록: 요청, 수정한 파일, 실행한 명령, 마지막 응답 | 기록 폴더 |
 | `shell-history` | zsh 명령 이력 (`setopt EXTENDED_HISTORY` 필요) | 히스토리 파일 |
 | `transcripts` | 전사 서비스 내보내기 폴더에서 가져오기 + `inbox/audio` 녹음을 whisperX로 전사 | 가져올 폴더, 언어, 모델 |

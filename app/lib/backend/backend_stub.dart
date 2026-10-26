@@ -10,8 +10,6 @@ class _WebBackend implements Backend {
   @override
   bool get isConfigured => true;
   @override
-  String gitEmail() => '';
-  @override
   Stream<String> run(List<String> args) => Stream<String>.error(UnsupportedError('브라우저에서는 실행할 수 없습니다'));
   @override
   Future<void> ensureServer() async {}

@@ -5,7 +5,6 @@ zaevis가 매일 데이터소스(git 커밋, Claude Code 세션, 셸 명령, 회
 Claude가 매주 그 원본과 inbox를 읽어 로그·프로젝트를 정리하고, 매월 요약을 쓴다.
 zaevis 앱으로 검색·열람하거나, Obsidian으로 이 폴더를 볼트로 열어도 된다.
 
-- 작성자: {{AUTHOR_EMAIL}}
 - 코드 저장소 위치: {{REPOS_ROOT}}
 
 ## 폴더
@@ -53,7 +52,7 @@ worklog/
 2. 입력을 읽는다.
    - `sources/*/YYYY-MM-DD.md` 중 마지막 정리 날짜 이후 파일 전부 (git, claude-code, shell-history, transcripts, 사용자 커넥터)
    - `inbox/transcripts/`, `inbox/claude-sessions/`의 모든 파일
-   - `sources/git/`이 비어 있으면(zaevis 수집 전) `{{REPOS_ROOT}}` 아래 git 저장소에서 작성자 `{{AUTHOR_EMAIL}}`의 커밋을 직접 읽는다 (`git log --all`)
+   - `sources/git/`이 비어 있으면(zaevis 수집 전) `{{REPOS_ROOT}}` 아래 git 저장소의 모든 커밋을 작성자와 함께 직접 읽는다 (`git log --all --format='%h %an %s'`)
 3. 완료·결정·블로커·배운 점을 뽑아 해당 월의 `log/YYYY-MM.md`에 한 줄씩 추가한다.
    - 원본을 그대로 옮기지 않는다. 같은 날 같은 일(커밋, 세션, 명령)은 의미 단위로 묶어 한 줄로 쓰고, 왜 했는지가 보이게 쓴다.
    - 셸 명령 이력은 단독으로 줄을 만들지 않고, 다른 기록의 맥락을 보충할 때만 쓴다.

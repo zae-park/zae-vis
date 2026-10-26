@@ -7,13 +7,11 @@ class SetupParams {
   const SetupParams({
     required this.worklogDir,
     required this.reposRoot,
-    required this.email,
     required this.dailyAt,
     this.disabledSources = const [],
   });
   final String worklogDir;
   final String reposRoot;
-  final String email;
   final String dailyAt; // "18:30"
   final List<String> disabledSources;
 
@@ -21,7 +19,6 @@ class SetupParams {
         'setup', '--yes', '--skip-refresh',
         '--worklog', worklogDir,
         '--repos', reposRoot,
-        if (email.isEmpty) '--any-author' else ...['--email', email],
         '--daily-at', dailyAt,
         for (final s in disabledSources) ...['--disable', s],
       ];
@@ -37,9 +34,6 @@ abstract class Backend {
   String get home;
 
   bool get isConfigured;
-
-  /// Default git e-mail from ~/.gitconfig (no git binary needed).
-  String gitEmail();
 
   /// Runs `zaevis <args>` from the bundle, streaming output lines. Errors if it exits non-zero.
   Stream<String> run(List<String> args);

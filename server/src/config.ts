@@ -29,7 +29,6 @@ export type AppConfig = {
   indexOnInject: boolean; // re-index right after a log line / transcript is added
   worklogDir: string;
   reposRoot: string;
-  authorEmail: string;
   autoragConfig: string;
   port: number;
   webDir: string;
@@ -45,7 +44,6 @@ export function loadConfig(): AppConfig {
     indexOnInject: fc.indexOnInject === true,
     worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
-    authorEmail: fc.authorEmail ?? "",
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
     port: Number(process.env.ZAEVIS_PORT ?? fc.port ?? 4710),
     // may not exist yet; built later by `zaevis run web`
@@ -65,7 +63,7 @@ export const sourcesFile = (): string => join(stateDir(), "sources.json");
 /** Built-in defaults; ~/.zaevis/sources.json overrides per key. */
 export function defaultSources(cfg: AppConfig): SourcesConfig {
   return {
-    git: { enabled: true, reposRoot: cfg.reposRoot, authorEmail: cfg.authorEmail, depth: 3 },
+    git: { enabled: true, reposRoot: cfg.reposRoot, depth: 3 },
     "claude-code": { enabled: true, projectsDir: "~/.claude/projects" },
     "shell-history": { enabled: true, historyFile: "~/.zsh_history" },
     transcripts: {

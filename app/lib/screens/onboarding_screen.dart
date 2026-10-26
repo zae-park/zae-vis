@@ -16,7 +16,7 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 const _sources = [
-  ('git', 'git 커밋', '코드 폴더 아래 모든 저장소의 내 커밋'),
+  ('git', 'git 커밋', '코드 폴더 아래 모든 저장소의 커밋 (작성자별로 표시)'),
   ('claude-code', 'Claude Code 세션', '요청, 수정한 파일, 실행한 명령'),
   ('shell-history', '터미널 명령 이력', 'zsh 히스토리 (비밀값은 가림)'),
   ('transcripts', '회의 전사본', '전사 서비스 내보내기 폴더, 녹음 전사'),
@@ -25,7 +25,6 @@ const _sources = [
 class _OnboardingScreenState extends State<OnboardingScreen> {
   late final _worklog = TextEditingController(text: '${widget.backend.home}/worklog');
   late final _repos = TextEditingController(text: widget.backend.home);
-  late final _email = TextEditingController(text: widget.backend.gitEmail());
   final Set<String> _enabled = {for (final s in _sources) s.$1};
   TimeOfDay _dailyAt = const TimeOfDay(hour: 18, minute: 30);
 
@@ -38,7 +37,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void dispose() {
     _worklog.dispose();
     _repos.dispose();
-    _email.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -61,7 +59,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final params = SetupParams(
       worklogDir: _worklog.text.trim(),
       reposRoot: _repos.text.trim(),
-      email: _email.text.trim(),
       dailyAt: '${two(_dailyAt.hour)}:${two(_dailyAt.minute)}',
       disabledSources: [for (final s in _sources) if (!_enabled.contains(s.$1)) s.$1],
     );
@@ -119,11 +116,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             const SizedBox(height: 24),
             _folder('기록을 모을 폴더 (worklog)', _worklog),
             _folder('코드 저장소들이 있는 폴더', _repos),
-            TextField(
-              controller: _email,
-              enabled: !_running,
-              decoration: const InputDecoration(labelText: 'git 커밋 이메일', helperText: '여러 개면 쉼표로 구분. 비우면 저장소의 모든 작성자 커밋을 모읍니다'),
-            ),
             const SizedBox(height: 20),
             Text('모을 데이터소스', style: t.titleMedium),
             for (final s in _sources)

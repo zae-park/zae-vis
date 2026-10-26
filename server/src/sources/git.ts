@@ -73,23 +73,19 @@ export function parseGitLog(repo: string, out: string): Commit[] {
 export const gitSource: Source = {
   name: "git",
   title: "git 커밋",
-  description: "저장소 상위 폴더 아래 모든 git 저장소의 커밋을 모읍니다 (이메일을 비우면 모든 작성자).",
+  description: "저장소 상위 폴더 아래 모든 git 저장소의 커밋을 작성자와 함께 모읍니다.",
   options: [
     { key: "reposRoot", label: "저장소 상위 폴더", kind: "path" },
-    { key: "authorEmail", label: "작성자 이메일 (쉼표로 여러 개, 비우면 모든 작성자)", kind: "text" },
     { key: "depth", label: "탐색 깊이", kind: "number" },
   ],
   async collect({ from, to, settings, log }) {
     const root = expandHome(String(settings.reposRoot ?? "~"));
-    // No e-mail = every author: the log is for everything the user can see, not only their own work.
-    const authors = String(settings.authorEmail ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     const git = gitBinary();
     if (!git) throw new Error("git이 없습니다 (Xcode 명령줄 도구: 터미널에서 xcode-select --install).");
     const repos = await findRepos(root, Number(settings.depth ?? 3));
     const commits: Commit[] = [];
     for (const repo of repos) {
       const args = ["-C", repo, "log", "--all", "--no-merges", `--since=${from.toISOString()}`, `--until=${to.toISOString()}`, "--date=iso-strict", "--pretty=format:%x1e%H%x1f%ad%x1f%an%x1f%s", "--shortstat"];
-      for (const a of authors) args.push(`--author=${a}`);
       try {
         const { stdout } = await run(git, args, { maxBuffer: 64 * 1024 * 1024 });
         commits.push(...parseGitLog(basename(repo), stdout));
@@ -102,8 +98,8 @@ export const gitSource: Source = {
     for (const c of commits.sort((a, b) => a.date.getTime() - b.date.getTime())) {
       const day = dayKey(c.date);
       const stat = c.files ? ` (${c.files} files, +${c.ins} −${c.del})` : "";
-      const who = authors.length ? "" : ` — ${redact(c.author)}`;
-      addTo((byDay[day] ??= {}), c.repo, `- ${hhmm(c.date)} \`${c.hash.slice(0, 7)}\` ${redact(c.subject)}${stat}${who}`);
+      // every author, named on each line: the log covers all work the user can see, and who did it
+      addTo((byDay[day] ??= {}), c.repo, `- ${hhmm(c.date)} \`${c.hash.slice(0, 7)}\` ${redact(c.subject)}${stat} — ${redact(c.author)}`);
     }
     const days: Record<string, string> = {};
     for (const [day, repos2] of Object.entries(byDay)) {
@@ -112,6 +108,7 @@ export const gitSource: Source = {
         .map(([repo, lines]) => `## ${repo}\n\n${lines.join("\n")}`)
         .join("\n\n");
     }
-    return { days, note: `커밋 ${commits.length}개 · 저장소 ${repos.length}개 탐색` };
+    const authors = new Set(commits.map((c) => c.author)).size;
+    return { days, note: `커밋 ${commits.length}개 · 작성자 ${authors}명 · 저장소 ${repos.length}개 탐색` };
   },
 };

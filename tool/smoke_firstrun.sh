@@ -14,7 +14,6 @@ P="$APP/Contents/Resources/zaevis"
 FAKE_HOME="$(mktemp -d /tmp/zv-smoke-home.XXXX)"
 STATE="$(mktemp -d /tmp/zv-smoke-state.XXXX)"
 PORT=4711   # not 4710, so a real server keeps running
-EMAIL="$(git -C "$ROOT" log -1 --format=%ae 2>/dev/null || echo you@example.com)"   # matches this checkout's commits
 
 zv() { env -i HOME="$FAKE_HOME" USER="$USER" ZAEVIS_HOME="$STATE" ZAEVIS_PORT=$PORT NO_COLOR=1 LANG=ko_KR.UTF-8 \
   PATH="$P/node/bin:$P/bin:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$P/bin/zaevis" "$@"; }
@@ -27,13 +26,13 @@ cleanup() {
 trap cleanup EXIT
 
 # a small fake home: this checkout as the only repository, Claude sessions read-only
-printf '[user]\n\temail = %s\n' "$EMAIL" > "$FAKE_HOME/.gitconfig"
+printf '[user]\n\tname = smoke\n\temail = smoke@example.com\n' > "$FAKE_HOME/.gitconfig"
 git clone -q "$ROOT" "$FAKE_HOME/zaevis"
 [[ -d "$HOME/.claude" ]] && ln -s "$HOME/.claude" "$FAKE_HOME/.claude"
 [[ -f "$HOME/.zsh_history" ]] && cp "$HOME/.zsh_history" "$FAKE_HOME/.zsh_history"
 
 echo "1) setup (마법사가 보내는 인자 그대로)"
-(cd "$FAKE_HOME" && zv setup --yes --skip-refresh --worklog "$FAKE_HOME/worklog" --repos "$FAKE_HOME" --email "$EMAIL" --daily-at 18:30 | grep -E '^[0-9]\)|●')
+(cd "$FAKE_HOME" && zv setup --yes --skip-refresh --worklog "$FAKE_HOME/worklog" --repos "$FAKE_HOME" --daily-at 18:30 | grep -E '^[0-9]\)|●')
 grep -q '"index": "첫 수집은 앱이 진행"' "$STATE/state.json" || { echo "✗ state.json 선표시 없음"; exit 1; }
 sleep 3
 grep -q '건너뜀' "$STATE/daily.log" 2>/dev/null || { echo "✗ launchd 즉시 실행이 건너뛰지 않았습니다"; cat "$STATE/daily.log" 2>/dev/null; exit 1; }
