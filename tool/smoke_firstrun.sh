@@ -14,7 +14,7 @@ P="$APP/Contents/Resources/zaevis"
 FAKE_HOME="$(mktemp -d /tmp/zv-smoke-home.XXXX)"
 STATE="$(mktemp -d /tmp/zv-smoke-state.XXXX)"
 PORT=4711   # not 4710, so a real server keeps running
-EMAIL="$(git config --global user.email 2>/dev/null || echo you@example.com)"
+EMAIL="$(git -C "$ROOT" log -1 --format=%ae 2>/dev/null || echo you@example.com)"   # matches this checkout's commits
 
 zv() { env -i HOME="$FAKE_HOME" USER="$USER" ZAEVIS_HOME="$STATE" ZAEVIS_PORT=$PORT NO_COLOR=1 LANG=ko_KR.UTF-8 \
   PATH="$P/node/bin:$P/bin:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$P/bin/zaevis" "$@"; }

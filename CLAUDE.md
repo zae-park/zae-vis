@@ -17,12 +17,19 @@
 - DMG: `tool/package_macos.sh` → `dist/zaevis-<ver>-<arch>.dmg`
 
 ## 현재 상태 (2026-10-26)
-클라우드 세션에서 작성했고, 그 환경엔 Flutter·macOS가 없어 아래는 **한 번도 실행되지 않았다**. 여기서부터 이어서 할 일:
-1. `flutter analyze`, `flutter test` 통과시키기 (정적 검토만 받은 코드)
-2. `tool/package_macos.sh`로 DMG 만들기 — Node 다운로드, `npm ci`, `cargo install minsync`(protoc 필요), 웹·macOS 빌드, ad-hoc 서명
-3. DMG 설치본으로 첫 실행 마법사 → 서버 시작 → 첫 수집 → 검색까지 확인
-4. launchd 예약 등록 확인: `launchctl print gui/$(id -u)/io.github.zaepark.zaevis.daily`
-5. 설정 화면의 whisperX 설치 확인 (uv 설치 스크립트 `UV_UNMANAGED_INSTALL` 동작, imageio-ffmpeg 링크)
+이 Mac(Apple Silicon)에서 아래를 모두 실행·확인했다.
+- `flutter analyze` 0건, `flutter test` 10개, 서버 테스트 35개 통과
+- `tool/package_macos.sh` → `dist/zaevis-0.1.0-arm64.dmg` (약 490MB: MinSync 274MB, server/node_modules 707MB 중 onnxruntime-node 287MB)
+  - 빌드 Mac에 **cmake**가 추가로 필요하다 (minsync 의존성 protobuf-src가 protobuf를 소스 빌드). Rust는 `~/.cargo/bin`에 있으니 PATH에 넣을 것
+- 첫 실행 흐름은 `tool/smoke_firstrun.sh [zaevis.app]`로 재현한다: 임시 HOME·ZAEVIS_HOME에서 마법사가 보내는 인자 그대로
+  setup → 서버 → 첫 수집 → 색인 → 검색까지 돌리고, 등록한 launchd 예약은 끝에 해제한다
+- GUI 자체는 `ZAEVIS_HOME`을 바꿔 띄워 확인: 설정이 있으면 `zaevis start` 후 API를 호출하고, 없으면 마법사 화면(서버 호출 없음)
+- whisperX: `zaevis ext install whisperx`로 uv(`UV_UNMANAGED_INSTALL` → `$ZAEVIS_HOME/ext/uv`)·whisperx 3.8.6·imageio-ffmpeg 링크 확인, 설정 API `whisperx: true`
+
+남은 일
+- Claude Code 세션엔 손쉬운 사용·화면 녹화 권한이 없어 GUI 클릭·스크린샷은 자동화하지 못했다. 마법사 버튼 클릭은 사람이 한 번 눌러 확인할 것
+- 검색은 키워드만 동작한다. 임베딩(시맨틱) 검색은 `minsync serve`가 떠 있어야 하며 아직 서버가 띄우지 않는다
+- shell-history는 `setopt EXTENDED_HISTORY`가 없는 zsh 이력에서 시각이 없어 실패한다 (안내 메시지는 나온다)
 
 ## 규칙
 - `~/jaepark` 상위 폴더는 회사 저장소 원격에 연결돼 있다. zaevis·worklog는 `.git/info/exclude`로 제외되어 있으니 그 저장소에 커밋하지 말 것.
