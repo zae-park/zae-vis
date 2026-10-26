@@ -10,7 +10,7 @@ import { parseGitLog } from "../src/sources/git.ts";
 import { renderSession, summarize, userText } from "../src/sources/claudeCode.ts";
 import { parseZshHistory, unmetafy } from "../src/sources/shellHistory.ts";
 import { splitByDate } from "../src/sources/command.ts";
-import { isStale, parseTime, renderPlist } from "../src/schedule.ts";
+import { isStale, labelFor, parseTime, renderPlist } from "../src/schedule.ts";
 
 test("redact masks common secrets but keeps normal text", () => {
   const s = redact("export OPENAI_API_KEY=sk-proj-abcdefghijklmnop1234 && curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1' https://u:pw123@host/x --password hunter22 dapi-example");
@@ -106,6 +106,9 @@ test("schedule: plist is valid XML with the time; staleness rule", () => {
   assert.match(xml, /<key>Hour<\/key>\s*<integer>18<\/integer>\s*<key>Minute<\/key>\s*<integer>30<\/integer>/);
   assert.match(xml, /<string>--if-stale<\/string>/);
   assert.doesNotMatch(xml, /ZAEVIS_HOME/);
+  assert.equal(labelFor(undefined, "/Users/me"), "io.github.zaepark.zaevis.daily");
+  assert.equal(labelFor("/Users/me/.zaevis", "/Users/me"), "io.github.zaepark.zaevis.daily");
+  assert.match(labelFor("/tmp/zv test", "/Users/me"), /^io\.github\.zaepark\.zaevis\.daily\.zv-test-[0-9a-f]{6}$/);
   const custom = renderPlist({ dailyAt: "18:30", bin: "/b", path: "/usr/bin", logFile: "/l", env: { ZAEVIS_HOME: "/tmp/zv&test" } });
   assert.match(custom, /<key>ZAEVIS_HOME<\/key>\s*<string>\/tmp\/zv&amp;test<\/string>/);
   assert.throws(() => parseTime("25:00"));

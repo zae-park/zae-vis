@@ -23,6 +23,7 @@
   - 빌드 Mac에 **cmake**가 추가로 필요하다 (minsync 의존성 protobuf-src가 protobuf를 소스 빌드). Rust는 `~/.cargo/bin`에 있으니 PATH에 넣을 것
 - 첫 실행 흐름은 `tool/smoke_firstrun.sh [zaevis.app]`로 재현한다: 임시 HOME·ZAEVIS_HOME에서 마법사가 보내는 인자 그대로
   setup → 서버 → 첫 수집 → 색인 → 검색까지 돌리고, 등록한 launchd 예약은 끝에 해제한다
+- 별도 `ZAEVIS_HOME`은 launchd 라벨도 `io.github.zaepark.zaevis.daily.<폴더명>-<해시>`로 분리된다 (테스트가 실제 예약을 내리지 않도록)
 - GUI 자체는 `ZAEVIS_HOME`을 바꿔 띄워 확인: 설정이 있으면 `zaevis start` 후 API를 호출하고, 없으면 마법사 화면(서버 호출 없음)
 - whisperX: `zaevis ext install whisperx`로 uv(`UV_UNMANAGED_INSTALL` → `$ZAEVIS_HOME/ext/uv`)·whisperx 3.8.6·imageio-ffmpeg 링크 확인, 설정 API `whisperx: true`
 

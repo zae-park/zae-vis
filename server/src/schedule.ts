@@ -3,16 +3,25 @@
 // covers the case where the Mac was off at the scheduled time.
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { stateDir } from "./config.ts";
 
 const run = promisify(execFile);
-export const LABEL = "io.github.zaepark.zaevis.daily";
+const BASE_LABEL = "io.github.zaepark.zaevis.daily";
+/** A non-default state folder (ZAEVIS_HOME) gets its own launchd job, so a test install never unloads the real one. */
+export function labelFor(stateHome: string | undefined, home = homedir()): string {
+  if (!stateHome || resolve(stateHome) === join(home, ".zaevis")) return BASE_LABEL;
+  const tag = basename(resolve(stateHome)).replace(/[^A-Za-z0-9-]+/g, "-").toLowerCase();
+  const hash = createHash("sha1").update(resolve(stateHome)).digest("hex").slice(0, 6);
+  return `${BASE_LABEL}.${tag}-${hash}`;
+}
+export const LABEL = labelFor(process.env.ZAEVIS_HOME);
 export const plistPath = (): string => join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 export const zaevisBin = (): string => resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "zaevis");
 
