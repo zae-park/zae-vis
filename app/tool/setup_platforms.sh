@@ -7,7 +7,13 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PLATFORMS="${1:-web,macos,windows,linux}"
 
-flutter create --platforms="$PLATFORMS" --project-name zaevis --org io.github.zaepark .
+# `flutter create` rewrites the runner templates (entitlements included) every time it runs, so only
+# ask it for platforms that are missing; existing folders keep their mtimes and local edits.
+MISSING=()
+for p in ${PLATFORMS//,/ }; do [[ -d "$p" ]] || MISSING+=("$p"); done
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  flutter create --platforms="$(IFS=,; echo "${MISSING[*]}")" --project-name zaevis --org io.github.zaepark .
+fi
 
 # zaevis is a local tool distributed outside the App Store: it starts its own server (bundled
 # Node), reads ~/.claude, git repositories and shell history, and installs a LaunchAgent.
