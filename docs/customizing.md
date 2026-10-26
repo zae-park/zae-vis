@@ -24,7 +24,8 @@
 | GET | `/api/logs` · `/api/logs/:YYYY-MM` | 월 목록 · `{ month, entries[] }` |
 | GET | `/api/projects` · `/api/projects/:slug` | 프로젝트 요약 목록 · 프로젝트 본문 |
 | GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` |
-| GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite) |
+| GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite). hit마다 `context`(출처·날짜·섹션·작성자·매치 단어)와 가장 잘 맞는 문단 `snippet`, 상위 대비 점수가 낮으면 `weak` |
+| GET | `/api/file?path=` | worklog 안의 markdown 원문 `{ path, markdown }` (검색 결과 원문 보기) |
 | GET / POST | `/api/index` | 색인 상태(+ `embedding`: 로컬 임베딩 데몬 상태 off/starting/ready/failed) · 색인 갱신 시작 (`{ force?: true }`) |
 | POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
 | GET | `/api/inbox` | inbox 파일과 전사 작업 |

@@ -93,7 +93,10 @@ export function formatHits(r: J): string {
   if (!hits.length) return c.dim(`"${r.query}"에 대한 결과가 없습니다.`);
   return hits
     .map((h) => {
-      const head = `${c.bold(c.cyan(`[${h.number}]`))} ${c.bold(h.title ?? "")}  ${c.dim(h.path ?? "")}`;
+      const ctx = (h.context ?? {}) as J;
+      const where = [ctx.date, ctx.sourceLabel, ctx.section, ctx.author ? `by ${ctx.author}` : null].filter(Boolean).join(" · ");
+      const weak = h.weak ? c.dim(" (약한 일치)") : "";
+      const head = `${c.bold(c.cyan(`[${h.number}]`))} ${c.bold(where || h.title || "")}${weak}  ${c.dim(h.path ?? "")}`;
       const snippet = String(h.snippet ?? "").replace(/\s+/g, " ").trim();
       return snippet ? `${head}\n${wrapIndent(snippet.length > 280 ? snippet.slice(0, 280) + "…" : snippet, "    ")}` : head;
     })

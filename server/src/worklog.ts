@@ -3,7 +3,7 @@
 
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, normalize, sep } from "node:path";
 
 export type LogEntry = {
   date: string;          // "10-06" as written in the log
@@ -186,6 +186,15 @@ export class Worklog {
     const file = freePath(dir, safeStem(name, date), ".txt");
     await writeFile(file, text.endsWith("\n") ? text : text + "\n");
     return file;
+  }
+
+  /** A markdown file inside the worklog, for showing a search hit's original. Rejects paths outside the root. */
+  async file(rel: string): Promise<{ path: string; markdown: string } | null> {
+    const clean = normalize(rel).replace(/^([/\\])+/, "");
+    const abs = join(this.root, clean);
+    if (!abs.startsWith(this.root + sep) || !clean.endsWith(".md")) return null;
+    const markdown = await this.read(clean);
+    return markdown === null ? null : { path: clean, markdown };
   }
 
   private async read(rel: string): Promise<string | null> {

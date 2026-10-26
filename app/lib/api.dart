@@ -107,6 +107,9 @@ class WorklogApi {
 
   Future<IndexStatus> indexStatus() async => IndexStatus.fromJson(await _get('/index'));
 
+  /// A markdown file inside the worklog (the original behind a search hit).
+  Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));
+
   static const _mutating = {'content-type': 'application/json', 'x-zaevis': '1'};
 
   Future<Json> _send(String method, String path, [Object? body]) async {

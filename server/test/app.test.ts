@@ -95,11 +95,43 @@ test("serves web app with SPA fallback, unknown api is 404", async () => {
   assert.equal((await get("/api/nope")).status, 404);
 });
 
+test("GET /file returns a worklog markdown file and rejects escapes", async () => {
+  const ok = await get("/api/file?path=summaries/2026-09.md");
+  assert.equal(ok.status, 200);
+  assert.match(ok.body.markdown, /작업 정리/);
+  assert.equal((await get("/api/file?path=../../etc/passwd")).status, 404);
+  assert.equal((await get("/api/file?path=summaries/2026-09.txt")).status, 404);
+  assert.equal((await get("/api/file")).status, 400);
+});
+
+test("normalizeSearch attaches context: source, date, section, author, best passage, weak flag", () => {
+  const content = "# git · 2026-10-26\n\n<!-- auto -->\n\n## zaevis\n\n- 11:17 `4d8dc2d` 설치형 macOS 앱: DMG 하나로 설치 (18 files) — 박재\n- 11:38 `fcc8c9b` Flutter analyze 통과 — bot\n\n## crea\n\n- 02:07 `6774fd3` feat(gpu): shared GPU worker — 박재";
+  const r = normalizeSearch("DMG 설치", { ok: true, results: [
+    { number: 1, source: "/w/sources/git/2026-10-26.md", score: 1, content },
+    { number: 2, source: "/w/log/2026-10.md", score: 0.05, content: "# 2026-10 로그\n\n- 10-06 [[zaevis]] #done 색인 완료" },
+  ] }, ["/w"]);
+  const [h1, h2] = r.hits;
+  assert.equal(h1.context.kind, "git");
+  assert.equal(h1.context.sourceLabel, "git 커밋");
+  assert.equal(h1.context.date, "2026-10-26");
+  assert.equal(h1.context.section, "zaevis");
+  assert.equal(h1.context.author, "박재");
+  assert.match(h1.snippet, /^- 11:17 `4d8dc2d` 설치형 macOS 앱: DMG/);
+  assert.ok(h1.context.matched.includes("dmg"));
+  assert.equal(h1.weak, false);
+  assert.equal(h2.context.kind, "log");
+  assert.equal(h2.context.date, "2026-10");
+  assert.equal(h2.weak, true);
+});
+
 test("normalizeSearch maps errors and common result fields", () => {
   const err = normalizeSearch("q", { ok: false, errorCode: "index-not-ready", message: "refresh first" });
   assert.deepEqual(err.error, { code: "index-not-ready", message: "refresh first" });
   const okr = normalizeSearch("q", { results: [{ title: "T", path: "/worklog/log/2026-10.md", summary: " s ", score: 0.5 }] }, ["/x"]);
-  assert.deepEqual(okr.hits[0], { number: 1, title: "T", path: "log/2026-10.md", snippet: "s", score: 0.5 });
+  const { context, weak, ...fields } = okr.hits[0];
+  assert.deepEqual(fields, { number: 1, title: "T", path: "log/2026-10.md", snippet: "s", score: 0.5 });
+  assert.equal(weak, false);
+  assert.equal(context.kind, "log");
 });
 
 test("normalizeSearch handles the AutoRAG 2.11 Lite shape (source string + content)", () => {

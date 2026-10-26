@@ -34,6 +34,19 @@ void main() {
     expect(ok.hits.single.score, 0.5);
   });
 
+  test('SearchHit reads context and weak flag', () {
+    final h = SearchHit.fromJson({
+      'number': 1, 'title': 't', 'path': 'sources/git/2026-10-26.md', 'snippet': 's', 'score': 1, 'weak': false,
+      'context': {'kind': 'git', 'sourceLabel': 'git 커밋', 'date': '2026-10-26', 'section': 'zaevis', 'author': '박재', 'matched': ['dmg']},
+    });
+    expect(h.context!.labels, ['2026-10-26', 'git 커밋', 'zaevis', '박재']);
+    expect(h.context!.matched, ['dmg']);
+    expect(h.weak, isFalse);
+    final old = SearchHit.fromJson({'number': 2, 'title': 't', 'path': 'p', 'snippet': 's'});
+    expect(old.context, isNull);
+    expect(old.weak, isFalse);
+  });
+
   test('IndexStatus reads diagnostics and refresh errors', () {
     final s = IndexStatus.fromJson({
       'refreshing': false,

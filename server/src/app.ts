@@ -197,6 +197,13 @@ export function createApp(opts: AppOptions): Server {
           return send(res, 200, await search.search(q, topK));
         }
 
+        case "GET /file": {
+          const rel = (url.searchParams.get("path") ?? "").trim();
+          if (!rel) return send(res, 400, { error: "missing_path" });
+          const f = await worklog.file(rel);
+          return f ? send(res, 200, f) : notFound(res);
+        }
+
         case "GET /index":
           return send(res, 200, {
             refreshing: refreshing !== null,

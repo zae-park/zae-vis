@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../widgets/common.dart';
+import 'file_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key, required this.api, required this.onOpenIndex});
@@ -68,7 +69,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                         itemCount: r.hits.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, i) => _HitCard(hit: r.hits[i]),
+                        itemBuilder: (context, i) => _HitCard(hit: r.hits[i], onOpen: () => FileScreen.open(context, widget.api, r.hits[i].path)),
                       );
                     },
                   ),
@@ -103,32 +104,86 @@ class _SearchError extends StatelessWidget {
 }
 
 class _HitCard extends StatelessWidget {
-  const _HitCard({required this.hit});
+  const _HitCard({required this.hit, required this.onOpen});
   final SearchHit hit;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    return Card.outlined(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            CircleAvatar(radius: 12, child: Text('${hit.number}', style: t.labelSmall)),
-            const SizedBox(width: 10),
-            Expanded(child: Text(hit.title, style: t.titleSmall, overflow: TextOverflow.ellipsis)),
-          ]),
-          if (hit.path.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            SelectableText(hit.path, style: t.bodySmall?.copyWith(color: scheme.outline, fontFamily: 'monospace')),
-          ],
-          if (hit.snippet.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            SelectableText(hit.snippet, maxLines: 6, style: t.bodyMedium),
-          ],
-        ]),
+    final ctx = hit.context;
+    final labels = ctx?.labels ?? [hit.title];
+    return Opacity(
+      opacity: hit.weak ? 0.55 : 1,
+      child: Card.outlined(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: hit.path.isEmpty ? null : onOpen,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                CircleAvatar(radius: 12, child: Text('${hit.number}', style: t.labelSmall)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    for (var i = 0; i < labels.length; i++)
+                      Text(labels[i], style: i == 0 ? t.titleSmall : t.bodyMedium?.copyWith(color: i == labels.length - 1 && ctx?.author != null ? scheme.tertiary : null)),
+                    if (hit.weak) Chip(label: const Text('약한 일치'), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, labelStyle: t.labelSmall),
+                  ]),
+                ),
+              ]),
+              if (hit.snippet.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _Highlighted(text: hit.snippet, terms: ctx?.matched ?? const [], style: t.bodyMedium, highlight: scheme.primary),
+              ],
+              if (hit.path.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(hit.path, style: t.bodySmall?.copyWith(color: scheme.outline, fontFamily: 'monospace')),
+              ],
+            ]),
+          ),
+        ),
       ),
     );
+  }
+}
+
+/// The passage with the matched query terms in bold.
+class _Highlighted extends StatelessWidget {
+  const _Highlighted({required this.text, required this.terms, required this.highlight, this.style});
+  final String text;
+  final List<String> terms;
+  final Color highlight;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final spans = <TextSpan>[];
+    final lower = text.toLowerCase();
+    final ts = terms.where((x) => x.isNotEmpty).toList()..sort((a, b) => b.length.compareTo(a.length));
+    var i = 0;
+    while (i < text.length) {
+      var hitLen = 0;
+      for (final term in ts) {
+        if (lower.startsWith(term, i)) {
+          hitLen = term.length;
+          break;
+        }
+      }
+      if (hitLen > 0) {
+        spans.add(TextSpan(text: text.substring(i, i + hitLen), style: TextStyle(fontWeight: FontWeight.w700, color: highlight)));
+        i += hitLen;
+      } else {
+        var j = i + 1;
+        while (j < text.length && !ts.any((term) => lower.startsWith(term, j))) {
+          j++;
+        }
+        spans.add(TextSpan(text: text.substring(i, j)));
+        i = j;
+      }
+    }
+    return SelectableText.rich(TextSpan(style: style, children: spans), maxLines: 8);
   }
 }

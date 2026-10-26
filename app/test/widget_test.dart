@@ -34,9 +34,16 @@ WorklogApi _fakeApi() => WorklogApi(
               'ok': true,
               'query': req.url.queryParameters['q'],
               'hits': [
-                {'number': 1, 'title': 'ROAS 주간회의', 'path': 'processed/transcripts/2026-10-09_회의.txt', 'snippet': 'GA4 캠페인 매핑이 빠져서', 'score': 1.2},
+                {
+                  'number': 1, 'title': 'ROAS 주간회의', 'path': 'sources/git/2026-10-09.md', 'snippet': 'GA4 캠페인 매핑이 빠져서', 'score': 1.0, 'weak': false,
+                  'context': {'kind': 'git', 'sourceLabel': 'git 커밋', 'date': '2026-10-09', 'section': 'roas', 'author': '박재', 'matched': ['ga4', '매핑']},
+                },
+                {'number': 2, 'title': 'x', 'path': 'log/2026-10.md', 'snippet': '무관한 줄', 'score': 0.05, 'weak': true,
+                  'context': {'kind': 'log', 'sourceLabel': '한 줄 기록', 'date': '2026-10', 'matched': <Object>[]}},
               ],
             });
+          case '/api/file':
+            return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## roas\n\n- GA4 캠페인 매핑이 빠져서 — 박재'});
           case '/api/sources':
             return _json({
               'collecting': false,
@@ -74,8 +81,17 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
-    expect(find.text('ROAS 주간회의'), findsOneWidget);
-    expect(find.text('processed/transcripts/2026-10-09_회의.txt'), findsOneWidget);
+    expect(find.text('2026-10-09'), findsOneWidget);
+    expect(find.text('git 커밋'), findsOneWidget);
+    expect(find.text('roas'), findsOneWidget);
+    expect(find.text('박재'), findsOneWidget);
+    expect(find.text('약한 일치'), findsOneWidget);
+    expect(find.text('sources/git/2026-10-09.md'), findsOneWidget);
+
+    await tester.tap(find.text('git 커밋'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
+    expect(find.textContaining('GA4 캠페인 매핑이 빠져서 — 박재'), findsWidgets);
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {

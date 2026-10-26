@@ -6,13 +6,18 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describeHit, type HitContext } from "./context.ts";
 
 export type SearchHit = {
   number: number;
   title: string;
   path: string;      // path relative to the worklog root when possible
+  /** The best-matching passage of the chunk (see context.ts). */
   snippet: string;
   score: number | null;
+  /** Relative score well below the top hit: shown dimmed as a weak match. */
+  weak: boolean;
+  context: HitContext;
 };
 
 export type SearchResponse = {
@@ -43,6 +48,8 @@ function payload(result: ToolResult): unknown {
   }
 }
 
+// AutoRAG scales scores so the top hit is 1; anything this far below it is noise more often than not.
+const WEAK_SCORE = 0.2;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -74,12 +81,17 @@ export function normalizeSearch(query: string, data: unknown, roots: string[] = 
     const src = (r.source && typeof r.source === "object" ? r.source : {}) as Record<string, unknown>;
     const rawPath = str(r.path) || str(r.virtualPath) || str(r.sourcePath) || str(src.path) || str(src.virtualPath) || str(r.source) || str(r.file);
     const path = displayPath(rawPath, roots);
+    const content = (str(r.snippet) || str(r.summary) || str(r.text) || str(r.content) || str(r.chunk)).trim();
+    const context = describeHit(path, content, query);
+    const score = num(r.score) ?? num(r.relevance);
     return {
       number: num(r.number) ?? num(r.rank) ?? i + 1,
       title: str(r.title) || str(src.title) || path.split("/").pop() || `#${i + 1}`,
       path,
-      snippet: clip((str(r.snippet) || str(r.summary) || str(r.text) || str(r.content) || str(r.chunk)).trim(), 600),
-      score: num(r.score) ?? num(r.relevance),
+      snippet: context.passage || clip(content, 600),
+      score,
+      weak: score !== null && score < WEAK_SCORE,
+      context,
     };
   });
   return { ok: true, query, hits };

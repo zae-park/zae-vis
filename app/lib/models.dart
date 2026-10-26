@@ -67,6 +67,8 @@ class SearchHit {
     required this.path,
     required this.snippet,
     this.score,
+    this.weak = false,
+    this.context,
   });
 
   factory SearchHit.fromJson(Json j) => SearchHit(
@@ -75,6 +77,8 @@ class SearchHit {
         path: _str(j['path']),
         snippet: _str(j['snippet']),
         score: (j['score'] as num?)?.toDouble(),
+        weak: j['weak'] == true,
+        context: j['context'] is Json ? HitContext.fromJson(j['context'] as Json) : null,
       );
 
   final int number;
@@ -82,6 +86,42 @@ class SearchHit {
   final String path;
   final String snippet;
   final double? score;
+
+  /// Scored far below the top hit: shown dimmed.
+  final bool weak;
+
+  /// Where the hit comes from (source, date, section, author) and the query terms it matched.
+  final HitContext? context;
+}
+
+class HitContext {
+  const HitContext({required this.kind, required this.sourceLabel, this.date, this.section, this.author, this.matched = const []});
+
+  factory HitContext.fromJson(Json j) => HitContext(
+        kind: _str(j['kind']),
+        sourceLabel: _str(j['sourceLabel']),
+        date: _strOrNull(j['date']),
+        section: _strOrNull(j['section']),
+        author: _strOrNull(j['author']),
+        matched: (j['matched'] is List ? j['matched'] as List : const <Object?>[]).whereType<String>().toList(),
+      );
+
+  final String kind; // git | claude-code | shell-history | transcripts | custom | log | project | summary | inbox | other
+  final String sourceLabel;
+  final String? date;
+  final String? section;
+  final String? author;
+  final List<String> matched;
+
+  /// "2026-10-26 · git 커밋 · zaevis · 박재"
+  List<String> get labels => [if (date != null) date!, sourceLabel, if (section != null) section!, if (author != null) author!];
+}
+
+class WorklogFile {
+  const WorklogFile({required this.path, required this.markdown});
+  factory WorklogFile.fromJson(Json j) => WorklogFile(path: _str(j['path']), markdown: _str(j['markdown']));
+  final String path;
+  final String markdown;
 }
 
 class SearchResult {
