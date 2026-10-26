@@ -13,6 +13,13 @@ ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 SERVER="$ROOT/server"
 APP="$ROOT/app"
 STATE="${ZAEVIS_HOME:-$HOME/.zaevis}"
+BUNDLED=0
+# Inside zaevis.app (Contents/Resources/zaevis): use the bundled Node, MinSync and web build.
+if [[ -x "$ROOT/node/bin/node" ]]; then
+  BUNDLED=1
+  export PATH="$ROOT/node/bin:$ROOT/bin:$PATH"
+  export ZAEVIS_WEB_DIR="${ZAEVIS_WEB_DIR:-$ROOT/web}"
+fi
 PID_FILE="$STATE/server.pid"
 LOG_FILE="$STATE/server.log"
 
@@ -74,11 +81,20 @@ need_node() {
   local major; major="$(node -p 'process.versions.node.split(".")[0]')"
   [[ "$major" -ge 24 ]] || die "Node.js 24 이상이 필요합니다 (현재 $(node -v)): brew install node@24"
   if [[ ! -d "$SERVER/node_modules" ]]; then
+    [[ $BUNDLED -eq 0 ]] || die "앱 파일이 손상되었습니다 ($SERVER/node_modules 없음). zaevis를 다시 설치하세요."
     info "서버 의존성 설치 중…"
     (cd "$SERVER" && npm install --no-fund --no-audit --silent)
   fi
 }
-need_flutter() { command -v flutter >/dev/null || die "Flutter가 필요합니다: brew install --cask flutter"; }
+need_flutter() {
+  [[ $BUNDLED -eq 0 ]] || die "앱 설치본에서는 빌드하지 않습니다. 앱을 쓰려면 'zaevis run app'."
+  command -v flutter >/dev/null || die "Flutter가 필요합니다: brew install --cask flutter"
+}
+
+app_bundle() { # …/zaevis.app when running from an installed app
+  local p="$ROOT"
+  while [[ "$p" != "/" ]]; do [[ "$p" == *.app ]] && { echo "$p"; return; }; p="$(dirname "$p")"; done
+}
 
 host_device() {
   case "$(uname -s)" in
@@ -186,18 +202,23 @@ cmd_install() {
 }
 
 ext_install_whisperx() {
-  local py="" v
-  for v in python3.12 python3.11 python3.10 python3; do
-    if command -v "$v" >/dev/null; then py="$(command -v "$v")"; break; fi
-  done
-  [[ -n "$py" ]] || die "Python 3.10~3.12가 필요합니다: brew install python@3.12"
-  local venv="$STATE/ext/whisperx"
-  info "whisperX 설치 ($py → $venv). 수 분 걸리고 1~2GB를 씁니다."
-  "$py" -m venv "$venv"
-  "$venv/bin/pip" install --quiet --upgrade pip
-  "$venv/bin/pip" install whisperx
-  command -v ffmpeg >/dev/null || warn "ffmpeg가 필요합니다: brew install ffmpeg"
-  say "${G}✓${N} whisperX 설치 완료. 녹음을 worklog/inbox/audio 에 넣거나 'zaevis ingest 녹음.m4a'."
+  # Needs nothing preinstalled: uv fetches Python 3.12, imageio-ffmpeg ships an ffmpeg binary.
+  local venv="$STATE/ext/whisperx" uvbin
+  uvbin="$(command -v uv || true)"
+  if [[ -z "$uvbin" ]]; then
+    uvbin="$STATE/ext/uv/uv"
+    if [[ ! -x "$uvbin" ]]; then
+      info "uv 내려받는 중 (Python 설치 도구)"
+      mkdir -p "$STATE/ext/uv"
+      curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="$STATE/ext/uv" sh
+    fi
+  fi
+  info "whisperX 설치 중 → $venv (수 분, 1~2GB)"
+  "$uvbin" venv --allow-existing --python 3.12 "$venv"
+  "$uvbin" pip install --python "$venv/bin/python" whisperx imageio-ffmpeg
+  local ff; ff="$("$venv/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+  ln -sf "$ff" "$venv/bin/ffmpeg"
+  say "${G}✓${N} whisperX 설치 완료. 앱에서 녹음을 올리거나 'zaevis ingest 녹음.m4a'."
   say "  화자 구분이 필요하면 HF_TOKEN 환경변수를 설정하세요 (pyannote 모델 동의 필요)."
 }
 
@@ -209,7 +230,6 @@ cmd_doctor() {
   check cargo "cargo --version" "https://rustup.rs (MinSync 빌드용)"
   check protoc "protoc --version" "brew install protobuf (MinSync 빌드용)"
   check minsync "minsync --version" "zaevis setup이 빌드합니다"
-  check ffmpeg "ffmpeg -version" "brew install ffmpeg (녹음 전사용, 선택)"
   if [[ -x "$STATE/ext/whisperx/bin/whisperx" ]] || command -v whisperx >/dev/null; then say "${G}✓${N} whisperx"; else say "${D}○${N} whisperx  ${D}선택: zaevis ext install whisperx${N}"; fi
   [[ -f "$STATE/config.json" ]] && say "${G}✓${N} 설정  ${D}$STATE/config.json${N}" || { say "${R}✗${N} 설정  ${D}zaevis setup 필요${N}"; ok=0; }
   server_status
@@ -228,10 +248,11 @@ main() {
       case "$target" in
         cli) server_start; cli repl ;;
         web)
-          if [[ "${1:-}" == "--rebuild" ]] || web_stale; then build_web; fi
+          if [[ $BUNDLED -eq 0 ]] && { [[ "${1:-}" == "--rebuild" ]] || web_stale; }; then build_web; fi
           server_start
           say "${G}●${N} $(url)"; open_url "$(url)" ;;
         app)
+          if [[ $BUNDLED -eq 1 ]]; then open "$(app_bundle)"; exit 0; fi
           server_start
           if [[ "${1:-}" == "--release" ]]; then
             build_app; open_built_app

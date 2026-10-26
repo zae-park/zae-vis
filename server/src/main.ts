@@ -42,7 +42,7 @@ const server = createApp({
         dailyAt: cfg.dailyAt,
         indexOnInject: cfg.indexOnInject,
         worklogDir: cfg.worklogDir,
-        schedule: await scheduleStatus(),
+        schedule: await scheduleStatus(cfg.dailyAt),
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
       };

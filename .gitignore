@@ -17,3 +17,7 @@ app/**/xcuserdata/
 
 .DS_Store
 *.log
+
+# packaging
+/build/
+/dist/

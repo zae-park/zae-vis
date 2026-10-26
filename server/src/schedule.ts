@@ -71,11 +71,11 @@ const domain = () => `gui/${process.getuid?.() ?? 501}`;
 
 export type ScheduleStatus = { supported: boolean; installed: boolean; loaded: boolean; dailyAt: string | null; plist: string; hint?: string };
 
-export async function scheduleStatus(): Promise<ScheduleStatus> {
+export async function scheduleStatus(dailyAtHint = "18:30"): Promise<ScheduleStatus> {
   const plist = plistPath();
   const base = { plist, supported: process.platform === "darwin" };
   if (!existsSync(plist)) {
-    return { ...base, installed: false, loaded: false, dailyAt: null, hint: base.supported ? undefined : cronHint("18:30") };
+    return { ...base, installed: false, loaded: false, dailyAt: null, hint: base.supported ? undefined : cronHint(dailyAtHint) };
   }
   const xml = await readFile(plist, "utf8");
   const h = /<key>Hour<\/key>\s*<integer>(\d+)<\/integer>/.exec(xml)?.[1];

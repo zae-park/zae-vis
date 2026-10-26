@@ -9,6 +9,21 @@ import { addTo, dayKey, hhmm, type Source } from "./types.ts";
 
 const run = promisify(execFile);
 
+/**
+ * On macOS /usr/bin/git is a stub that pops up "install developer tools" when they are missing,
+ * so look for a real git first and skip the source quietly if there is none.
+ */
+export function gitBinary(): string | null {
+  if (process.platform !== "darwin") return "git";
+  const candidates = [
+    "/opt/homebrew/bin/git",
+    "/usr/local/bin/git",
+    "/Library/Developer/CommandLineTools/usr/bin/git",
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+  ];
+  return candidates.find((c) => existsSync(c)) ?? null;
+}
+
 const SKIP_DIRS = new Set(["node_modules", ".venv", "venv", "build", "dist", ".dart_tool", "Pods", "__pycache__"]);
 
 export async function findRepos(root: string, depth: number): Promise<string[]> {
@@ -67,13 +82,15 @@ export const gitSource: Source = {
     const root = expandHome(String(settings.reposRoot ?? "~"));
     const authors = String(settings.authorEmail ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     if (!authors.length) throw new Error("작성자 이메일이 설정되지 않았습니다.");
+    const git = gitBinary();
+    if (!git) throw new Error("git이 없습니다 (Xcode 명령줄 도구: 터미널에서 xcode-select --install).");
     const repos = await findRepos(root, Number(settings.depth ?? 3));
     const commits: Commit[] = [];
     for (const repo of repos) {
       const args = ["-C", repo, "log", "--all", "--no-merges", `--since=${from.toISOString()}`, `--until=${to.toISOString()}`, "--date=iso-strict", "--pretty=format:%x1e%H%x1f%ad%x1f%s", "--shortstat"];
       for (const a of authors) args.push(`--author=${a}`);
       try {
-        const { stdout } = await run("git", args, { maxBuffer: 64 * 1024 * 1024 });
+        const { stdout } = await run(git, args, { maxBuffer: 64 * 1024 * 1024 });
         commits.push(...parseGitLog(basename(repo), stdout));
       } catch (err) {
         log(`git: ${repo} 건너뜀 (${(err as Error).message.split("\n")[0]})`);

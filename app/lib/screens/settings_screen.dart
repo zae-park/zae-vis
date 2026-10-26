@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../backend/backend.dart';
 import '../models.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.api, required this.onServerChanged});
+  const SettingsScreen({super.key, required this.api, required this.onServerChanged, this.backend});
   final WorklogApi api;
+  final Backend? backend;
   final VoidCallback onServerChanged;
 
   @override
@@ -25,6 +27,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _reload() => setState(() => _future = widget.api.settings());
+
+  bool get _managed => widget.backend?.managed == true;
+
+  /// Runs `zaevis <args>` from the app bundle and shows its output live.
+  Future<void> _runTask(String title, List<String> args, {List<String>? then}) async {
+    final lines = ValueNotifier<List<String>>(const []);
+    final done = ValueNotifier<String?>(null);
+    void add(String l) => lines.value = [...lines.value, l];
+    () async {
+      try {
+        await widget.backend!.run(args).forEach(add);
+        if (then != null) await widget.backend!.run(then).forEach(add);
+        done.value = '완료';
+      } catch (e) {
+        done.value = '실패: $e';
+      }
+    }();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 600,
+          height: 320,
+          child: ValueListenableBuilder<List<String>>(
+            valueListenable: lines,
+            builder: (_, l, __) => ListView(reverse: true, children: [
+              for (final line in l.reversed) Text(line, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            ]),
+          ),
+        ),
+        actions: [
+          ValueListenableBuilder<String?>(
+            valueListenable: done,
+            builder: (context, d, _) => d == null
+                ? const Padding(padding: EdgeInsets.all(8), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                : TextButton(onPressed: () => Navigator.pop(context), child: Text('$d · 닫기')),
+          ),
+        ],
+      ),
+    );
+    if (mounted) _reload();
+  }
 
   Future<void> _update({String? dailyAt, bool? indexOnInject}) async {
     try {
@@ -110,8 +156,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(s.whisperx ? Icons.check_circle_outline : Icons.extension_outlined),
                   title: const Text('whisperX (녹음 전사)'),
-                  subtitle: Text(s.whisperx ? '설치됨' : "설치되지 않음 — 터미널에서 'zaevis ext install whisperx'"),
+                  subtitle: Text(s.whisperx
+                      ? '설치됨'
+                      : (_managed ? '설치하면 녹음을 올릴 때 자동으로 전사합니다 (1~2GB 다운로드)' : "설치되지 않음 — 터미널에서 'zaevis ext install whisperx'")),
+                  trailing: !s.whisperx && _managed
+                      ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
+                      : null,
                 ),
+                if (_managed) ...[
+                  const SizedBox(height: 16),
+                  Text('앱', style: t.titleMedium),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.open_in_browser),
+                    title: const Text('브라우저로 열기'),
+                    subtitle: Text(widget.api.baseUrl),
+                    onTap: () => widget.backend!.open(widget.api.baseUrl),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.terminal),
+                    title: const Text('터미널에서 zaevis 명령 쓰기'),
+                    subtitle: const Text('~/.local/bin 에 zaevis 명령을 등록합니다'),
+                    onTap: () => _runTask('zaevis 명령 등록', const ['install']),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.restart_alt),
+                    title: const Text('서버 다시 시작'),
+                    onTap: () => _runTask('서버 다시 시작', const ['stop'], then: const ['start']),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.description_outlined),
+                    title: const Text('로그 폴더 열기'),
+                    subtitle: const Text('~/.zaevis'),
+                    onTap: () => widget.backend!.open('${widget.backend!.home}/.zaevis'),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Text('worklog 폴더', style: t.titleMedium),
                 SelectableText(s.worklogDir, style: t.bodyMedium?.copyWith(fontFamily: 'monospace')),

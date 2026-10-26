@@ -38,24 +38,38 @@
 | `server/` | 로컬 API 서버 (Node 24, TypeScript). worklog 파일 + AutoRAG MCP를 HTTP로 제공하고, 웹 앱도 서빙 |
 | `app/` | Flutter 앱. 검색 · 로그 · 프로젝트 · 월간 정리 · 색인 상태 |
 
-## 설치 (macOS 기준)
+## 설치 (macOS)
 
-필요한 것: Node.js 24+, Rust(cargo)와 protobuf(AutoRAG 임베딩 엔진 빌드용, 처음 한 번), Flutter 3.27+
+1. `zaevis-<버전>-arm64.dmg`를 열고 **zaevis**를 Applications로 끌어다 놓습니다.
+2. Applications에서 zaevis를 엽니다. 서명되지 않은 앱이라 처음 한 번은 경고가 뜹니다:
+   **시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"** (또는 터미널에서 `xattr -dr com.apple.quarantine /Applications/zaevis.app`).
+3. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 이메일, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다.
+
+Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)는 앱 설정에서 버튼 한 번으로 설치합니다.
+터미널 명령이 필요하면 앱 설정 → **터미널에서 zaevis 명령 쓰기**를 누르세요.
+
+### DMG 만들기 (배포하는 사람만)
+
+```bash
+brew install --cask flutter && brew install protobuf
+curl https://sh.rustup.rs -sSf | sh          # MinSync(검색 임베딩 엔진) 빌드용, 처음 한 번
+tool/package_macos.sh                         # → dist/zaevis-<버전>-arm64.dmg
+```
+
+Node 24 공식 배포본(체크섬 확인), 서버 의존성, MinSync, 웹·macOS 빌드를 앱 하나로 묶고 ad-hoc 서명까지 합니다. 빌드한 맥과 같은 CPU(Apple Silicon / Intel)용 DMG가 나옵니다.
+
+### 개발용으로 소스에서 바로 쓰기
 
 ```bash
 brew install node@24 flutter protobuf
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-git clone https://github.com/zae-park/zaevis.git
-cd zaevis
-bin/zaevis install                 # 'zaevis' 명령을 PATH에 등록 (~/.local/bin)
-zaevis setup                       # worklog 위치, 저장소 위치, git 이메일을 묻습니다
-zaevis doctor                      # 필요한 도구가 다 있는지 확인
+curl https://sh.rustup.rs -sSf | sh
+git clone https://github.com/zae-park/zaevis.git && cd zaevis
+bin/zaevis install && zaevis setup && zaevis doctor
 ```
 
-`zaevis setup`은 다시 실행해도 기존 파일을 덮어쓰지 않습니다. 검색 없이 기록만 쓰려면 `zaevis setup --no-autorag`.
+## 사용
 
-### 실행
+앱의 탭: **검색 · 로그 · 프로젝트 · 월간 정리 · 수집**. 터미널에서는:
 
 ```bash
 zaevis run cli          # 터미널: 입력하면 검색, :log  :projects  :summary  :index
@@ -80,7 +94,7 @@ zaevis ingest 회의.txt 녹음.m4a      # 전사본은 inbox로, 녹음은 whis
 zaevis collect                      # 지금 수집 + 색인 (zaevis collect git: 하나만)
 zaevis sources                      # 데이터소스 상태 (zaevis sources off shell-history)
 zaevis schedule install 18:30       # 매일 실행 시각 바꾸기
-zaevis ext install whisperx         # 녹음 전사 확장 (ffmpeg 필요: brew install ffmpeg)
+zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지 자동 설치)
 ```
 
 ## 데이터소스

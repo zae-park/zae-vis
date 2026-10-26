@@ -2,8 +2,10 @@
 # zaevis setup — creates your personal worklog folder and wires Claude + AutoRAG to it.
 # Safe to re-run: existing files are never overwritten.
 #
-#   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR] [--no-autorag] [--yes]
+#   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR] [--daily-at HH:MM] [--disable SOURCE]...
+#                [--claude-md] [--no-autorag] [--skip-refresh] [--no-schedule] [--yes]
 #
+# The zaevis app runs this from its first-run wizard with --yes and explicit values.
 set -euo pipefail
 
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +17,11 @@ REPOS_ROOT=""
 AUTHOR_EMAIL=""
 WITH_AUTORAG=1
 ASSUME_YES=0
+SKIP_REFRESH=0
+WITH_SCHEDULE=1
+WITH_CLAUDE_MD=0
+DAILY_AT="18:30"
+DISABLED=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,8 +29,13 @@ while [[ $# -gt 0 ]]; do
     --repos) REPOS_ROOT="$2"; shift 2 ;;
     --email) AUTHOR_EMAIL="$2"; shift 2 ;;
     --no-autorag) WITH_AUTORAG=0; shift ;;
+    --skip-refresh) SKIP_REFRESH=1; shift ;;
+    --no-schedule) WITH_SCHEDULE=0; shift ;;
+    --claude-md) WITH_CLAUDE_MD=1; shift ;;
+    --daily-at) DAILY_AT="$2"; shift 2 ;;
+    --disable) DISABLED+=("$2"); shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
-    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -62,12 +74,16 @@ MONTH="$(date +%Y-%m)"
 [[ -e "$WORKLOG_DIR/log/$MONTH.md" ]] || { printf '# %s 로그\n\n' "$MONTH" > "$WORKLOG_DIR/log/$MONTH.md"; echo "  + log/$MONTH.md"; }
 [[ -e "$WORKLOG_DIR/.state.md" ]] || printf 'last_weekly: %s\n' "$(date -v-7d +%F 2>/dev/null || date -d '7 days ago' +%F)" > "$WORKLOG_DIR/.state.md"
 
-echo "2) Claude 세션 노트 지침: $REPOS_ROOT/CLAUDE.md"
-if [[ -e "$REPOS_ROOT/CLAUDE.md" ]] && ! grep -q "zaevis" "$REPOS_ROOT/CLAUDE.md"; then
-  echo "  ! 기존 CLAUDE.md가 있어 덮어쓰지 않습니다. 아래 파일 내용을 직접 붙여 넣으세요:"
-  render "$KIT_DIR/claude/CLAUDE.md" "$STATE_DIR/CLAUDE.snippet.md"
+if [[ $WITH_CLAUDE_MD -eq 1 ]]; then
+  echo "2) Claude 세션 노트 지침: $REPOS_ROOT/CLAUDE.md"
+  if [[ -e "$REPOS_ROOT/CLAUDE.md" ]] && ! grep -q "zaevis" "$REPOS_ROOT/CLAUDE.md"; then
+    echo "  ! 기존 CLAUDE.md가 있어 덮어쓰지 않습니다. 아래 파일 내용을 직접 붙여 넣으세요:"
+    render "$KIT_DIR/claude/CLAUDE.md" "$STATE_DIR/CLAUDE.snippet.md"
+  else
+    render "$KIT_DIR/claude/CLAUDE.md" "$REPOS_ROOT/CLAUDE.md"
+  fi
 else
-  render "$KIT_DIR/claude/CLAUDE.md" "$REPOS_ROOT/CLAUDE.md"
+  echo "2) Claude Code 작업은 claude-code 데이터소스가 세션 기록에서 직접 모읍니다 (CLAUDE.md 불필요)"
 fi
 
 # Never let the personal log leak into a repository that happens to contain it.
@@ -98,11 +114,19 @@ else
   "authorEmail": "$AUTHOR_EMAIL",
   "autoragConfig": "$AUTORAG_CONFIG",
   "port": 4710,
-  "dailyAt": "18:30",
+  "dailyAt": "$DAILY_AT",
   "indexOnInject": false
 }
 JSON
   echo "  + $STATE_DIR/config.json"
+fi
+if [[ ! -e "$STATE_DIR/sources.json" ]]; then
+  {
+    printf '{\n'
+    for src in ${DISABLED[@]+"${DISABLED[@]}"}; do printf '  "%s": { "enabled": false },\n' "$src"; done
+    printf '  "custom": []\n}\n'
+  } > "$STATE_DIR/sources.json"
+  echo "  + $STATE_DIR/sources.json"
 fi
 
 if [[ $WITH_AUTORAG -eq 1 ]]; then
@@ -121,7 +145,7 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
       exit 1
     fi
   fi
-  (cd "$ROOT_DIR/server" && npm install --no-fund --no-audit)
+  [[ -d "$ROOT_DIR/server/node_modules" ]] || (cd "$ROOT_DIR/server" && npm install --no-fund --no-audit)
   if [[ ! -e "$AUTORAG_CONFIG" ]]; then
     mkdir -p "$(dirname "$AUTORAG_CONFIG")"
     AUTORAG_CONFIG="$AUTORAG_CONFIG" "$ROOT_DIR/server/node_modules/.bin/autorag" lite init \
@@ -131,14 +155,16 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
     echo "  MinSync 빌드 중 (처음 한 번, 수 분 걸림)…"
     cargo install minsync --locked
   fi
-  echo "  색인 생성 중…"
-  AUTORAG_CONFIG="$AUTORAG_CONFIG" "$ROOT_DIR/server/node_modules/.bin/autorag" lite refresh
+  if [[ $SKIP_REFRESH -eq 0 ]]; then
+    echo "  색인 생성 중…"
+    AUTORAG_CONFIG="$AUTORAG_CONFIG" "$ROOT_DIR/server/node_modules/.bin/autorag" lite refresh
+  fi
 fi
 
-if [[ "$(uname -s)" == "Darwin" ]] && command -v node >/dev/null && [[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 24 ]]; then
+if [[ $WITH_SCHEDULE -eq 1 && "$(uname -s)" == "Darwin" ]] && command -v node >/dev/null && [[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 24 ]]; then
   echo "5) 매일 수집·색인 예약 (launchd)"
   [[ -d "$ROOT_DIR/server/node_modules" ]] || (cd "$ROOT_DIR/server" && npm install --no-fund --no-audit --silent)
-  ZAEVIS_HOME="$STATE_DIR" node "$ROOT_DIR/server/src/cli.ts" schedule install || echo "  ! 예약 등록 실패 — 나중에 'zaevis schedule install'"
+  ZAEVIS_HOME="$STATE_DIR" node "$ROOT_DIR/server/src/cli.ts" schedule install "$DAILY_AT" || echo "  ! 예약 등록 실패 — 나중에 'zaevis schedule install'"
 fi
 
 cat <<DONE

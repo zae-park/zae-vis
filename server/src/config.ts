@@ -49,7 +49,8 @@ export function loadConfig(): AppConfig {
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
     port: Number(process.env.ZAEVIS_PORT ?? fc.port ?? 4710),
     // may not exist yet; built later by `zaevis run web`
-    webDir: process.env.ZAEVIS_WEB_DIR ?? resolve(here, "..", "..", "app", "build", "web"),
+    // packaged app: <payload>/web · repo checkout: app/build/web (may not exist until built)
+    webDir: process.env.ZAEVIS_WEB_DIR ?? (existsSync(resolve(here, "..", "..", "web", "index.html")) ? resolve(here, "..", "..", "web") : resolve(here, "..", "..", "app", "build", "web")),
   };
 }
 

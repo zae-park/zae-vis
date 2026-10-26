@@ -181,7 +181,7 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
     }
     case "schedule": {
       const action = args[0] ?? "status";
-      const st = action === "install" ? await installSchedule(args[1] ?? cfg.dailyAt) : action === "remove" ? await removeSchedule() : await scheduleStatus();
+      const st = action === "install" ? await installSchedule(args[1] ?? cfg.dailyAt) : action === "remove" ? await removeSchedule() : await scheduleStatus(cfg.dailyAt);
       if (!st.supported) return c.yellow(`macOS가 아니라 launchd를 쓸 수 없습니다. ${st.hint ?? ""}`);
       if (!st.installed) return `예약 없음. 'zaevis schedule install' 로 매일 ${cfg.dailyAt}에 수집·색인합니다.`;
       return `${st.loaded ? c.green("●") : c.yellow("●")} 매일 ${st.dailyAt} 수집·색인 ${st.loaded ? "" : "(등록됐지만 아직 로드되지 않음)"}\n${c.dim(st.plist)}`;

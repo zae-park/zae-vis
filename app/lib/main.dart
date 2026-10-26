@@ -1,20 +1,28 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'backend/backend.dart';
 import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
 import 'screens/log_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/summaries_screen.dart';
 import 'widgets/input_dialogs.dart';
 
-void main() => runApp(ZaevisApp(api: WorklogApi()));
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(ZaevisApp(api: WorklogApi(), backend: createBackend()));
+}
 
 class ZaevisApp extends StatelessWidget {
-  const ZaevisApp({super.key, required this.api});
+  const ZaevisApp({super.key, required this.api, this.backend});
   final WorklogApi api;
+
+  /// null in tests / when the server is managed elsewhere.
+  final Backend? backend;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +35,64 @@ class ZaevisApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
-      home: HomeShell(api: api),
+      home: backend == null ? HomeShell(api: api) : _BootGate(api: api, backend: backend!),
+    );
+  }
+}
+
+/// Packaged app: first-run wizard, then make sure the bundled server is up.
+class _BootGate extends StatefulWidget {
+  const _BootGate({required this.api, required this.backend});
+  final WorklogApi api;
+  final Backend backend;
+
+  @override
+  State<_BootGate> createState() => _BootGateState();
+}
+
+class _BootGateState extends State<_BootGate> {
+  late bool _configured = widget.backend.isConfigured;
+  Future<void>? _starting;
+
+  Future<void> _start() => _starting ??= widget.backend.ensureServer();
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.backend;
+    if (!b.managed) return HomeShell(api: widget.api, backend: b);
+    if (!_configured) {
+      return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() => _configured = true));
+    }
+    return FutureBuilder<void>(
+      future: _start(),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('zaevis 준비 중…'),
+          ])));
+        }
+        if (snap.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.error_outline, size: 40),
+                  const SizedBox(height: 12),
+                  Text('서버를 시작하지 못했습니다.\n${snap.error}', textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  const Text('로그: ~/.zaevis/server.log'),
+                  const SizedBox(height: 16),
+                  FilledButton(onPressed: () => setState(() => _starting = null), child: const Text('다시 시도')),
+                ]),
+              ),
+            ),
+          );
+        }
+        return HomeShell(api: widget.api, backend: b);
+      },
     );
   }
 }
@@ -48,8 +113,9 @@ const _dests = [
 ];
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.api});
+  const HomeShell({super.key, required this.api, this.backend});
   final WorklogApi api;
+  final Backend? backend;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -64,7 +130,7 @@ class _HomeShellState extends State<HomeShell> {
   void _openProject(String slug) => openProject(context, api, slug);
 
   void _openSettings() => Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => SettingsScreen(api: api, onServerChanged: () => setState(() => _generation++)),
+        builder: (_) => SettingsScreen(api: api, backend: widget.backend, onServerChanged: () => setState(() => _generation++)),
       ));
 
   Future<void> _addLog() async {
