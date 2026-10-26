@@ -127,7 +127,12 @@ export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "inde
 }
 
 export type SourceState = { lastRun?: string; lastOk?: boolean; lastError?: string; lastErrorAt?: string; lastNote?: string };
-export type CollectState = { sources: Record<string, SourceState>; daily?: { lastRun: string; ok: boolean; index: string } };
+export type CollectState = {
+  sources: Record<string, SourceState>;
+  daily?: { lastRun: string; ok: boolean; index: string };
+  /** Vectors were built from scratch for this embedding model (so a first start re-indexes once). */
+  embedding?: { model: string; builtAt: string };
+};
 
 export const stateFile = (): string => join(stateDir(), "state.json");
 export const loadState = (): CollectState => readJson<CollectState>(stateFile(), { sources: {} });

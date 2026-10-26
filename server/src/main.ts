@@ -24,7 +24,6 @@ if (!existsSync(cfg.worklogDir)) {
 const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir] });
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
-if (cfg.localEmbedding) void embedding.start().then((s) => s.state === "failed" && console.error(`[embedding] ${s.error}`));
 const queue = new TranscribeQueue();
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
@@ -77,7 +76,13 @@ const server = createApp({
       }
       const was = embedding.current.state;
       const s = await embedding.start();
-      return s.state === "ready" && was !== "ready";
+      const became = s.state === "ready" && was !== "ready";
+      if (became) {
+        const state = loadState();
+        state.embedding = { model: s.model ?? "", builtAt: new Date().toISOString() };
+        saveState(state);
+      }
+      return became;
     },
   },
   audio: {
@@ -95,7 +100,32 @@ server.listen(cfg.port, "127.0.0.1", () => {
   console.log(`  worklog : ${cfg.worklogDir}`);
   console.log(`  autorag : ${cfg.autoragConfig}`);
   console.log(`  web app : ${existsSync(join(cfg.webDir, "index.html")) ? cfg.webDir : "(not built — run: zaevis run web)"}`);
+  if (cfg.localEmbedding) void startEmbeddingAtBoot();
 });
+
+/** Starts the daemon; the first time a model is available, rebuilds the index so existing chunks get vectors. */
+async function startEmbeddingAtBoot(): Promise<void> {
+  const s = await embedding.start();
+  if (s.state !== "ready") {
+    if (s.state === "failed") console.error(`[embedding] ${s.error}`);
+    return;
+  }
+  const state = loadState();
+  if (state.embedding?.model === s.model) return;
+  console.log(`[embedding] first run with ${s.model}: rebuilding the index so every chunk gets a vector`);
+  try {
+    const res = await fetch(`http://127.0.0.1:${cfg.port}/api/index`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-zaevis": "1" },
+      body: JSON.stringify({ force: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.embedding = { model: s.model ?? "", builtAt: new Date().toISOString() };
+    saveState(state);
+  } catch (err) {
+    console.error(`[embedding] rebuild request failed: ${(err as Error).message}`);
+  }
+}
 
 const shutdown = async () => {
   server.close();
