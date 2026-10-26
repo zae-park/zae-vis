@@ -50,6 +50,17 @@
 Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)는 앱 설정에서 버튼 한 번으로 설치합니다.
 터미널 명령이 필요하면 앱 설정 → **터미널에서 zaevis 명령 쓰기**를 누르세요.
 
+### 플랫폼
+
+| | 설치 | 비고 |
+|---|---|---|
+| macOS (Apple Silicon·Intel) | `dist/zaevis-<버전>-arm64.dmg` / `-x86_64.dmg` | 매일 수집은 launchd, 전역 단축키 ⌘⇧Space, 메뉴 막대 |
+| Windows 10/11 (x64) | `dist/zaevis-<버전>-win-x64.zip` — 풀어서 `zaevis.exe` 실행 | 매일 수집은 작업 스케줄러, 전역 단축키 Ctrl+Shift+Space. SmartScreen 경고는 "추가 정보 → 실행" |
+| 브라우저 (web) | 설치한 앱의 설정 → "브라우저로 열기" 또는 `zaevis run web` | 같은 서버(`127.0.0.1:4710`)가 웹 앱을 함께 서빙. 녹음·검색·설정 모두 동작, 전역 단축키만 없음 |
+| Linux | 소스에서 `zaevis run app` | 패키지는 아직 없음. 매일 수집은 `zaevis schedule`이 알려 주는 crontab 한 줄 |
+
+세 플랫폼 모두 같은 서버·CLI(`server/src/zaevis.ts`)를 쓰고, 앱은 번들된 Node로 그 파일을 실행합니다. 셸 스크립트는 없습니다.
+
 ### DMG 만들기 (배포하는 사람만)
 
 ```bash
@@ -57,6 +68,14 @@ brew install --cask flutter && brew install protobuf cmake
 curl https://sh.rustup.rs -sSf | sh          # MinSync(검색 임베딩 엔진) 빌드용, 처음 한 번
 tool/package_macos.sh                         # → dist/zaevis-<버전>-arm64.dmg
 ```
+
+Windows에서는 Flutter(Visual Studio C++ 워크로드 포함)·Rust·protobuf·cmake를 설치한 뒤:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tool\package_windows.ps1   # → dist\zaevis-<버전>-win-x64.zip
+```
+
+GitHub Actions(`ci.yml`)가 세 OS에서 서버 테스트와 macOS·Windows 앱 빌드를 돌리고, 태그를 올리거나 수동 실행하면 두 설치본을 아티팩트로 만듭니다.
 
 Node 24 공식 배포본(체크섬 확인), 서버 의존성, MinSync, 웹·macOS 빌드를 앱 하나로 묶고 ad-hoc 서명까지 합니다. 빌드한 맥과 같은 CPU(Apple Silicon / Intel)용 DMG가 나옵니다.
 

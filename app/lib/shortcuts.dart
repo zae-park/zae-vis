@@ -13,8 +13,11 @@ import 'package:window_manager/window_manager.dart';
 class AppShortcuts {
   static bool get _mac => !kIsWeb && Platform.isMacOS;
 
-  /// Desktop (not web, not tests): the global hotkey and the native menu make sense.
+  /// Desktop (not web, not tests): the global hotkey makes sense.
   static bool get desktop => !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+
+  /// Flutter's PlatformMenuBar exists only on macOS; elsewhere the in-app shortcuts are the whole story.
+  static bool get nativeMenu => _mac;
 
   static String get modLabel => kIsWeb || _mac ? '⌘' : 'Ctrl+';
 
@@ -82,7 +85,12 @@ class ShortcutScope extends StatelessWidget {
 class GlobalHotkey {
   static HotKey? _registered;
 
-  static final hotKey = HotKey(key: PhysicalKeyboardKey.space, modifiers: [HotKeyModifier.meta, HotKeyModifier.shift], scope: HotKeyScope.system);
+  // ⌘⇧Space on macOS; Ctrl+Shift+Space on Windows/Linux (the Windows key is reserved by the OS)
+  static final hotKey = HotKey(
+    key: PhysicalKeyboardKey.space,
+    modifiers: [AppShortcuts.nativeMenu ? HotKeyModifier.meta : HotKeyModifier.control, HotKeyModifier.shift],
+    scope: HotKeyScope.system,
+  );
 
   /// Call before runApp on desktop: clears stale registrations (hot reload) and prepares the window.
   static Future<void> prepare() async {

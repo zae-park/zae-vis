@@ -4,21 +4,27 @@ import 'dart:io';
 
 import 'backend.dart';
 
+/// The packaged app's own backend: a Node runtime, the server and the CLI shipped next to the app.
+///
+/// Layout: macOS `zaevis.app/Contents/Resources/zaevis/`, Windows and Linux `<folder of zaevis.exe>/zaevis/`.
+/// Inside: `node/` (runtime), `server/`, `bin/`, `kit/`, `web/`, `VERSION`. Commands run as
+/// `node server/src/zaevis.ts <args>` — no shell involved, so the same code serves every platform.
 class IoBackend implements Backend {
   IoBackend(this.payload);
 
-  /// <app>/Contents/Resources/zaevis, or ZAEVIS_ROOT for development; null when not bundled.
+  /// Payload folder, or ZAEVIS_ROOT for development; null when not bundled.
   final String? payload;
 
   static IoBackend detect() {
     final env = Platform.environment;
-    final exe = File(Platform.resolvedExecutable);
+    final exeDir = File(Platform.resolvedExecutable).parent;
     final candidates = <String>[
       if (env['ZAEVIS_ROOT'] != null) env['ZAEVIS_ROOT']!,
-      '${exe.parent.parent.path}/Resources/zaevis', // macOS .app layout
+      if (Platform.isMacOS) '${exeDir.parent.path}/Resources/zaevis',
+      '${exeDir.path}${Platform.pathSeparator}zaevis',
     ];
     for (final c in candidates) {
-      if (File('$c/bin/zaevis').existsSync()) return IoBackend(c);
+      if (File('$c${Platform.pathSeparator}server${Platform.pathSeparator}src${Platform.pathSeparator}zaevis.ts').existsSync()) return IoBackend(c);
     }
     return IoBackend(null);
   }
@@ -27,28 +33,39 @@ class IoBackend implements Backend {
   bool get managed => payload != null;
 
   @override
-  String get home => Platform.environment['HOME'] ?? '';
+  String get home => Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '';
 
-  String get _stateDir => Platform.environment['ZAEVIS_HOME'] ?? '$home/.zaevis';
+  String get _stateDir => Platform.environment['ZAEVIS_HOME'] ?? '$home${Platform.pathSeparator}.zaevis';
 
   @override
-  bool get isConfigured => File('$_stateDir/config.json').existsSync();
+  bool get isConfigured => File('$_stateDir${Platform.pathSeparator}config.json').existsSync();
 
   @override
   String? get problem {
-    if (Platform.resolvedExecutable.contains('/AppTranslocation/')) {
+    if (Platform.isMacOS && Platform.resolvedExecutable.contains('/AppTranslocation/')) {
       return 'zaevis를 Applications 폴더로 옮긴 뒤 다시 여세요. (지금은 다운로드한 위치에서 임시로 실행 중이라 매일 수집 예약을 만들 수 없습니다)';
     }
     return null;
   }
 
+  /// The bundled Node, falling back to one on PATH during development (ZAEVIS_ROOT).
+  String get _node {
+    final p = payload!;
+    final bundled = Platform.isWindows ? '$p\\node\\node.exe' : '$p/node/bin/node';
+    return File(bundled).existsSync() ? bundled : 'node';
+  }
+
   Map<String, String> get _env {
     final p = payload!;
+    final sep = Platform.isWindows ? ';' : ':';
     final path = Platform.environment['PATH'] ?? '';
+    final nodeDir = Platform.isWindows ? '$p\\node' : '$p/node/bin';
+    final binDir = '$p${Platform.pathSeparator}bin';
+    // Finder/Explorer-launched apps get a minimal PATH; put the bundled runtime first.
+    final extra = Platform.isMacOS ? ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'] : const <String>[];
     return {
       ...Platform.environment,
-      // Finder-launched apps get a minimal PATH; put the bundled runtime first.
-      'PATH': '$p/node/bin:$p/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$path',
+      'PATH': [nodeDir, binDir, ...extra, path].join(sep),
       'NO_COLOR': '1',
     };
   }
@@ -59,8 +76,8 @@ class IoBackend implements Backend {
     final out = StreamController<String>();
     () async {
       try {
-        // via bash so a lost exec bit on the script can't break the app
-        final proc = await Process.start('/bin/bash', ['$payload/bin/zaevis', ...args], environment: _env, workingDirectory: home);
+        final proc = await Process.start(_node, ['$payload${Platform.pathSeparator}server${Platform.pathSeparator}src${Platform.pathSeparator}zaevis.ts', ...args],
+            environment: _env, workingDirectory: home.isEmpty ? null : home);
         unawaited(proc.stdin.close());
         final done = <Future<void>>[
           for (final s in [proc.stdout, proc.stderr])

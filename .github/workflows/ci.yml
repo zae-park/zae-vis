@@ -3,10 +3,16 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
+  # The server (and the zaevis command) must behave the same on every OS the app ships for.
   server:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: server
@@ -17,6 +23,12 @@ jobs:
           node-version: 24
       - run: npm install --no-fund --no-audit
       - run: npm test
+      - name: zaevis launcher smoke (help, doctor)
+        shell: bash
+        run: |
+          cd ..
+          if [ "$RUNNER_OS" = "Windows" ]; then cmd //c "bin\\zaevis.cmd help" ; else bin/zaevis help; fi
+          ZAEVIS_HOME=$RUNNER_TEMP/zv node server/src/zaevis.ts doctor || true
 
   app:
     runs-on: ubuntu-latest
@@ -32,4 +44,84 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
+      - name: web build
+        run: |
+          tool/setup_platforms.sh web
+          flutter build web --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: app/build/web
 
+  # Desktop builds: proves the runners compile with the plugins (record, hotkey, window) on each OS.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            out: app/build/macos/Build/Products/Release/zaevis.app
+          - os: windows-latest
+            platform: windows
+            out: app/build/windows/x64/runner/Release
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: runner folder
+        shell: bash
+        run: tool/setup_platforms.sh ${{ matrix.platform }}
+      - run: flutter build ${{ matrix.platform }} --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.platform }}
+          path: ${{ matrix.out }}
+
+  # Full installers (Node runtime + MinSync + server + app), on demand or for a tag.
+  package:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: tool/package_macos.sh
+            artifact: dist/*.dmg
+          - os: windows-latest
+            script: powershell -ExecutionPolicy Bypass -File tool/package_windows.ps1
+            artifact: dist/*.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build tools (protobuf, cmake)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install protobuf cmake; else choco install -y protoc cmake --no-progress; fi
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/package/cache/minsync
+            build/package-win/cache/minsync
+          key: minsync-${{ runner.os }}-0.5.0
+      - run: ${{ matrix.script }}
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ runner.os }}
+          path: ${{ matrix.artifact }}

@@ -23,7 +23,7 @@ export function labelFor(stateHome: string | undefined, home = homedir()): strin
 }
 export const LABEL = labelFor(process.env.ZAEVIS_HOME);
 export const plistPath = (): string => join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
-export const zaevisBin = (): string => resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "zaevis");
+export const zaevisBin = (): string => resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", process.platform === "win32" ? "zaevis.cmd" : "zaevis");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -83,7 +83,26 @@ const domain = () => `gui/${process.getuid?.() ?? 501}`;
 
 export type ScheduleStatus = { supported: boolean; installed: boolean; loaded: boolean; dailyAt: string | null; plist: string; hint?: string };
 
+const WIN = process.platform === "win32";
+/** Windows: the Task Scheduler entry runs this script (env + log redirect can't go in /TR cleanly). */
+export const winTaskScript = (): string => join(stateDir(), "daily.cmd");
+/** Windows: what we registered (schtasks' query output is localized, so we keep our own record). */
+const winRecord = (): string => join(stateDir(), "schedule.json");
+
+export function renderWinTask(opts: { bin: string; stateHome?: string; logFile: string }): string {
+  const env = opts.stateHome ? `set "ZAEVIS_HOME=${opts.stateHome}"\r\n` : "";
+  return `@echo off\r\n${env}"${opts.bin}" daily --if-stale >> "${opts.logFile}" 2>&1\r\n`;
+}
+
 export async function scheduleStatus(dailyAtHint = "18:30"): Promise<ScheduleStatus> {
+  if (WIN) {
+    const plist = winTaskScript();
+    const base = { plist, supported: true };
+    if (!existsSync(winRecord())) return { ...base, installed: false, loaded: false, dailyAt: null };
+    const rec = JSON.parse(await readFile(winRecord(), "utf8")) as { dailyAt?: string };
+    const loaded = await run("schtasks", ["/Query", "/TN", LABEL]).then(() => true, () => false);
+    return { ...base, installed: true, loaded, dailyAt: rec.dailyAt ?? null };
+  }
   const plist = plistPath();
   const base = { plist, supported: process.platform === "darwin" };
   if (!existsSync(plist)) {
@@ -104,10 +123,19 @@ export function cronHint(dailyAt: string): string {
 }
 
 export async function installSchedule(dailyAt: string): Promise<ScheduleStatus> {
-  parseTime(dailyAt);
+  const { hour, minute } = parseTime(dailyAt);
+  await mkdir(stateDir(), { recursive: true });
+  if (WIN) {
+    // Task Scheduler, daily at HH:MM, as the current user. `daily --if-stale` also covers a missed slot
+    // the next time anything runs it (the app's server starts it too).
+    await writeFile(winTaskScript(), renderWinTask({ bin: zaevisBin(), stateHome: process.env.ZAEVIS_HOME, logFile: join(stateDir(), "daily.log") }));
+    const st = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    await run("schtasks", ["/Create", "/F", "/SC", "DAILY", "/TN", LABEL, "/ST", st, "/TR", `"${winTaskScript()}"`]);
+    await writeFile(winRecord(), JSON.stringify({ dailyAt: st, task: LABEL, script: winTaskScript() }, null, 2) + "\n");
+    return scheduleStatus();
+  }
   if (process.platform !== "darwin") return { supported: false, installed: false, loaded: false, dailyAt, plist: plistPath(), hint: cronHint(dailyAt) };
   await mkdir(dirname(plistPath()), { recursive: true });
-  await mkdir(stateDir(), { recursive: true });
   // A custom state folder (ZAEVIS_HOME) must reach the job too, or it would collect into ~/.zaevis.
   const env = process.env.ZAEVIS_HOME ? { ZAEVIS_HOME: process.env.ZAEVIS_HOME } : undefined;
   await writeFile(plistPath(), renderPlist({ dailyAt, bin: zaevisBin(), path: launchdPath(), logFile: join(stateDir(), "daily.log"), env }));
@@ -117,6 +145,12 @@ export async function installSchedule(dailyAt: string): Promise<ScheduleStatus> 
 }
 
 export async function removeSchedule(): Promise<ScheduleStatus> {
+  if (WIN) {
+    await run("schtasks", ["/Delete", "/F", "/TN", LABEL]).catch(() => {});
+    await rm(winRecord(), { force: true });
+    await rm(winTaskScript(), { force: true });
+    return scheduleStatus();
+  }
   if (process.platform === "darwin") await run("launchctl", ["bootout", `${domain()}/${LABEL}`]).catch(() => {});
   await rm(plistPath(), { force: true });
   return scheduleStatus();

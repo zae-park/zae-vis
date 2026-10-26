@@ -15,9 +15,11 @@ export const TEXT_EXT = new Set([".txt", ".md", ".vtt", ".srt"]);
 export type TranscribeOptions = { language?: string; model?: string; whisperxBin?: string; hfToken?: string };
 
 export function whisperxBin(explicit?: string): string | null {
-  const candidates = [explicit, process.env.ZAEVIS_WHISPERX, join(stateDir(), "ext", "whisperx", "bin", "whisperx")].filter(Boolean) as string[];
+  const win = process.platform === "win32";
+  const exe = win ? "whisperx.exe" : "whisperx";
+  const candidates = [explicit, process.env.ZAEVIS_WHISPERX, join(stateDir(), "ext", "whisperx", win ? "Scripts" : "bin", exe)].filter(Boolean) as string[];
   for (const c of candidates) if (existsSync(expandHome(c))) return expandHome(c);
-  for (const dir of (process.env.PATH ?? "").split(":")) if (dir && existsSync(join(dir, "whisperx"))) return join(dir, "whisperx");
+  for (const dir of (process.env.PATH ?? "").split(win ? ";" : ":")) if (dir && existsSync(join(dir, exe))) return join(dir, exe);
   return null;
 }
 

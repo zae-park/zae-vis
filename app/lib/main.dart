@@ -215,8 +215,8 @@ class _HomeShellState extends State<HomeShell> {
       onTab: _selectTab,
       child: _layout(context),
     );
-    if (!_native) return shell;
-    // macOS menu bar: the same actions, discoverable with their shortcuts
+    if (!_native || !AppShortcuts.nativeMenu) return shell;
+    // macOS menu bar: the same actions, discoverable with their shortcuts (Windows/Linux: shortcuts only)
     return PlatformMenuBar(
       menus: [
         PlatformMenu(label: 'zaevis', menus: [

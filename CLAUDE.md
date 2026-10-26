@@ -8,8 +8,9 @@
 - `server/` Node 24 TypeScript(빌드 없이 `node src/*.ts`). `main.ts` API 서버(127.0.0.1:4710), `daily.ts` 수집+색인,
   `cli.ts` 터미널 클라이언트, `sources/` 커넥터, `schedule.ts` launchd, `transcribe.ts` whisperX
 - `app/` Flutter. `lib/backend/` 앱 번들 안의 서버 관리(`backend_io.dart`), `screens/onboarding_screen.dart` 첫 실행 마법사
-- `bin/zaevis` CLI(bash), `kit/setup.sh` 초기 설정, `tool/package_macos.sh` DMG 패키징
-- 앱 번들 레이아웃: `zaevis.app/Contents/Resources/zaevis/{node/bin/node, bin/{zaevis,minsync}, server/, kit/, web/}`
+- `zaevis` 명령의 실제 구현은 `server/src/zaevis.ts`(시작/중지/상태, run, setup, doctor, install, ext whisperx, 나머지는 cli.ts·daily.ts 위임)와 `server/src/setup.ts`(옛 kit/setup.sh). `bin/zaevis`(sh)·`bin/zaevis.cmd`는 Node를 찾아 그 파일을 실행하는 래퍼일 뿐. 셸 스크립트에 로직을 넣지 말 것
+- 플랫폼: macOS(launchd, DMG `tool/package_macos.sh`), Windows(작업 스케줄러 `schtasks`, `tool/package_windows.ps1` → zip), web(서버가 `web/`를 서빙), Linux(cron 힌트). `schedule.ts`가 OS별 분기. CI(`.github/workflows/ci.yml`)가 세 OS에서 서버 테스트, mac·Windows 앱 빌드, 태그/수동 실행 시 설치본 패키징
+- 앱 번들 레이아웃: macOS `zaevis.app/Contents/Resources/zaevis/`, Windows `zaevis.exe` 옆 `zaevis\` — 안에 `{node/(bin/node | node.exe), bin/{zaevis,zaevis.cmd,minsync}, server/, kit/, web/, VERSION}`. 앱(`backend_io.dart`)은 번들 node로 `server/src/zaevis.ts`를 직접 실행
 
 ## 검증 명령
 - 서버: `cd server && npm install && npm test` (35개 통과 상태)
