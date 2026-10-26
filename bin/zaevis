@@ -119,7 +119,8 @@ server_stale() {
   [[ -n "${ZAEVIS_BUILD:-}" ]] || return 1
   local running
   running="$(curl -sf -m 2 "$(url)/api/health" | sed -nE 's/.*"build":"([^"]*)".*/\1/p')"
-  [[ -n "$running" && "$running" != "$ZAEVIS_BUILD" ]]
+  # no build in the reply = a server from before build ids existed: treat as stale too
+  [[ "$running" != "$ZAEVIS_BUILD" ]]
 }
 
 server_start() {
