@@ -126,6 +126,11 @@ export function formatIndex(s: J): string {
   const a = (s.autorag ?? {}) as J;
   const state = s.refreshing || a.inFlight ? c.yellow("색인 중…") : a.state === "failed" ? c.red("실패") : String(a.state ?? "알 수 없음");
   const out = [`상태: ${state}`, `최신: ${a.stale ? c.yellow("갱신 필요") : c.green("최신")}`];
+  const e = s.embedding as J | undefined;
+  if (e) {
+    const label = e.state === "ready" ? c.green(`켜짐 (${e.model ?? "로컬 모델"}, ${e.device ?? "cpu"})`) : e.state === "starting" ? c.yellow("시작 중… (처음엔 모델 1.1GB 다운로드)") : e.state === "failed" ? c.red(`실패: ${e.error ?? ""}`) : c.dim("꺼짐 — 키워드 검색만");
+    out.push(`의미 검색: ${label}`);
+  }
   const err = s.lastRefresh?.ok === false ? s.lastRefresh.error : a.lastError;
   if (err) out.push(`오류: ${c.red(String(err))}`);
   const diags = ((a.diagnostics ?? []) as J[]).map((d) => String(d.message ?? "")).filter(Boolean);

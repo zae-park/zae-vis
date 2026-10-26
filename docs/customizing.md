@@ -25,13 +25,13 @@
 | GET | `/api/projects` · `/api/projects/:slug` | 프로젝트 요약 목록 · 프로젝트 본문 |
 | GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` |
 | GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite) |
-| GET / POST | `/api/index` | 색인 상태 · 색인 갱신 시작 (`{ force?: true }`) |
+| GET / POST | `/api/index` | 색인 상태(+ `embedding`: 로컬 임베딩 데몬 상태 off/starting/ready/failed) · 색인 갱신 시작 (`{ force?: true }`) |
 | POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
 | GET | `/api/inbox` | inbox 파일과 전사 작업 |
 | POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
 | GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
 | GET / POST | `/api/collect` | 수집 상태 · 수집 시작 (`{ sources?: [], index?: false }`) |
-| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인 |
+| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인) |
 
 GET이 아닌 요청은 `x-zaevis: 1` 헤더가 있어야 하고, 다른 사이트(Origin)나 다른 호스트 이름에서 온 요청은 거절합니다. 사용자 커넥터가 명령을 실행하기 때문에 넣은 보호 장치입니다.
 

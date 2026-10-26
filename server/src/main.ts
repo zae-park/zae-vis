@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
+import { EmbeddingDaemon } from "./embedding.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
@@ -21,6 +22,9 @@ if (!existsSync(cfg.worklogDir)) {
 }
 
 const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir] });
+// Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
+const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
+if (cfg.localEmbedding) void embedding.start().then((s) => s.state === "failed" && console.error(`[embedding] ${s.error}`));
 const queue = new TranscribeQueue();
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
@@ -50,6 +54,7 @@ const server = createApp({
         schedule: await scheduleStatus(cfg.dailyAt),
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
+        localEmbedding: cfg.localEmbedding,
       };
     },
     async update(patch) {
@@ -62,6 +67,18 @@ const server = createApp({
       return this.get();
     },
     indexOnInject: () => cfg.indexOnInject,
+  },
+  embedding: {
+    status: async () => embedding.health(),
+    set: async (enabled) => {
+      if (!enabled) {
+        await embedding.stop();
+        return false;
+      }
+      const was = embedding.current.state;
+      const s = await embedding.start();
+      return s.state === "ready" && was !== "ready";
+    },
   },
   audio: {
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),
@@ -82,6 +99,7 @@ server.listen(cfg.port, "127.0.0.1", () => {
 
 const shutdown = async () => {
   server.close();
+  await embedding.stop();
   await search.close();
   process.exit(0);
 };

@@ -25,11 +25,12 @@
   setup → 서버 → 첫 수집 → 색인 → 검색까지 돌리고, 등록한 launchd 예약은 끝에 해제한다
 - 별도 `ZAEVIS_HOME`은 launchd 라벨도 `io.github.zaepark.zaevis.daily.<폴더명>-<해시>`로 분리된다 (테스트가 실제 예약을 내리지 않도록)
 - GUI 자체는 `ZAEVIS_HOME`을 바꿔 띄워 확인: 설정이 있으면 `zaevis start` 후 API를 호출하고, 없으면 마법사 화면(서버 호출 없음)
+- 의미 검색: 서버가 `minsync serve`(Qwen3-Embedding-0.6B, Metal)를 자식으로 띄운다(`server/src/embedding.ts`). AutoRAG는 `~/.cache/minsync/serve/*/port`와 `/health`로 데몬을 찾아 채택한다.
+  설정 `localEmbedding`(기본 켬), 켜면 force 재색인. 일일 작업은 idle 300초짜리 데몬을 detached로 띄운다. 모델은 `~/.cache/minsync/models`(1.1GB)
 - whisperX: `zaevis ext install whisperx`로 uv(`UV_UNMANAGED_INSTALL` → `$ZAEVIS_HOME/ext/uv`)·whisperx 3.8.6·imageio-ffmpeg 링크 확인, 설정 API `whisperx: true`
 
 남은 일
 - Claude Code 세션엔 손쉬운 사용·화면 녹화 권한이 없어 GUI 클릭·스크린샷은 자동화하지 못했다. 마법사 버튼 클릭은 사람이 한 번 눌러 확인할 것
-- 검색은 키워드만 동작한다. 임베딩(시맨틱) 검색은 `minsync serve`가 떠 있어야 하며 아직 서버가 띄우지 않는다
 - shell-history는 `setopt EXTENDED_HISTORY`가 없는 zsh 이력에서 시각이 없어 실패한다 (안내 메시지는 나온다)
 
 ## 규칙

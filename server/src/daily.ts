@@ -6,11 +6,19 @@
 import { existsSync } from "node:fs";
 import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
+import { EmbeddingDaemon } from "./embedding.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
 
-async function refreshIndex(autoragConfig: string, worklogDir: string): Promise<string> {
+async function refreshIndex(autoragConfig: string, worklogDir: string, localEmbedding: boolean): Promise<string> {
   if (!existsSync(autoragConfig)) return "건너뜀 (AutoRAG 미설정)";
+  if (localEmbedding) {
+    // The app's server keeps a daemon while it runs; when it is closed, start one that exits after a
+    // few idle minutes so the nightly refresh still gets vectors. AutoRAG adopts whichever is running.
+    const d = new EmbeddingDaemon({ idleTimeout: 300, detached: true, log: (m) => console.log(`  ${m}`) });
+    const s = await d.start();
+    if (s.state !== "ready") console.log(`  · 임베딩 데몬 없음 — 키워드 색인만: ${s.error ?? s.state}`);
+  }
   const rag = new AutoRAGMcp({ configPath: autoragConfig, roots: [worklogDir] });
   try {
     await rag.refresh(false);
@@ -50,7 +58,7 @@ async function main(): Promise<void> {
   if (!argv.includes("--no-index")) {
     console.log(`[${ts()}] 색인 갱신`);
     try {
-      index = await refreshIndex(cfg.autoragConfig, cfg.worklogDir);
+      index = await refreshIndex(cfg.autoragConfig, cfg.worklogDir, cfg.localEmbedding);
     } catch (err) {
       index = `실패: ${(err as Error).message}`;
       process.exitCode = 1;

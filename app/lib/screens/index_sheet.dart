@@ -48,7 +48,7 @@ class _IndexSheetState extends State<IndexSheet> {
         _error = null;
       });
       _poll?.cancel();
-      if (s.refreshing) _poll = Timer(const Duration(seconds: 3), _fetch);
+      if (s.refreshing || s.embedding?.state == 'starting') _poll = Timer(const Duration(seconds: 3), _fetch);
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -79,6 +79,7 @@ class _IndexSheetState extends State<IndexSheet> {
                     const SizedBox(height: 12),
                     _row('상태', s.refreshing ? '색인 중…' : _stateLabel(s.state)),
                     _row('최신 여부', s.stale ? '새 파일이 있음 — 다시 색인 필요' : '최신'),
+                    if (s.embedding != null) _row('의미 검색', s.embedding!.label),
                     if (s.lastError != null) _row('마지막 오류', s.lastError!),
                     for (final m in s.messages.take(4))
                       Padding(

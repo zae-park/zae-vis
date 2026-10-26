@@ -72,9 +72,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _update({String? dailyAt, bool? indexOnInject}) async {
+  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding}) async {
     try {
-      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject);
+      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding);
       if (mounted) toast(context, '저장했습니다');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
@@ -149,6 +149,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('한 줄 기록이나 전사본을 넣으면 바로 검색 색인을 갱신합니다. 끄면 예약·수동 색인 때만 반영됩니다.'),
                   value: s.indexOnInject,
                   onChanged: (v) => _update(indexOnInject: v),
+                ),
+                const SizedBox(height: 16),
+                Text('검색', style: t.titleMedium),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.psychology_outlined),
+                  title: const Text('의미 검색 (로컬 임베딩)'),
+                  subtitle: const Text('이 맥에서 Qwen3-Embedding 모델을 돌려 뜻이 비슷한 기록도 찾습니다. 외부 서비스나 키는 쓰지 않습니다. '
+                      '처음 켤 때 모델(1.1GB)을 내려받고 색인을 다시 만듭니다. 끄면 키워드 검색만 합니다.'),
+                  value: s.localEmbedding,
+                  onChanged: (v) => _update(localEmbedding: v),
                 ),
                 const SizedBox(height: 16),
                 Text('확장', style: t.titleMedium),

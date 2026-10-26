@@ -16,6 +16,7 @@ const calls: string[] = [];
 let added: Array<Record<string, unknown>> = [];
 const queued: string[] = [];
 let indexOnInject = false;
+let embeddingOn = false;
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "zv-in-"));
@@ -57,6 +58,15 @@ before(async () => {
       indexOnInject: () => indexOnInject,
     },
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), jobs: () => [] },
+    embedding: {
+      status: async () => ({ enabled: embeddingOn, state: embeddingOn ? "ready" : "off", available: true }),
+      set: async (on) => {
+        calls.push(`embedding:${on}`);
+        const became = on && !embeddingOn;
+        embeddingOn = on;
+        return became;
+      },
+    },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -142,4 +152,19 @@ test("sources: add custom, toggle, remove; collect runs in background then index
   await tick();
   await tick();
   assert.deepEqual(calls, ["collect:all", "refresh", "daily:true:완료"]);
+});
+
+test("embedding: /index reports the daemon; turning it on re-indexes from scratch once", async () => {
+  assert.equal((await call("GET", "/api/index")).body.embedding.state, "off");
+  calls.length = 0;
+  assert.equal((await call("PUT", "/api/settings", { localEmbedding: true })).status, 200);
+  await tick();
+  assert.deepEqual(calls, ["embedding:true", "refresh"]);
+  assert.equal((await call("GET", "/api/index")).body.embedding.state, "ready");
+  calls.length = 0;
+  await call("PUT", "/api/settings", { localEmbedding: true }); // already on: no second rebuild
+  await tick();
+  assert.deepEqual(calls, ["embedding:true"]);
+  await call("PUT", "/api/settings", { localEmbedding: false });
+  assert.equal((await call("GET", "/api/index")).body.embedding.state, "off");
 });

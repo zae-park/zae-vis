@@ -27,6 +27,7 @@ export function writeJson(file: string, value: unknown): void {
 export type AppConfig = {
   dailyAt: string;        // "18:30" — daily collect + index (launchd)
   indexOnInject: boolean; // re-index right after a log line / transcript is added
+  localEmbedding: boolean; // keep a local `minsync serve` embedding daemon for semantic search (default on)
   worklogDir: string;
   reposRoot: string;
   autoragConfig: string;
@@ -42,6 +43,7 @@ export function loadConfig(): AppConfig {
   return {
     dailyAt: /^\d{2}:\d{2}$/.test(String(fc.dailyAt)) ? String(fc.dailyAt) : "18:30",
     indexOnInject: fc.indexOnInject === true,
+    localEmbedding: fc.localEmbedding !== false,
     worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
@@ -119,7 +121,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }

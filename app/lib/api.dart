@@ -184,7 +184,11 @@ class WorklogApi {
   // ── settings ─────────────────────────────────────────────────────────────
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
-  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject}) async => AppSettings.fromJson(
-        await _send('PUT', '/settings', {if (dailyAt != null) 'dailyAt': dailyAt, if (indexOnInject != null) 'indexOnInject': indexOnInject}),
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding}) async => AppSettings.fromJson(
+        await _send('PUT', '/settings', {
+          if (dailyAt != null) 'dailyAt': dailyAt,
+          if (indexOnInject != null) 'indexOnInject': indexOnInject,
+          if (localEmbedding != null) 'localEmbedding': localEmbedding,
+        }),
       );
 }

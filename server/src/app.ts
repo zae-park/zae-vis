@@ -26,8 +26,14 @@ export type AppOptions = {
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
-    update(patch: { dailyAt?: string; indexOnInject?: boolean }): Promise<Record<string, unknown>>;
+    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
+  };
+  /** Local embedding daemon (semantic search); absent when minsync is not managed here. */
+  embedding?: {
+    status(): Promise<Record<string, unknown>>;
+    /** Returns true when the daemon just became ready (caller re-indexes so vectors get built). */
+    set(enabled: boolean): Promise<boolean>;
   };
   audio?: {
     dir(): string;
@@ -192,7 +198,12 @@ export function createApp(opts: AppOptions): Server {
         }
 
         case "GET /index":
-          return send(res, 200, { refreshing: refreshing !== null, lastRefresh, autorag: await search.status() });
+          return send(res, 200, {
+            refreshing: refreshing !== null,
+            lastRefresh,
+            autorag: await search.status(),
+            ...(opts.embedding ? { embedding: await opts.embedding.status() } : {}),
+          });
 
         case "POST /index": {
           const body = await readJson(req);
@@ -335,11 +346,17 @@ export function createApp(opts: AppOptions): Server {
         case "PUT /settings": {
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
-          const patch: { dailyAt?: string; indexOnInject?: boolean } = {};
+          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean } = {};
           if (typeof b.dailyAt === "string") patch.dailyAt = b.dailyAt;
           if (typeof b.indexOnInject === "boolean") patch.indexOnInject = b.indexOnInject;
+          if (typeof b.localEmbedding === "boolean") patch.localEmbedding = b.localEmbedding;
           try {
-            return send(res, 200, await opts.settings.update(patch));
+            const out = await opts.settings.update(patch);
+            if (patch.localEmbedding !== undefined && opts.embedding) {
+              // Existing chunks have no vectors until a full re-index, so rebuild once the daemon is up.
+              if (await opts.embedding.set(patch.localEmbedding)) startRefresh(true);
+            }
+            return send(res, 200, out);
           } catch (err) {
             throw new HttpError(400, (err as Error).message);
           }

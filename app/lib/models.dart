@@ -120,6 +120,7 @@ class IndexStatus {
     required this.stale,
     required this.messages,
     this.lastError,
+    this.embedding,
   });
 
   factory IndexStatus.fromJson(Json j) {
@@ -134,6 +135,7 @@ class IndexStatus {
       stale: a['stale'] == true,
       messages: diags.whereType<Json>().map((d) => _str(d['message'])).where((m) => m.isNotEmpty).toList(),
       lastError: lastError,
+      embedding: j['embedding'] is Json ? EmbeddingStatus.fromJson(j['embedding'] as Json) : null,
     );
   }
 
@@ -142,6 +144,37 @@ class IndexStatus {
   final bool stale;
   final List<String> messages;
   final String? lastError;
+
+  /// Local embedding daemon for semantic search; null when the server does not manage one.
+  final EmbeddingStatus? embedding;
+}
+
+/// `minsync serve` (local Qwen3 embedding model) as reported by GET /index.
+class EmbeddingStatus {
+  const EmbeddingStatus({required this.enabled, required this.state, required this.available, this.model, this.device, this.error});
+
+  factory EmbeddingStatus.fromJson(Json j) => EmbeddingStatus(
+        enabled: j['enabled'] == true,
+        state: _str(j['state']),
+        available: j['available'] != false,
+        model: _strOrNull(j['model']),
+        device: _strOrNull(j['device']),
+        error: _strOrNull(j['error']),
+      );
+
+  final bool enabled;
+  final String state; // off | starting | ready | failed
+  final bool available;
+  final String? model;
+  final String? device;
+  final String? error;
+
+  String get label => switch (state) {
+        'ready' => '켜짐 — ${model ?? '로컬 모델'} (${device ?? 'cpu'})',
+        'starting' => '시작 중… 처음에는 모델(1.1GB)을 내려받습니다',
+        'failed' => '실패: ${error ?? ''}',
+        _ => available ? '꺼짐 — 키워드 검색만' : '사용 불가 (minsync 없음)',
+      };
 }
 
 bool? _boolOrNull(Object? v) => v is bool ? v : null;
@@ -286,6 +319,7 @@ class AppSettings {
     required this.scheduleInstalled,
     required this.scheduleLoaded,
     required this.whisperx,
+    this.localEmbedding = true,
     this.scheduleHint,
     this.lastDaily,
   });
@@ -302,12 +336,14 @@ class AppSettings {
       scheduleLoaded: s['loaded'] == true,
       scheduleHint: _strOrNull(s['hint']),
       whisperx: j['whisperx'] == true,
+      localEmbedding: j['localEmbedding'] != false,
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
     );
   }
 
   final String dailyAt;
   final bool indexOnInject;
+  final bool localEmbedding;
   final String worklogDir;
   final bool scheduleSupported;
   final bool scheduleInstalled;

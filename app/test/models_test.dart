@@ -48,6 +48,18 @@ void main() {
     });
     expect(s.lastError, 'boom');
     expect(s.messages, ['embedding unavailable']);
+    expect(s.embedding, isNull);
+
+    final e = IndexStatus.fromJson({
+      'refreshing': false,
+      'autorag': {'state': 'success'},
+      'embedding': {'enabled': true, 'state': 'ready', 'available': true, 'model': 'Qwen/Qwen3-Embedding-0.6B', 'device': 'metal'},
+    }).embedding!;
+    expect(e.state, 'ready');
+    expect(e.label, contains('Qwen/Qwen3-Embedding-0.6B'));
+    expect(EmbeddingStatus.fromJson({'enabled': false, 'state': 'off'}).label, contains('키워드'));
+    expect(AppSettings.fromJson({'dailyAt': '18:30'}).localEmbedding, isTrue);
+    expect(AppSettings.fromJson({'dailyAt': '18:30', 'localEmbedding': false}).localEmbedding, isFalse);
     expect(s.stale, isTrue);
   });
 
