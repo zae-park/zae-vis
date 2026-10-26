@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zaevis/models.dart';
 import 'package:zaevis/widgets/markdown_view.dart';
@@ -97,10 +98,24 @@ void main() {
     expect(blocks[5].checked, isTrue);
   });
 
-  test('parseInline finds bold, code, links and tags', () {
-    final spans = parseInline('**굵게** `x` [[roas-multihorizon]] #done 끝');
+  test('parseInline finds bold, italic, code, math, links and tags', () {
+    final spans = parseInline('**굵게** *기울임* `x` \$E = mc^2\$ [[roas-multihorizon]] #done 끝');
     expect(spans.where((s) => s.kind != InlineKind.text).map((s) => s.kind).toList(),
-        [InlineKind.bold, InlineKind.code, InlineKind.link, InlineKind.tag]);
+        [InlineKind.bold, InlineKind.italic, InlineKind.code, InlineKind.math, InlineKind.link, InlineKind.tag]);
     expect(spans.firstWhere((s) => s.kind == InlineKind.link).text, 'roas-multihorizon');
+    expect(spans.firstWhere((s) => s.kind == InlineKind.math).text, 'E = mc^2');
+    // a lone asterisk inside a word is not italic, and a price is not math
+    expect(parseInline('a*b and 5*3').every((s) => s.kind == InlineKind.text), isTrue);
+    expect(parseInline(r'$5 and $7 later').any((s) => s.kind == InlineKind.math), isFalse);
+    expect(parseInline(r'넓이 $\pi r^2$ 로').firstWhere((s) => s.kind == InlineKind.math).text, r'\pi r^2');
+  });
+
+  test('highlightSpans marks query terms case-insensitively', () {
+    const mark = TextStyle(fontWeight: FontWeight.w700);
+    final spans = highlightSpans('DMG 빌드와 dmg 서명', ['dmg'], mark);
+    expect(spans.map((s) => s.text).toList(), ['DMG', ' 빌드와 ', 'dmg', ' 서명']);
+    expect(spans[0].style?.fontWeight, FontWeight.w700);
+    expect(spans[1].style?.fontWeight, isNull);
+    expect(highlightSpans('그대로', const [], mark).single.text, '그대로');
   });
 }

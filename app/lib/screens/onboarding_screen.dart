@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../backend/backend.dart';
+import '../theme.dart';
 
 /// First run of the packaged app: pick folders and sources, then setup + start + first collect.
 class OnboardingScreen extends StatefulWidget {
@@ -159,7 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: ListView.builder(
                   controller: _scroll,
                   itemCount: _log.length,
-                  itemBuilder: (_, i) => Text(_log[i], style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                  itemBuilder: (_, i) => Text(_log[i], style: ZaevisTheme.mono.copyWith(fontSize: 12)),
                 ),
               ),
             ],

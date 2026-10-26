@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 /// A small Markdown renderer for worklog files: headings, bullet / numbered / task lists,
-/// fenced code, quotes, and inline **bold**, `code`, [[links]] and #tags.
+/// fenced code, quotes, and inline **bold**, *italic*, `code`, $math$, [[links]] and #tags.
 /// It intentionally avoids a third-party package; worklog files use a narrow subset.
 class MarkdownView extends StatelessWidget {
   const MarkdownView(this.markdown, {super.key, this.onLink});
@@ -90,7 +92,7 @@ List<MdBlock> parseBlocks(String md) {
   return out;
 }
 
-enum InlineKind { text, bold, code, link, tag }
+enum InlineKind { text, bold, italic, code, math, link, tag }
 
 class MdInline {
   const MdInline(this.kind, this.text);
@@ -98,7 +100,12 @@ class MdInline {
   final String text;
 }
 
-final _inline = RegExp(r'\*\*(.+?)\*\*|`([^`]+)`|\[\[([^\]|]+)(?:\|[^\]]*)?\]\]|(?<=^|\s)#([\p{L}\p{N}_-]+)', unicode: true);
+// **bold** · *italic* · `code` · $math$ · [[link]] · #tag
+final _inline = RegExp(
+  // math needs no space right inside the dollars, so "$5 and $7" stays text
+  r'\*\*(.+?)\*\*|(?<![\w*])\*([^*\n]+?)\*(?![\w*])|`([^`\n]+)`|\$(?!\s)([^$\n]+?)(?<!\s)\$|\[\[([^\]|]+)(?:\|[^\]]*)?\]\]|(?<=^|\s)#([\p{L}\p{N}_-]+)',
+  unicode: true,
+);
 
 List<MdInline> parseInline(String text) {
   final out = <MdInline>[];
@@ -108,11 +115,15 @@ List<MdInline> parseInline(String text) {
     if (m.group(1) != null) {
       out.add(MdInline(InlineKind.bold, m.group(1)!));
     } else if (m.group(2) != null) {
-      out.add(MdInline(InlineKind.code, m.group(2)!));
+      out.add(MdInline(InlineKind.italic, m.group(2)!));
     } else if (m.group(3) != null) {
-      out.add(MdInline(InlineKind.link, m.group(3)!.trim()));
+      out.add(MdInline(InlineKind.code, m.group(3)!));
+    } else if (m.group(4) != null) {
+      out.add(MdInline(InlineKind.math, m.group(4)!.trim()));
+    } else if (m.group(5) != null) {
+      out.add(MdInline(InlineKind.link, m.group(5)!.trim()));
     } else {
-      out.add(MdInline(InlineKind.tag, m.group(4)!));
+      out.add(MdInline(InlineKind.tag, m.group(6)!));
     }
     last = m.end;
   }
@@ -120,17 +131,54 @@ List<MdInline> parseInline(String text) {
   return out;
 }
 
-TextSpan inlineSpan(BuildContext context, String text, {TextStyle? base, void Function(String)? onLink}) {
+/// Splits [text] into plain / highlighted spans wherever one of [terms] occurs (case-insensitive).
+List<TextSpan> highlightSpans(String text, List<String> terms, TextStyle mark, [TextStyle? style]) {
+  final ts = terms.where((x) => x.isNotEmpty).toList()..sort((a, b) => b.length.compareTo(a.length));
+  if (ts.isEmpty) return [TextSpan(text: text, style: style)];
+  final lower = text.toLowerCase();
+  final out = <TextSpan>[];
+  var i = 0;
+  while (i < text.length) {
+    var hit = 0;
+    for (final term in ts) {
+      if (lower.startsWith(term, i)) {
+        hit = term.length;
+        break;
+      }
+    }
+    if (hit > 0) {
+      out.add(TextSpan(text: text.substring(i, i + hit), style: (style ?? const TextStyle()).merge(mark)));
+      i += hit;
+    } else {
+      var j = i + 1;
+      while (j < text.length && !ts.any((term) => lower.startsWith(term, j))) {
+        j++;
+      }
+      out.add(TextSpan(text: text.substring(i, j), style: style));
+      i = j;
+    }
+  }
+  return out;
+}
+
+/// One line of worklog text as rich spans: `code` in a monospace chip, $x^2$ in a serif italic
+/// formula style, **bold**, *italic*, [[links]], #tags — and, when [highlight] is given, the query
+/// terms marked inside plain and bold runs.
+TextSpan inlineSpan(BuildContext context, String text, {TextStyle? base, void Function(String)? onLink, List<String> highlight = const []}) {
   final scheme = Theme.of(context).colorScheme;
-  final mono = TextStyle(fontFamily: 'monospace', backgroundColor: scheme.surfaceContainerHighest);
+  final mono = ZaevisTheme.mono.copyWith(backgroundColor: scheme.surfaceContainerHigh, color: scheme.onSurface, fontSize: (base?.fontSize ?? 14) - 1);
+  final math = ZaevisTheme.math.copyWith(color: scheme.onSurface, fontSize: (base?.fontSize ?? 14) + 1);
+  final mark = TextStyle(fontWeight: FontWeight.w700, color: scheme.primary);
   return TextSpan(
     style: base,
     children: [
       for (final s in parseInline(text))
         switch (s.kind) {
-          InlineKind.text => TextSpan(text: s.text),
-          InlineKind.bold => TextSpan(text: s.text, style: const TextStyle(fontWeight: FontWeight.w600)),
-          InlineKind.code => TextSpan(text: s.text, style: mono),
+          InlineKind.text => TextSpan(children: highlightSpans(s.text, highlight, mark)),
+          InlineKind.bold => TextSpan(children: highlightSpans(s.text, highlight, mark, const TextStyle(fontWeight: FontWeight.w600))),
+          InlineKind.italic => TextSpan(text: s.text, style: const TextStyle(fontStyle: FontStyle.italic)),
+          InlineKind.code => TextSpan(text: ' ${s.text} ', style: mono),
+          InlineKind.math => TextSpan(text: s.text, style: math),
           InlineKind.tag => TextSpan(text: '#${s.text}', style: TextStyle(color: scheme.tertiary)),
           InlineKind.link => WidgetSpan(
               alignment: PlaceholderAlignment.middle,
@@ -174,7 +222,7 @@ class _BlockWidget extends StatelessWidget {
           ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Text(block.text, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+            child: Text(block.text, style: ZaevisTheme.mono.copyWith(color: scheme.onSurface)),
           ),
         );
       case BlockKind.quote:

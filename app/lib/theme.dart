@@ -9,6 +9,13 @@ class ZaevisTheme {
   static const _cardLight = Color(0xFFFFFFFF);
   static const _cardDark = Color(0xFF1C1D1F);
 
+  /// Code: a real monospace on each platform ('monospace' alone is not a font on macOS), Korean
+  /// inside code falls back to Pretendard so it does not switch to a random system face.
+  static const mono = TextStyle(fontFamily: 'Menlo', fontFamilyFallback: ['SF Mono', 'Consolas', 'DejaVu Sans Mono', 'monospace', 'Pretendard'], fontSize: 13, height: 1.45);
+
+  /// Formulas (`$…$`): serif italic, the conventional look for math without a LaTeX engine.
+  static const math = TextStyle(fontFamily: 'Times New Roman', fontFamilyFallback: ['Georgia', 'serif', 'Pretendard'], fontStyle: FontStyle.italic, fontSize: 15, height: 1.4);
+
   static ThemeData of(Brightness b) {
     final dark = b == Brightness.dark;
     final base = ColorScheme.fromSeed(seedColor: seed, brightness: b);

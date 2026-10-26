@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/markdown_view.dart';
 import 'file_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -137,11 +139,12 @@ class _HitCard extends StatelessWidget {
               ]),
               if (hit.snippet.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                _Highlighted(text: hit.snippet, terms: ctx?.matched ?? const [], style: t.bodyMedium, highlight: scheme.primary),
+                // minLines matters: without it SelectableText reserves the full maxLines height
+                SelectableText.rich(inlineSpan(context, hit.snippet, base: t.bodyMedium, highlight: ctx?.matched ?? const []), minLines: 1, maxLines: 8),
               ],
               if (hit.path.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(hit.path, style: t.bodySmall?.copyWith(color: scheme.outline, fontFamily: 'monospace')),
+                Text(hit.path, style: ZaevisTheme.mono.copyWith(fontSize: 11.5, color: scheme.outline)),
               ],
             ]),
           ),
@@ -151,41 +154,3 @@ class _HitCard extends StatelessWidget {
   }
 }
 
-/// The passage with the matched query terms in bold.
-class _Highlighted extends StatelessWidget {
-  const _Highlighted({required this.text, required this.terms, required this.highlight, this.style});
-  final String text;
-  final List<String> terms;
-  final Color highlight;
-  final TextStyle? style;
-
-  @override
-  Widget build(BuildContext context) {
-    final spans = <TextSpan>[];
-    final lower = text.toLowerCase();
-    final ts = terms.where((x) => x.isNotEmpty).toList()..sort((a, b) => b.length.compareTo(a.length));
-    var i = 0;
-    while (i < text.length) {
-      var hitLen = 0;
-      for (final term in ts) {
-        if (lower.startsWith(term, i)) {
-          hitLen = term.length;
-          break;
-        }
-      }
-      if (hitLen > 0) {
-        spans.add(TextSpan(text: text.substring(i, i + hitLen), style: TextStyle(fontWeight: FontWeight.w700, color: highlight)));
-        i += hitLen;
-      } else {
-        var j = i + 1;
-        while (j < text.length && !ts.any((term) => lower.startsWith(term, j))) {
-          j++;
-        }
-        spans.add(TextSpan(text: text.substring(i, j)));
-        i = j;
-      }
-    }
-    // minLines matters: without it SelectableText reserves the full maxLines height
-    return SelectableText.rich(TextSpan(style: style, children: spans), minLines: 1, maxLines: 8);
-  }
-}

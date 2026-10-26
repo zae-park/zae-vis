@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../widgets/common.dart';
+import '../widgets/markdown_view.dart';
 
 const _tags = ['done', 'decision', 'blocked', 'learned'];
 
@@ -133,7 +134,7 @@ class _EntryTile extends StatelessWidget {
                 ),
             ]),
             const SizedBox(height: 4),
-            SelectableText(entry.text, style: t.bodyMedium),
+            SelectableText.rich(inlineSpan(context, entry.text, base: t.bodyMedium, onLink: onOpenProject), minLines: 1, maxLines: 6),
             if (entry.source != null)
               Padding(
                 padding: const EdgeInsets.only(top: 2),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../backend/backend.dart';
 import '../models.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
 
@@ -59,7 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: ValueListenableBuilder<List<String>>(
             valueListenable: lines,
             builder: (_, l, __) => ListView(reverse: true, children: [
-              for (final line in l.reversed) Text(line, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+              for (final line in l.reversed) Text(line, style: ZaevisTheme.mono.copyWith(fontSize: 12)),
             ]),
           ),
         ),
@@ -215,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
                 const SizedBox(height: 16),
                 Text('worklog 폴더', style: t.titleMedium),
-                SelectableText(s.worklogDir, style: t.bodyMedium?.copyWith(fontFamily: 'monospace')),
+                SelectableText(s.worklogDir, style: ZaevisTheme.mono),
               ]);
             },
           ),
@@ -462,7 +463,7 @@ class _DigestSectionState extends State<_DigestSection> {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
               child: SelectableText(s.last!.report.length > 1200 ? '…${s.last!.report.substring(s.last!.report.length - 1200)}' : s.last!.report,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12), minLines: 1, maxLines: 14),
+                  style: ZaevisTheme.mono.copyWith(fontSize: 12), minLines: 1, maxLines: 14),
             ),
           ],
         ]);

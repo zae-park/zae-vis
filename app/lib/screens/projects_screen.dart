@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/markdown_view.dart';
 
@@ -62,12 +63,11 @@ class _ProjectCard extends StatelessWidget {
             ]),
             if (project.currentState.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(project.currentState, style: t.bodyMedium, maxLines: 3, overflow: TextOverflow.ellipsis),
+              Text.rich(inlineSpan(context, project.currentState, base: t.bodyMedium), maxLines: 3, overflow: TextOverflow.ellipsis),
             ],
             if (project.repos.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(project.repos.join(' · '),
-                  style: t.bodySmall?.copyWith(color: scheme.outline, fontFamily: 'monospace')),
+              Text(project.repos.join(' · '), style: ZaevisTheme.mono.copyWith(fontSize: 11.5, color: scheme.outline)),
             ],
           ]),
         ),
