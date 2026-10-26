@@ -21,3 +21,13 @@ app/**/xcuserdata/
 # packaging
 /build/
 /dist/
+
+# flutter create가 만드는 플랫폼 폴더·템플릿 파일 (app/tool/setup_platforms.sh로 재생성)
+app/macos/
+app/web/
+app/windows/
+app/linux/
+app/.metadata
+app/README.md
+app/.gitignore
+app/*.iml
