@@ -30,6 +30,10 @@ printf '[user]\n\tname = smoke\n\temail = smoke@example.com\n' > "$FAKE_HOME/.gi
 git clone -q "$ROOT" "$FAKE_HOME/zaevis"
 [[ -d "$HOME/.claude" ]] && ln -s "$HOME/.claude" "$FAKE_HOME/.claude"
 [[ -f "$HOME/.zsh_history" ]] && cp "$HOME/.zsh_history" "$FAKE_HOME/.zsh_history"
+# reuse the embedding model already on this Mac (1.1GB) instead of downloading it into the fake home
+if [[ -d "$HOME/.cache/minsync/models" ]]; then
+  mkdir -p "$FAKE_HOME/.cache/minsync" && ln -s "$HOME/.cache/minsync/models" "$FAKE_HOME/.cache/minsync/models"
+fi
 
 echo "1) setup (마법사가 보내는 인자 그대로)"
 (cd "$FAKE_HOME" && zv setup --yes --skip-refresh --worklog "$FAKE_HOME/worklog" --repos "$FAKE_HOME" --daily-at 18:30 | grep -E '^[0-9]\)|●')
