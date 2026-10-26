@@ -30,7 +30,7 @@ class _AddLogDialog extends StatefulWidget {
 class _AddLogDialogState extends State<_AddLogDialog> {
   final _text = TextEditingController();
   final _project = TextEditingController();
-  String? _tag = 'done';
+  String? _tag; // optional: a plain line is fine; tags only help filtering and the monthly summary
   bool _saving = false;
   String? _error;
 

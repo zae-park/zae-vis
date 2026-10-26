@@ -21,7 +21,7 @@ class SetupParams {
         'setup', '--yes', '--skip-refresh',
         '--worklog', worklogDir,
         '--repos', reposRoot,
-        '--email', email,
+        if (email.isEmpty) '--any-author' else ...['--email', email],
         '--daily-at', dailyAt,
         for (final s in disabledSources) ...['--disable', s],
       ];

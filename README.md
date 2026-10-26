@@ -101,7 +101,7 @@ zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지
 
 | 이름 | 수집 내용 | 설정 |
 |---|---|---|
-| `git` | 저장소 상위 폴더 아래 모든 저장소의 내 커밋 | 폴더, 작성자 이메일, 탐색 깊이 |
+| `git` | 저장소 상위 폴더 아래 모든 저장소의 커밋 (이메일을 비우면 모든 작성자, 작성자 이름 표시) | 폴더, 작성자 이메일, 탐색 깊이 |
 | `claude-code` | `~/.claude/projects` 세션 기록: 요청, 수정한 파일, 실행한 명령, 마지막 응답 | 기록 폴더 |
 | `shell-history` | zsh 명령 이력 (`setopt EXTENDED_HISTORY` 필요) | 히스토리 파일 |
 | `transcripts` | 전사 서비스 내보내기 폴더에서 가져오기 + `inbox/audio` 녹음을 whisperX로 전사 | 가져올 폴더, 언어, 모델 |

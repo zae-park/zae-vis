@@ -20,8 +20,9 @@ test("redact masks common secrets but keeps normal text", () => {
 });
 
 test("parseGitLog reads subject and shortstat", () => {
-  const out = "\x1eabc1234567\x1f2026-10-21T10:15:00+09:00\x1ffeat: 채점 분리\n 3 files changed, 40 insertions(+), 2 deletions(-)\n\x1edef9876543\x1f2026-10-21T11:00:00+09:00\x1fdocs\n";
+  const out = "\x1eabc1234567\x1f2026-10-21T10:15:00+09:00\x1f박재\x1ffeat: 채점 분리\n 3 files changed, 40 insertions(+), 2 deletions(-)\n\x1edef9876543\x1f2026-10-21T11:00:00+09:00\x1fbot\x1fdocs\n";
   const c = parseGitLog("repo", out);
+  assert.equal(c[0].author, "박재");
   assert.equal(c.length, 2);
   assert.deepEqual([c[0].files, c[0].ins, c[0].del, c[1].files], [3, 40, 2, 0]);
 });

@@ -46,13 +46,13 @@ export async function findRepos(root: string, depth: number): Promise<string[]> 
   return out.sort();
 }
 
-type Commit = { repo: string; hash: string; date: Date; subject: string; files: number; ins: number; del: number };
+type Commit = { repo: string; hash: string; date: Date; author: string; subject: string; files: number; ins: number; del: number };
 
 export function parseGitLog(repo: string, out: string): Commit[] {
   const commits: Commit[] = [];
   for (const chunk of out.split("\x1e").slice(1)) {
     const [head, ...rest] = chunk.split("\n");
-    const [hash, iso, subject] = head.split("\x1f");
+    const [hash, iso, author, subject] = head.split("\x1f");
     if (!hash || !iso) continue;
     const stat = rest.join("\n");
     const num = (re: RegExp) => Number(re.exec(stat)?.[1] ?? 0);
@@ -60,6 +60,7 @@ export function parseGitLog(repo: string, out: string): Commit[] {
       repo,
       hash,
       date: new Date(iso),
+      author: author ?? "",
       subject: subject ?? "",
       files: num(/(\d+) files? changed/),
       ins: num(/(\d+) insertions?/),
@@ -72,22 +73,22 @@ export function parseGitLog(repo: string, out: string): Commit[] {
 export const gitSource: Source = {
   name: "git",
   title: "git 커밋",
-  description: "저장소 상위 폴더 아래 모든 git 저장소에서 내 커밋을 모읍니다.",
+  description: "저장소 상위 폴더 아래 모든 git 저장소의 커밋을 모읍니다 (이메일을 비우면 모든 작성자).",
   options: [
     { key: "reposRoot", label: "저장소 상위 폴더", kind: "path" },
-    { key: "authorEmail", label: "작성자 이메일 (쉼표로 여러 개)", kind: "text" },
+    { key: "authorEmail", label: "작성자 이메일 (쉼표로 여러 개, 비우면 모든 작성자)", kind: "text" },
     { key: "depth", label: "탐색 깊이", kind: "number" },
   ],
   async collect({ from, to, settings, log }) {
     const root = expandHome(String(settings.reposRoot ?? "~"));
+    // No e-mail = every author: the log is for everything the user can see, not only their own work.
     const authors = String(settings.authorEmail ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (!authors.length) throw new Error("작성자 이메일이 설정되지 않았습니다.");
     const git = gitBinary();
     if (!git) throw new Error("git이 없습니다 (Xcode 명령줄 도구: 터미널에서 xcode-select --install).");
     const repos = await findRepos(root, Number(settings.depth ?? 3));
     const commits: Commit[] = [];
     for (const repo of repos) {
-      const args = ["-C", repo, "log", "--all", "--no-merges", `--since=${from.toISOString()}`, `--until=${to.toISOString()}`, "--date=iso-strict", "--pretty=format:%x1e%H%x1f%ad%x1f%s", "--shortstat"];
+      const args = ["-C", repo, "log", "--all", "--no-merges", `--since=${from.toISOString()}`, `--until=${to.toISOString()}`, "--date=iso-strict", "--pretty=format:%x1e%H%x1f%ad%x1f%an%x1f%s", "--shortstat"];
       for (const a of authors) args.push(`--author=${a}`);
       try {
         const { stdout } = await run(git, args, { maxBuffer: 64 * 1024 * 1024 });
@@ -101,7 +102,8 @@ export const gitSource: Source = {
     for (const c of commits.sort((a, b) => a.date.getTime() - b.date.getTime())) {
       const day = dayKey(c.date);
       const stat = c.files ? ` (${c.files} files, +${c.ins} −${c.del})` : "";
-      addTo((byDay[day] ??= {}), c.repo, `- ${hhmm(c.date)} \`${c.hash.slice(0, 7)}\` ${redact(c.subject)}${stat}`);
+      const who = authors.length ? "" : ` — ${redact(c.author)}`;
+      addTo((byDay[day] ??= {}), c.repo, `- ${hhmm(c.date)} \`${c.hash.slice(0, 7)}\` ${redact(c.subject)}${stat}${who}`);
     }
     const days: Record<string, string> = {};
     for (const [day, repos2] of Object.entries(byDay)) {

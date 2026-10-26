@@ -122,7 +122,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             TextField(
               controller: _email,
               enabled: !_running,
-              decoration: const InputDecoration(labelText: 'git 커밋 이메일', helperText: '여러 개면 쉼표로 구분'),
+              decoration: const InputDecoration(labelText: 'git 커밋 이메일', helperText: '여러 개면 쉼표로 구분. 비우면 저장소의 모든 작성자 커밋을 모읍니다'),
             ),
             const SizedBox(height: 20),
             Text('모을 데이터소스', style: t.titleMedium),

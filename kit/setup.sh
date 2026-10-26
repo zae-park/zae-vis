@@ -2,7 +2,7 @@
 # zaevis setup — creates your personal worklog folder and wires Claude + AutoRAG to it.
 # Safe to re-run: existing files are never overwritten.
 #
-#   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR] [--daily-at HH:MM] [--disable SOURCE]...
+#   kit/setup.sh [--worklog DIR] [--repos DIR] [--email ADDR | --any-author] [--daily-at HH:MM] [--disable SOURCE]...
 #                [--claude-md] [--no-autorag] [--skip-refresh] [--no-schedule] [--yes]
 #
 # The zaevis app runs this from its first-run wizard with --yes and explicit values.
@@ -20,6 +20,7 @@ ASSUME_YES=0
 SKIP_REFRESH=0
 WITH_SCHEDULE=1
 WITH_CLAUDE_MD=0
+ANY_AUTHOR=0   # git: collect every author, not only AUTHOR_EMAIL
 DAILY_AT="18:30"
 DISABLED=()
 
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
     --worklog) WORKLOG_DIR="$2"; shift 2 ;;
     --repos) REPOS_ROOT="$2"; shift 2 ;;
     --email) AUTHOR_EMAIL="$2"; shift 2 ;;
+    --any-author) ANY_AUTHOR=1; shift ;;
     --no-autorag) WITH_AUTORAG=0; shift ;;
     --skip-refresh) SKIP_REFRESH=1; shift ;;
     --no-schedule) WITH_SCHEDULE=0; shift ;;
@@ -52,7 +54,7 @@ expand() { local p="$1"; [[ "$p" == "~/"* ]] && p="$HOME/${p:2}"; printf '%s' "$
 
 ask WORKLOG_DIR "worklog 폴더 위치" "$HOME/worklog"
 ask REPOS_ROOT "코드 저장소들이 있는 상위 폴더" "$HOME"
-ask AUTHOR_EMAIL "git 작성자 이메일" "$(git config --global user.email 2>/dev/null || echo you@example.com)"
+[[ $ANY_AUTHOR -eq 1 ]] || ask AUTHOR_EMAIL "git 작성자 이메일 (비우면 모든 작성자)" "$(git config --global user.email 2>/dev/null || echo "")"
 WORKLOG_DIR="$(expand "$WORKLOG_DIR")"
 REPOS_ROOT="$(expand "$REPOS_ROOT")"
 
