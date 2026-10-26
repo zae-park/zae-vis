@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bestPassage, classifyPath, describeHit, gitAuthor, queryTerms, sectionAbove } from "../src/context.ts";
+import { bestPassage, classifyPath, describeHit, gitAuthor, queryTerms, sectionAbove, stemKo } from "../src/context.ts";
 
 test("classifyPath: sources, log, projects, summaries, inbox", () => {
   assert.deepEqual(classifyPath("sources/git/2026-10-26.md"), { kind: "git", sourceLabel: "git 커밋", date: "2026-10-26" });
@@ -15,10 +15,16 @@ test("classifyPath: sources, log, projects, summaries, inbox", () => {
   assert.equal(classifyPath("/Users/me/worklog/log/2026-10.md").kind, "log");
 });
 
-test("queryTerms: words plus Korean bigrams", () => {
-  const t = queryTerms("DMG 설치파일 서명");
-  assert.ok(t.includes("dmg") && t.includes("설치파일") && t.includes("설치") && t.includes("치파") && t.includes("서명"));
-  assert.ok(!t.includes("서"), "single characters are not terms");
+test("queryTerms: particles stripped, content words kept, bigrams only for long words", () => {
+  assert.equal(stemKo("음성에서"), "음성");
+  assert.equal(stemKo("자동으로"), "자동");
+  assert.equal(stemKo("모으는"), "모으");
+  assert.equal(stemKo("서명"), "서명", "nothing stripped when the stem would be shorter than 2");
+  assert.equal(stemKo("cmake"), "cmake");
+  assert.deepEqual(queryTerms("음성에서 화자를 나누는 작업"), ["음성", "화자", "나누", "작업"]);
+  const long = queryTerms("DMG 설치파일 서명");
+  assert.ok(long.includes("dmg") && long.includes("설치파일") && long.includes("설치") && long.includes("치파") && long.includes("서명"));
+  assert.ok(!long.includes("서"), "single characters are not terms");
 });
 
 test("bestPassage: picks the matching line and grows around it; skips headers", () => {

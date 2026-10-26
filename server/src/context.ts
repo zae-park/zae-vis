@@ -49,13 +49,31 @@ export function classifyPath(path: string): { kind: HitKind; sourceLabel: string
   return { kind: "other", sourceLabel: "worklog", date };
 }
 
-/** Query → terms worth matching: words of 2+ chars, plus Korean bigrams so particles don't block a match. */
+// Korean particles and endings stripped from the end of a query word, longest first, so that
+// "음성에서" → "음성", "모으는" → "모으", "자동으로" → "자동". Not a morphological analyser — just enough
+// that highlighting and passage picking follow content words rather than grammar.
+const KO_SUFFIXES = [
+  "에서는", "으로는", "에게서", "한테서", "으로써", "으로서",
+  "에서", "으로", "에게", "한테", "까지", "부터", "처럼", "보다", "마다", "조차", "라도", "이나", "에는", "에도", "로는", "로도", "와는", "과는", "하는", "되는", "하고", "이다", "였다", "했다", "하기", "되기",
+  "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "로", "만", "들", "요", "며", "고", "면",
+];
+const HANGUL = /[ㄱ-힝]/;
+
+export function stemKo(word: string): string {
+  if (!HANGUL.test(word)) return word;
+  for (const s of KO_SUFFIXES) {
+    if (word.length - s.length >= 2 && word.endsWith(s)) return word.slice(0, -s.length);
+  }
+  return word;
+}
+
+/** Query → terms worth matching: content words (Korean particles stripped), plus bigrams of long Korean words. */
 export function queryTerms(query: string): string[] {
-  const words = query.toLowerCase().split(/[\s,.;:!?()[\]{}"'`]+/).filter((w) => w.length >= 2);
+  const words = query.toLowerCase().split(/[\s,.;:!?()[\]{}"'`]+/).map(stemKo).filter((w) => w.length >= 2);
   const out = new Set<string>();
   for (const w of words) {
     out.add(w);
-    if (/[ㄱ-힝]/.test(w) && w.length >= 3) {
+    if (HANGUL.test(w) && w.length >= 4) {
       for (let i = 0; i + 2 <= w.length; i++) out.add(w.slice(i, i + 2));
     }
   }
@@ -82,7 +100,7 @@ function lineScore(line: string, terms: string[], whole: string[]): { score: num
 export function bestPassage(content: string, query: string, maxChars = 420): { passage: string; matched: string[]; lineIndex: number } {
   const lines = content.split("\n");
   const terms = queryTerms(query);
-  const whole = query.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+  const whole = query.toLowerCase().split(/\s+/).map(stemKo).filter((w) => w.length >= 2);
   let best = -1;
   let bestScore = 0;
   let bestMatched: string[] = [];
