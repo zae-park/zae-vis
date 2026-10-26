@@ -10,7 +10,9 @@ import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/summaries_screen.dart';
+import 'recording/recorder.dart';
 import 'widgets/input_dialogs.dart';
+import 'widgets/record_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,11 +20,14 @@ void main() {
 }
 
 class ZaevisApp extends StatelessWidget {
-  const ZaevisApp({super.key, required this.api, this.backend});
+  const ZaevisApp({super.key, required this.api, this.backend, this.recorder});
   final WorklogApi api;
 
   /// null in tests / when the server is managed elsewhere.
   final Backend? backend;
+
+  /// Microphone source; tests pass a fake, the app uses the platform plugin.
+  final Recorder? recorder;
 
   @override
   Widget build(BuildContext context) {
@@ -35,16 +40,17 @@ class ZaevisApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
-      home: backend == null ? HomeShell(api: api) : _BootGate(api: api, backend: backend!),
+      home: backend == null ? HomeShell(api: api, recorder: recorder) : _BootGate(api: api, backend: backend!, recorder: recorder),
     );
   }
 }
 
 /// Packaged app: first-run wizard, then make sure the bundled server is up.
 class _BootGate extends StatefulWidget {
-  const _BootGate({required this.api, required this.backend});
+  const _BootGate({required this.api, required this.backend, this.recorder});
   final WorklogApi api;
   final Backend backend;
+  final Recorder? recorder;
 
   @override
   State<_BootGate> createState() => _BootGateState();
@@ -59,7 +65,7 @@ class _BootGateState extends State<_BootGate> {
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
-    if (!b.managed) return HomeShell(api: widget.api, backend: b);
+    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder);
     if (!_configured) {
       return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() => _configured = true));
     }
@@ -91,7 +97,7 @@ class _BootGateState extends State<_BootGate> {
             ),
           );
         }
-        return HomeShell(api: widget.api, backend: b);
+        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder);
       },
     );
   }
@@ -113,9 +119,10 @@ const _dests = [
 ];
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.api, this.backend});
+  const HomeShell({super.key, required this.api, this.backend, this.recorder});
   final WorklogApi api;
   final Backend? backend;
+  final Recorder? recorder;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -151,7 +158,7 @@ class _HomeShellState extends State<HomeShell> {
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
         3 => SummariesScreen(api: api, onOpenProject: _openProject),
-        _ => CollectScreen(api: api),
+        _ => CollectScreen(api: api, recorder: widget.recorder),
       };
 
   @override
@@ -159,6 +166,14 @@ class _HomeShellState extends State<HomeShell> {
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final body = KeyedSubtree(key: ValueKey('$_index/$_generation'), child: _screen());
     final actions = [
+      IconButton(
+        tooltip: '녹음',
+        icon: const Icon(Icons.mic_none),
+        onPressed: () async {
+          await recordAndNotify(context, api, recorder: widget.recorder);
+          if (mounted) setState(() => _generation++);
+        },
+      ),
       IconButton(
         tooltip: '검색 색인',
         icon: const Icon(Icons.storage_outlined),

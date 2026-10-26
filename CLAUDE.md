@@ -29,6 +29,7 @@
   설정 `localEmbedding`(기본 켬), 켜면 force 재색인. 일일 작업은 idle 300초짜리 데몬을 detached로 띄운다. 모델은 `~/.cache/minsync/models`(1.1GB)
 - 검색 결과 맥락: `server/src/context.ts`가 경로로 출처·날짜, 청크 안에서 질의에 가장 잘 맞는 문단(한국어 2글자 조각 매칭), 위쪽 `## 제목`(섹션), git 줄의 작성자를 뽑는다. 상위 대비 0.2 미만은 `weak`. 원문은 `GET /api/file?path=` → 앱 `file_screen.dart`
 - 외부 provider: AutoRAG Lite 검색이 쓰는 외부 모델은 **OpenRouter 재정렬(rerank)** 하나뿐이다(Jev·질의 분해는 Lite 경로에서 쓰이지 않음). `server/src/rerank.ts`가 키(`secrets.json` 0600)·설정(`config.rerank`)·AutoRAG `config.json`의 `rerank` 항목·검색 자식의 `OPENROUTER_API_KEY`를 관리한다. setup.sh는 lite init 뒤 `rerank: false`로 두고 jev/queryDecomposition을 지운다
+- 앱 내 녹음: `record` 플러그인으로 16kHz 모노 PCM 스트림을 받아 메모리에서 WAV로 만들어 `/api/inbox/audio`에 올린다(`app/lib/recording/recorder.dart`, `widgets/record_dialog.dart`; 앱바 마이크 버튼·수집 탭 "녹음하기"). macOS는 `setup_platforms.sh`가 Info.plist `NSMicrophoneUsageDescription`과 `audio-input` entitlement를 넣는다(없으면 마이크 접근 시 앱이 죽음). 테스트는 `Recorder` 인터페이스의 가짜 구현으로
 - whisperX: `zaevis ext install whisperx`로 uv(`UV_UNMANAGED_INSTALL` → `$ZAEVIS_HOME/ext/uv`)·whisperx 3.8.6·imageio-ffmpeg 링크 확인, 설정 API `whisperx: true`
 
 남은 일

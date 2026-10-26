@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
 import 'package:zaevis/main.dart';
+import 'package:zaevis/recording/recorder.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -67,6 +70,9 @@ WorklogApi _fakeApi() => WorklogApi(
             });
           case '/api/projects':
             return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
+          case '/api/inbox/audio':
+            posted.add(req);
+            return _json({'file': req.url.queryParameters['name']}, 201);
           case '/api/logs' when req.method == 'POST':
             posted.add(req);
             return _json({'month': '2026-10', 'line': '- 10-23 #done x'}, 201);
@@ -75,6 +81,32 @@ WorklogApi _fakeApi() => WorklogApi(
         }
       }),
     );
+
+/// Emits two PCM chunks, then waits to be stopped.
+class _FakeRecorder implements Recorder {
+  bool permission = true;
+  bool stopped = false;
+  final _ctrl = StreamController<Uint8List>();
+
+  @override
+  Future<bool> hasPermission() async => permission;
+
+  @override
+  Future<Stream<Uint8List>> startStream({int sampleRate = kSampleRate}) async {
+    _ctrl.add(Uint8List.fromList([1, 0, 2, 0]));
+    _ctrl.add(Uint8List.fromList([3, 0]));
+    return _ctrl.stream;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopped = true;
+    await _ctrl.close();
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
 
 void main() {
   testWidgets('search shows numbered hits', (tester) async {
@@ -116,6 +148,48 @@ void main() {
     // nothing to save yet: the save button stays disabled until a key is typed
     final save = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장'));
     expect(save.onPressed, isNull);
+  });
+
+  testWidgets('record button records, stops, and uploads a WAV to the inbox', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final rec = _FakeRecorder();
+
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi(), recorder: rec));
+    await tester.tap(find.byTooltip('녹음'));
+    await tester.pumpAndSettle();
+    expect(find.text('눌러서 녹음 시작'), findsOneWidget);
+
+    await tester.tap(find.text('녹음 시작'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('중지하고 올리기'), findsOneWidget);
+
+    await tester.tap(find.text('중지하고 올리기'));
+    await tester.pumpAndSettle();
+    expect(rec.stopped, isTrue);
+    final up = posted.singleWhere((r) => r.url.path == '/api/inbox/audio');
+    expect(up.url.queryParameters['name'], endsWith('_녹음.wav'));
+    expect(up.bodyBytes.length, 44 + 6); // WAV header + 3 samples
+    expect(find.textContaining('전사 대기열에 넣었습니다'), findsOneWidget);
+  });
+
+  testWidgets('record button explains a denied microphone', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final rec = _FakeRecorder()..permission = false;
+
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi(), recorder: rec));
+    await tester.tap(find.byTooltip('녹음'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('녹음 시작'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('마이크 접근이 허용되지 않았습니다'), findsOneWidget);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(find.text('녹음'), findsNothing);
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {

@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../widgets/common.dart';
+import '../recording/recorder.dart';
 import '../widgets/input_dialogs.dart';
+import '../widgets/record_dialog.dart';
 
 String _ago(DateTime? t) {
   if (t == null) return '아직 수집 안 함';
@@ -20,8 +22,9 @@ String _size(int b) => b >= 1 << 20 ? '${(b / (1 << 20)).toStringAsFixed(1)}MB' 
 
 /// Data sources (batch) + inbox and real-time input.
 class CollectScreen extends StatefulWidget {
-  const CollectScreen({super.key, required this.api});
+  const CollectScreen({super.key, required this.api, this.recorder});
   final WorklogApi api;
+  final Recorder? recorder;
 
   @override
   State<CollectScreen> createState() => _CollectScreenState();
@@ -105,6 +108,14 @@ class _CollectScreenState extends State<CollectScreen> {
               },
               icon: const Icon(Icons.content_paste),
               label: const Text('전사본 붙여넣기'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () async {
+                await recordAndNotify(context, widget.api, recorder: widget.recorder);
+                await _load();
+              },
+              icon: const Icon(Icons.mic),
+              label: const Text('녹음하기'),
             ),
             FilledButton.tonalIcon(
               onPressed: () async {

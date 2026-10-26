@@ -26,10 +26,17 @@ for f in macos/Runner/DebugProfile.entitlements macos/Runner/Release.entitlement
   if perl -0ne 'exit 1 unless /<key>com\.apple\.security\.app-sandbox<\/key>\s*<true\/>/' "$f"; then
     perl -0pi -e 's#(<key>com\.apple\.security\.app-sandbox</key>\s*)<true/>#$1<false/>#' "$f"; changed=1
   fi
-  for key in com.apple.security.network.client com.apple.security.files.user-selected.read-only; do
+  for key in com.apple.security.network.client com.apple.security.files.user-selected.read-only com.apple.security.device.audio-input; do
     if ! grep -q "$key" "$f"; then
       KEY="$key" perl -0pi -e 's#</dict>\s*</plist>#\t<key>$ENV{KEY}</key>\n\t<true/>\n</dict>\n</plist>#' "$f"; changed=1
     fi
   done
   [[ $changed -eq 1 ]] && echo "entitlements updated: $f" || echo "entitlements ok: $f"
 done
+
+# In-app recording: macOS refuses microphone access (and kills the app) without a usage description.
+PLIST=macos/Runner/Info.plist
+if [[ -f "$PLIST" ]] && ! grep -q NSMicrophoneUsageDescription "$PLIST"; then
+  perl -0pi -e 's#</dict>\s*</plist>#\t<key>NSMicrophoneUsageDescription</key>\n\t<string>회의나 메모를 녹음해 바로 전사(whisperX)하려면 마이크가 필요합니다.</string>\n</dict>\n</plist>#' "$PLIST"
+  echo "Info.plist updated: NSMicrophoneUsageDescription"
+fi
