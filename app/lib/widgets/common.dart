@@ -74,22 +74,94 @@ class ErrorPane extends StatelessWidget {
   }
 }
 
+/// Empty state: the first line of [message] is the title, the rest is the hint.
 class EmptyPane extends StatelessWidget {
   const EmptyPane(this.message, {super.key, this.icon = Icons.inbox_outlined});
   final String message;
   final IconData icon;
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final nl = message.indexOf('\n');
+    final title = nl < 0 ? message : message.substring(0, nl);
+    final hint = nl < 0 ? null : message.substring(nl + 1).trim();
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 40, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(color: scheme.primary.withValues(alpha: 0.08), shape: BoxShape.circle),
+              child: Icon(icon, size: 28, color: scheme.primary),
+            ),
+            const SizedBox(height: 16),
+            Text(title, textAlign: TextAlign.center, style: t.titleMedium),
+            if (hint != null && hint.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(hint, textAlign: TextAlign.center, style: t.bodySmall),
+            ],
           ]),
         ),
-      );
+      ),
+    );
+  }
+}
+
+/// Small section label ("매일 수집 · 색인") with an optional trailing widget.
+class SectionHeader extends StatelessWidget {
+  const SectionHeader(this.title, {super.key, this.subtitle, this.trailing});
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 22, bottom: 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: t.titleMedium),
+            if (subtitle != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(subtitle!, style: t.bodySmall)),
+          ]),
+        ),
+        if (trailing != null) trailing!,
+      ]),
+    );
+  }
+}
+
+/// A bordered panel that groups related rows (settings, lists). Children are divided by hairlines.
+class Panel extends StatelessWidget {
+  const Panel({super.key, required this.children, this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 4), this.divided = true});
+  final List<Widget> children;
+  final EdgeInsetsGeometry padding;
+  final bool divided;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0 && divided) rows.add(Divider(color: scheme.outlineVariant));
+      rows.add(children[i]);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      padding: padding,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+    );
+  }
 }
 
 /// Colour per log tag, shared by the log list and search.
@@ -109,15 +181,22 @@ String tagLabel(String tag) => switch (tag) {
       _ => '#$tag',
     };
 
-/// Reads at most [maxWidth] wide, centred, so long lines stay readable on desktop.
+/// Reads at most [maxWidth] wide so long lines stay readable on desktop. Left-aligned under the page
+/// header on wide windows (12px extra gutter), centred when the window is narrow.
 class Readable extends StatelessWidget {
   const Readable({super.key, required this.child, this.maxWidth = 860});
   final Widget child;
   final double maxWidth;
 
   @override
-  Widget build(BuildContext context) => Align(
-        alignment: Alignment.topCenter,
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 760;
+    return Align(
+      alignment: wide ? Alignment.topLeft : Alignment.topCenter,
+      child: Padding(
+        padding: EdgeInsets.only(left: wide ? 12 : 0),
         child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child),
-      );
+      ),
+    );
+  }
 }

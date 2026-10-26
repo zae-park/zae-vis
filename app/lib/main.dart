@@ -10,6 +10,7 @@ import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/summaries_screen.dart';
+import 'theme.dart';
 import 'recording/recorder.dart';
 import 'widgets/input_dialogs.dart';
 import 'widgets/record_dialog.dart';
@@ -31,15 +32,11 @@ class ZaevisApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    ThemeData theme(Brightness b) => ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3F6E8C), brightness: b),
-          visualDensity: VisualDensity.standard,
-        );
     return MaterialApp(
       title: 'zaevis',
       debugShowCheckedModeBanner: false,
-      theme: theme(Brightness.light),
-      darkTheme: theme(Brightness.dark),
+      theme: ZaevisTheme.of(Brightness.light),
+      darkTheme: ZaevisTheme.of(Brightness.dark),
       home: backend == null ? HomeShell(api: api, recorder: recorder) : _BootGate(api: api, backend: backend!, recorder: recorder),
     );
   }
@@ -104,18 +101,19 @@ class _BootGateState extends State<_BootGate> {
 }
 
 class _Dest {
-  const _Dest(this.label, this.icon, this.selectedIcon);
+  const _Dest(this.label, this.icon, this.selectedIcon, this.hint);
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+  final String hint;
 }
 
 const _dests = [
-  _Dest('검색', Icons.search, Icons.search),
-  _Dest('로그', Icons.list_alt_outlined, Icons.list_alt),
-  _Dest('프로젝트', Icons.folder_outlined, Icons.folder),
-  _Dest('월간 정리', Icons.calendar_month_outlined, Icons.calendar_month),
-  _Dest('수집', Icons.input_outlined, Icons.input),
+  _Dest('검색', Icons.search, Icons.search, '기록 전체를 뜻과 단어로 찾습니다'),
+  _Dest('로그', Icons.list_alt_outlined, Icons.list_alt, '날짜순 한 줄 기록 — 내가 쓴 줄과 정리가 쓴 줄'),
+  _Dest('프로젝트', Icons.folder_outlined, Icons.folder, '프로젝트별 현재 상태 · 결정 · 열린 문제'),
+  _Dest('월간 정리', Icons.calendar_month_outlined, Icons.calendar_month, '달마다 정리된 요약'),
+  _Dest('수집', Icons.input_outlined, Icons.input, '데이터소스와 inbox, 바로 넣기'),
 ];
 
 class HomeShell extends StatefulWidget {
@@ -161,51 +159,48 @@ class _HomeShellState extends State<HomeShell> {
         _ => CollectScreen(api: api, recorder: widget.recorder),
       };
 
+  Future<void> _record() async {
+    await recordAndNotify(context, api, recorder: widget.recorder);
+    if (mounted) setState(() => _generation++);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 720;
+    final wide = MediaQuery.sizeOf(context).width >= 760;
     final body = KeyedSubtree(key: ValueKey('$_index/$_generation'), child: _screen());
-    final actions = [
-      IconButton(
-        tooltip: '녹음',
-        icon: const Icon(Icons.mic_none),
-        onPressed: () async {
-          await recordAndNotify(context, api, recorder: widget.recorder);
-          if (mounted) setState(() => _generation++);
-        },
-      ),
-      IconButton(
-        tooltip: '검색 색인',
-        icon: const Icon(Icons.storage_outlined),
-        onPressed: () => IndexSheet.show(context, api),
-      ),
-      IconButton(tooltip: '설정', icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
-    ];
     final fab = _index == 1
         ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: const Text('한 줄 기록'))
         : null;
 
     if (wide) {
       return Scaffold(
-        appBar: AppBar(title: Text(_dests[_index].label), actions: actions),
         floatingActionButton: fab,
         body: Row(children: [
-          NavigationRail(
-            selectedIndex: _index,
-            labelType: NavigationRailLabelType.all,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            destinations: [
-              for (final d in _dests)
-                NavigationRailDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selectedIcon), label: Text(d.label)),
-            ],
+          _Sidebar(
+            index: _index,
+            onSelect: (i) => setState(() => _index = i),
+            onRecord: _record,
+            onIndex: () => IndexSheet.show(context, api),
+            onSettings: _openSettings,
           ),
-          const VerticalDivider(width: 1),
-          Expanded(child: body),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _PageHeader(dest: _dests[_index]),
+              Expanded(child: body),
+            ]),
+          ),
         ]),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(_dests[_index].label), actions: actions),
+      appBar: AppBar(
+        title: Text(_dests[_index].label),
+        actions: [
+          IconButton(tooltip: '녹음', icon: const Icon(Icons.mic_none), onPressed: _record),
+          IconButton(tooltip: '검색 색인', icon: const Icon(Icons.storage_outlined), onPressed: () => IndexSheet.show(context, api)),
+          IconButton(tooltip: '설정', icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
+        ],
+      ),
       floatingActionButton: fab,
       body: body,
       bottomNavigationBar: NavigationBar(
@@ -216,6 +211,137 @@ class _HomeShellState extends State<HomeShell> {
             NavigationDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selectedIcon), label: d.label),
         ],
       ),
+    );
+  }
+}
+
+/// Wide layout: a labelled sidebar with the wordmark on top and the global actions at the bottom.
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({required this.index, required this.onSelect, required this.onRecord, required this.onIndex, required this.onSettings});
+  final int index;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onRecord;
+  final VoidCallback onIndex;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    return Container(
+      width: 212,
+      decoration: BoxDecoration(color: scheme.surfaceContainerLow, border: Border(right: BorderSide(color: scheme.outlineVariant))),
+      padding: const EdgeInsets.fromLTRB(12, 18, 12, 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 8, 18),
+          child: Row(children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(8)),
+              alignment: Alignment.center,
+              child: Text('z', style: TextStyle(color: scheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 17, height: 1)),
+            ),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('zaevis', style: t.titleMedium?.copyWith(letterSpacing: -0.3, height: 1.1)),
+              Text('작업 기록 · 지식', style: t.labelSmall),
+            ]),
+          ]),
+        ),
+        for (var i = 0; i < _dests.length; i++) _NavItem(dest: _dests[i], selected: i == index, onTap: () => onSelect(i)),
+        const Spacer(),
+        Tooltip(message: '녹음', child: FilledButton.tonalIcon(onPressed: onRecord, icon: const Icon(Icons.mic, size: 18), label: const Text('녹음'))),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(child: _SmallAction(icon: Icons.storage_outlined, label: '색인', onTap: onIndex)),
+          const SizedBox(width: 6),
+          Expanded(child: _SmallAction(icon: Icons.settings_outlined, label: '설정', onTap: onSettings)),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({required this.dest, required this.selected, required this.onTap});
+  final _Dest dest;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? scheme.primary.withValues(alpha: 0.10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Row(children: [
+              Icon(selected ? dest.selectedIcon : dest.icon, size: 20, color: selected ? scheme.primary : scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Text(dest.label, style: t.bodyMedium?.copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? scheme.primary : scheme.onSurface)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SmallAction extends StatelessWidget {
+  const _SmallAction({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Tooltip(
+          message: label,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Text(label, style: t.labelMedium),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Title line of each page on the wide layout: the tab name plus what the page is for.
+class _PageHeader extends StatelessWidget {
+  const _PageHeader({required this.dest});
+  final _Dest dest;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 4),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        Text(dest.label, style: t.headlineSmall),
+        const SizedBox(width: 12),
+        Expanded(child: Padding(padding: const EdgeInsets.only(bottom: 3), child: Text(dest.hint, style: t.bodySmall, overflow: TextOverflow.ellipsis))),
+      ]),
     );
   }
 }

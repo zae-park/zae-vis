@@ -81,17 +81,13 @@ class _CollectScreenState extends State<CollectScreen> {
     final s = _sources;
     final inbox = _inbox;
     if (s == null || inbox == null) return const Center(child: CircularProgressIndicator());
-    final t = Theme.of(context).textTheme;
 
     return Readable(
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 32), children: [
           // ── real-time input ─────────────────────────────────────────────
-          Text('바로 넣기', style: t.titleMedium),
-          const SizedBox(height: 4),
-          Text('저장하는 즉시 worklog에 들어갑니다. 검색에는 다음 색인 뒤에 잡힙니다.', style: t.bodySmall),
-          const SizedBox(height: 8),
+          const SectionHeader('바로 넣기', subtitle: '저장하는 즉시 worklog에 들어갑니다. 검색에는 다음 색인 뒤에 잡힙니다.'),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton.tonalIcon(
               onPressed: () async {
@@ -132,16 +128,17 @@ class _CollectScreenState extends State<CollectScreen> {
           const SizedBox(height: 28),
 
           // ── batch sources ────────────────────────────────────────────────
-          Row(children: [
-            Expanded(child: Text('데이터소스 (매일 자동 수집)', style: t.titleMedium)),
-            FilledButton.icon(
+          SectionHeader(
+            '데이터소스',
+            subtitle: '매일 자동으로 모읍니다. 켜고 끄거나, 지금 바로 모을 수 있습니다.',
+            trailing: FilledButton.icon(
               onPressed: s.collecting ? null : () => _act(() => widget.api.collect(), done: '수집을 시작했습니다 (끝나면 색인까지)'),
               icon: s.collecting
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.sync),
               label: Text(s.collecting ? '수집 중…' : '지금 수집'),
             ),
-          ]),
+          ),
           if (s.lastCollectError != null)
             Padding(padding: const EdgeInsets.only(top: 6), child: Text(s.lastCollectError!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           const SizedBox(height: 8),

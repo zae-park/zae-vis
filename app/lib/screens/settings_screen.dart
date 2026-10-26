@@ -462,7 +462,7 @@ class _DigestSectionState extends State<_DigestSection> {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
               child: SelectableText(s.last!.report.length > 1200 ? '…${s.last!.report.substring(s.last!.report.length - 1200)}' : s.last!.report,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12), maxLines: 14),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12), minLines: 1, maxLines: 14),
             ),
           ],
         ]);

@@ -40,10 +40,11 @@ class _SearchScreenState extends State<SearchScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
             child: SearchBar(
               controller: _controller,
-              hintText: '회의, 결정, 작업 내용을 검색 (예: GA4 캠페인 매핑)',
+              autoFocus: true,
+              hintText: '무엇을 했는지, 왜 그렇게 정했는지 물어보세요 (예: GA4 캠페인 매핑)',
               leading: const Icon(Icons.search),
               onSubmitted: _submit,
               trailing: [IconButton(onPressed: _submit, icon: const Icon(Icons.arrow_forward), tooltip: '검색')],
@@ -51,8 +52,8 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           Expanded(
             child: _result == null
-                ? const EmptyPane('worklog 폴더 전체(로그, 프로젝트, 요약, 전사본)를 AutoRAG로 검색합니다.\n'
-                    '한국어는 형태소 단위로 찾습니다.', icon: Icons.manage_search)
+                ? const EmptyPane('기록 전체를 뜻으로 찾습니다\n'
+                    '로그 · 프로젝트 · 월간 정리 · 전사본 · 수집 원본을 키워드와 의미(로컬 임베딩)로 함께 검색합니다. 결과를 누르면 원문이 열립니다.', icon: Icons.manage_search)
                 : FutureBuilder<SearchResult>(
                     future: _result,
                     builder: (context, snap) {
@@ -184,6 +185,7 @@ class _Highlighted extends StatelessWidget {
         i = j;
       }
     }
-    return SelectableText.rich(TextSpan(style: style, children: spans), maxLines: 8);
+    // minLines matters: without it SelectableText reserves the full maxLines height
+    return SelectableText.rich(TextSpan(style: style, children: spans), minLines: 1, maxLines: 8);
   }
 }

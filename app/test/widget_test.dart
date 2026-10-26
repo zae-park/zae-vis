@@ -217,7 +217,7 @@ void main() {
     expect(find.textContaining('마이크 접근이 허용되지 않았습니다'), findsOneWidget);
     await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
-    expect(find.text('녹음'), findsNothing);
+    expect(find.text('눌러서 녹음 시작'), findsNothing, reason: 'dialog closed');
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {
