@@ -104,6 +104,9 @@ test("schedule: plist is valid XML with the time; staleness rule", () => {
   const xml = renderPlist({ dailyAt: "18:30", bin: "/Users/me/zaevis/bin/zaevis", path: "/usr/bin:/bin", logFile: "/Users/me/.zaevis/daily.log" });
   assert.match(xml, /<key>Hour<\/key>\s*<integer>18<\/integer>\s*<key>Minute<\/key>\s*<integer>30<\/integer>/);
   assert.match(xml, /<string>--if-stale<\/string>/);
+  assert.doesNotMatch(xml, /ZAEVIS_HOME/);
+  const custom = renderPlist({ dailyAt: "18:30", bin: "/b", path: "/usr/bin", logFile: "/l", env: { ZAEVIS_HOME: "/tmp/zv&test" } });
+  assert.match(custom, /<key>ZAEVIS_HOME<\/key>\s*<string>\/tmp\/zv&amp;test<\/string>/);
   assert.throws(() => parseTime("25:00"));
   const at = (s: string) => new Date(s);
   assert.equal(isStale(null, "18:30"), true);

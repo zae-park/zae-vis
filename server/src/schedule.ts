@@ -24,8 +24,11 @@ export function parseTime(hhmm: string): { hour: number; minute: number } {
   return { hour: Number(m[1]), minute: Number(m[2]) };
 }
 
-export function renderPlist(opts: { dailyAt: string; bin: string; path: string; logFile: string }): string {
+export function renderPlist(opts: { dailyAt: string; bin: string; path: string; logFile: string; env?: Record<string, string> }): string {
   const { hour, minute } = parseTime(opts.dailyAt);
+  const extraEnv = Object.entries(opts.env ?? {})
+    .map(([k, v]) => `\n\t\t<key>${esc(k)}</key>\n\t\t<string>${esc(v)}</string>`)
+    .join("");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -41,7 +44,7 @@ export function renderPlist(opts: { dailyAt: string; bin: string; path: string; 
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
-		<string>${esc(opts.path)}</string>
+		<string>${esc(opts.path)}</string>${extraEnv}
 	</dict>
 	<key>StartCalendarInterval</key>
 	<dict>
@@ -96,7 +99,9 @@ export async function installSchedule(dailyAt: string): Promise<ScheduleStatus> 
   if (process.platform !== "darwin") return { supported: false, installed: false, loaded: false, dailyAt, plist: plistPath(), hint: cronHint(dailyAt) };
   await mkdir(dirname(plistPath()), { recursive: true });
   await mkdir(stateDir(), { recursive: true });
-  await writeFile(plistPath(), renderPlist({ dailyAt, bin: zaevisBin(), path: launchdPath(), logFile: join(stateDir(), "daily.log") }));
+  // A custom state folder (ZAEVIS_HOME) must reach the job too, or it would collect into ~/.zaevis.
+  const env = process.env.ZAEVIS_HOME ? { ZAEVIS_HOME: process.env.ZAEVIS_HOME } : undefined;
+  await writeFile(plistPath(), renderPlist({ dailyAt, bin: zaevisBin(), path: launchdPath(), logFile: join(stateDir(), "daily.log"), env }));
   await run("launchctl", ["bootout", `${domain()}/${LABEL}`]).catch(() => {});
   await run("launchctl", ["bootstrap", domain(), plistPath()]);
   return scheduleStatus();
