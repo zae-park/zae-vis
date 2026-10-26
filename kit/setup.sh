@@ -161,6 +161,14 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
   fi
 fi
 
+# The app's wizard passes --skip-refresh and runs the first collect itself right after this script.
+# The LaunchAgent below starts `daily --if-stale` as soon as it is loaded; mark today as done so it
+# does not run a second collect + index at the same time (MinSync holds a lock).
+if [[ $SKIP_REFRESH -eq 1 && ! -e "$STATE_DIR/state.json" ]]; then
+  printf '{\n  "sources": {},\n  "daily": { "lastRun": "%s", "ok": true, "index": "첫 수집은 앱이 진행" }\n}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATE_DIR/state.json"
+fi
+
 if [[ $WITH_SCHEDULE -eq 1 && "$(uname -s)" == "Darwin" ]] && command -v node >/dev/null && [[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 24 ]]; then
   echo "5) 매일 수집·색인 예약 (launchd)"
   [[ -d "$ROOT_DIR/server/node_modules" ]] || (cd "$ROOT_DIR/server" && npm install --no-fund --no-audit --silent)

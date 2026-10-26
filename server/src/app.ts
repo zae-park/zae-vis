@@ -21,6 +21,8 @@ export type AppOptions = {
     update(name: string, patch: Record<string, unknown>): void;
     add(src: { name: string; command: string; description?: string }): void;
     remove(name: string): boolean;
+    /** A full collect (+ index) from the API counts as the daily run — so `daily --if-stale` does not repeat it. */
+    recordDaily?(result: { ok: boolean; index: string }): void;
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
@@ -298,17 +300,29 @@ export function createApp(opts: AppOptions): Server {
           const withIndex = b.index !== false;
           if (!collecting) {
             const srcs = opts.sources;
+            const full = !only || only.length === 0;
             collecting = srcs
               .collect(only)
               .then((report) => {
                 lastCollect = { finishedAt: new Date().toISOString(), report };
                 if (withIndex) startRefresh(false);
+                return report;
               })
               .catch((err: unknown) => {
                 lastCollect = { finishedAt: new Date().toISOString(), report: [], error: String((err as Error)?.message ?? err) };
+                return null;
               })
               .finally(() => {
                 collecting = null;
+              })
+              .then(async (report) => {
+                if (!full || !report) return;
+                let index = "건너뜀";
+                if (withIndex) {
+                  await refreshing;
+                  index = lastRefresh?.ok ? "완료" : `실패: ${lastRefresh?.error ?? "?"}`;
+                }
+                srcs.recordDaily?.({ ok: report.every((r) => r.ok), index });
               });
           }
           return send(res, 202, { collecting: true });

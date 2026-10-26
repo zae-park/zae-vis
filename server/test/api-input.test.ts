@@ -45,6 +45,7 @@ before(async () => {
         added = added.filter((x) => x.name !== name);
         return added.length < n;
       },
+      recordDaily: (r) => calls.push(`daily:${r.ok}:${r.index}`),
     },
     settings: {
       get: async () => ({ dailyAt: "18:30", indexOnInject }),
@@ -134,4 +135,11 @@ test("sources: add custom, toggle, remove; collect runs in background then index
   assert.deepEqual(calls, ["collect:git", "refresh"]);
   const st = await call("GET", "/api/collect");
   assert.equal(st.body.lastCollect.report[0].name, "git");
+  assert.ok(!calls.some((c) => c.startsWith("daily:")), "partial collect is not a daily run");
+
+  calls.length = 0;
+  assert.equal((await call("POST", "/api/collect", {})).status, 202);
+  await tick();
+  await tick();
+  assert.deepEqual(calls, ["collect:all", "refresh", "daily:true:완료"]);
 });

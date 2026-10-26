@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
-import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings } from "./config.ts";
+import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
@@ -34,6 +34,11 @@ const server = createApp({
     update: (name, patch) => saveSourceSettings(name, patch),
     add: (src) => addCustomSource(src),
     remove: (name) => removeCustomSource(name),
+    recordDaily: ({ ok, index }) => {
+      const state = loadState();
+      state.daily = { lastRun: new Date().toISOString(), ok, index };
+      saveState(state);
+    },
   },
   settings: {
     async get() {
