@@ -185,6 +185,19 @@ class WorklogApi {
   }
 
   // ── settings ─────────────────────────────────────────────────────────────
+  /// Saves re-ranking settings; an empty [apiKey] removes the stored key. The key is never returned.
+  Future<RerankStatus> updateRerank({bool? enabled, String? apiKey, String? model}) async => RerankStatus.fromJson(
+        await _send('PUT', '/settings/rerank', {
+          if (enabled != null) 'enabled': enabled,
+          if (apiKey != null) 'apiKey': apiKey,
+          if (model != null) 'model': model,
+        }),
+      );
+
+  /// Asks the server to check a key with OpenRouter (the stored key when [apiKey] is null).
+  Future<KeyCheck> testRerankKey([String? apiKey]) async =>
+      KeyCheck.fromJson(await _send('POST', '/settings/rerank/test', {if (apiKey != null) 'apiKey': apiKey}));
+
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
   Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding}) async => AppSettings.fromJson(

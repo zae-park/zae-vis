@@ -360,6 +360,7 @@ class AppSettings {
     required this.scheduleLoaded,
     required this.whisperx,
     this.localEmbedding = true,
+    this.rerank,
     this.scheduleHint,
     this.lastDaily,
   });
@@ -377,6 +378,7 @@ class AppSettings {
       scheduleHint: _strOrNull(s['hint']),
       whisperx: j['whisperx'] == true,
       localEmbedding: j['localEmbedding'] != false,
+      rerank: j['rerank'] is Json ? RerankStatus.fromJson(j['rerank'] as Json) : null,
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
     );
   }
@@ -384,6 +386,9 @@ class AppSettings {
   final String dailyAt;
   final bool indexOnInject;
   final bool localEmbedding;
+
+  /// Optional OpenRouter re-ranking; null when the server does not offer it.
+  final RerankStatus? rerank;
   final String worklogDir;
   final bool scheduleSupported;
   final bool scheduleInstalled;
@@ -391,4 +396,34 @@ class AppSettings {
   final String? scheduleHint;
   final bool whisperx;
   final DateTime? lastDaily;
+}
+
+/// Search re-ranking through OpenRouter: the one external model AutoRAG Lite can use. Off by default.
+class RerankStatus {
+  const RerankStatus({required this.enabled, required this.hasKey, required this.model, required this.external, this.keyHint});
+
+  factory RerankStatus.fromJson(Json j) => RerankStatus(
+        enabled: j['enabled'] == true,
+        hasKey: j['hasKey'] == true,
+        keyHint: _strOrNull(j['keyHint']),
+        model: _str(j['model']),
+        external: _str(j['external']),
+      );
+
+  final bool enabled;
+  final bool hasKey;
+  final String? keyHint;
+  final String model;
+
+  /// What leaves the machine, in plain words ("없음 — …" or "검색어와 상위 25개 문단이 …").
+  final String external;
+
+  bool get active => enabled && hasKey;
+}
+
+class KeyCheck {
+  const KeyCheck({required this.ok, required this.message});
+  factory KeyCheck.fromJson(Json j) => KeyCheck(ok: j['ok'] == true, message: _str(j['message']));
+  final bool ok;
+  final String message;
 }

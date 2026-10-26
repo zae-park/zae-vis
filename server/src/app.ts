@@ -29,6 +29,13 @@ export type AppOptions = {
     update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
+  /** Optional OpenRouter re-ranking of search results. */
+  rerank?: {
+    status(): Record<string, unknown>;
+    /** Saves setting/key (apiKey "" removes the key), rewrites AutoRAG's config, restarts the search child. */
+    update(patch: { enabled?: boolean; model?: string; apiKey?: string }): Promise<Record<string, unknown>>;
+    test(apiKey?: string): Promise<{ ok: boolean; message: string }>;
+  };
   /** Local embedding daemon (semantic search); absent when minsync is not managed here. */
   embedding?: {
     status(): Promise<Record<string, unknown>>;
@@ -350,7 +357,25 @@ export function createApp(opts: AppOptions): Server {
           if (!opts.settings) return notFound(res);
           return send(res, 200, await opts.settings.get());
 
+        case "POST /settings": {
+          // POST /api/settings/rerank/test — checks a key with OpenRouter without saving it
+          if (arg !== "rerank" || parts[3] !== "test" || !opts.rerank) return notFound(res);
+          const b = await readJson(req);
+          return send(res, 200, await opts.rerank.test(typeof b.apiKey === "string" ? b.apiKey : undefined));
+        }
+
         case "PUT /settings": {
+          if (arg === "rerank") {
+            // PUT /api/settings/rerank { enabled?, model?, apiKey? } — apiKey "" removes the stored key
+            if (!opts.rerank) return notFound(res);
+            const b = await readJson(req);
+            const patch: { enabled?: boolean; model?: string; apiKey?: string } = {};
+            if (typeof b.enabled === "boolean") patch.enabled = b.enabled;
+            if (typeof b.model === "string") patch.model = b.model.trim();
+            if (typeof b.apiKey === "string") patch.apiKey = b.apiKey;
+            return send(res, 200, await opts.rerank.update(patch));
+          }
+          if (arg) return notFound(res);
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
           const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean } = {};

@@ -161,6 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: s.localEmbedding,
                   onChanged: (v) => _update(localEmbedding: v),
                 ),
+                if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
                 const SizedBox(height: 16),
                 Text('확장', style: t.titleMedium),
                 ListTile(
@@ -214,5 +215,115 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ]),
       ),
     );
+  }
+}
+
+/// Optional OpenRouter re-ranking: the only place a search leaves this machine. Off until the user
+/// turns it on and saves a key; the key is sent to the server once and only its last 4 chars come back.
+class _RerankSection extends StatefulWidget {
+  const _RerankSection({required this.api, required this.status, required this.onChanged});
+  final WorklogApi api;
+  final RerankStatus status;
+  final VoidCallback onChanged;
+
+  @override
+  State<_RerankSection> createState() => _RerankSectionState();
+}
+
+class _RerankSectionState extends State<_RerankSection> {
+  final _key = TextEditingController();
+  bool _busy = false;
+  String? _check;
+
+  @override
+  void dispose() {
+    _key.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<String?> Function() task) async {
+    setState(() {
+      _busy = true;
+      _check = null;
+    });
+    try {
+      final msg = await task();
+      if (mounted && msg != null) toast(context, msg);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+      widget.onChanged();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final s = widget.status;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        secondary: const Icon(Icons.cloud_outlined),
+        title: const Text('검색 결과 재정렬 (OpenRouter)'),
+        subtitle: Text(s.hasKey
+            ? '검색 상위 25개 문단을 OpenRouter의 ${s.model} 모델로 다시 정렬합니다. 켜면 검색어와 그 문단이 외부로 나갑니다.'
+            : '켜려면 아래에 OpenRouter API 키를 저장하세요. 키가 없으면 켜도 아무것도 전송되지 않습니다.'),
+        value: s.enabled,
+        onChanged: _busy ? null : (v) => _run(() async => (await widget.api.updateRerank(enabled: v)).active ? '재정렬을 켰습니다' : (v ? '켰지만 키가 없어 전송되지 않습니다' : '재정렬을 껐습니다')),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(left: 56, bottom: 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _key,
+                obscureText: true,
+                enabled: !_busy,
+                decoration: InputDecoration(
+                  labelText: 'OpenRouter API 키',
+                  hintText: s.hasKey ? '저장됨 •••• ${s.keyHint}' : 'sk-or-v1-…',
+                  helperText: s.hasKey ? '새 키를 넣고 저장하면 바뀝니다. 키는 ~/.zaevis/secrets.json(소유자만 읽기)에만 저장됩니다.' : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              onPressed: _busy || _key.text.trim().isEmpty
+                  ? null
+                  : () => _run(() async {
+                        await widget.api.updateRerank(apiKey: _key.text.trim());
+                        _key.clear();
+                        return '키를 저장했습니다';
+                      }),
+              child: const Text('저장'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: _busy || (!s.hasKey && _key.text.trim().isEmpty)
+                  ? null
+                  : () => _run(() async {
+                        final r = await widget.api.testRerankKey(_key.text.trim().isEmpty ? null : _key.text.trim());
+                        setState(() => _check = r.message);
+                        return null;
+                      }),
+              child: const Text('연결 확인'),
+            ),
+            if (s.hasKey)
+              TextButton(
+                onPressed: _busy ? null : () => _run(() async => (await widget.api.updateRerank(apiKey: '')).hasKey ? null : '키를 지웠습니다'),
+                child: const Text('키 삭제'),
+              ),
+          ]),
+          if (_check != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(_check!, style: t.bodySmall)),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('지금 외부로 나가는 요청: ${s.external}', style: t.bodySmall?.copyWith(color: s.active ? scheme.error : scheme.outline)),
+          ),
+        ]),
+      ),
+    ]);
   }
 }

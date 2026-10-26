@@ -10,6 +10,7 @@ import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
+import * as rerank from "./rerank.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
@@ -21,7 +22,10 @@ if (!existsSync(cfg.worklogDir)) {
   process.exit(1);
 }
 
-const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir] });
+// The search child only sees the OpenRouter key while re-ranking is turned on.
+const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => rerank.childEnv(cfg.rerank) });
+// Keep AutoRAG's config in step with the setting (also clears the lite-init defaults on first start).
+rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== null);
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
 const queue = new TranscribeQueue();
@@ -54,6 +58,7 @@ const server = createApp({
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
         localEmbedding: cfg.localEmbedding,
+        rerank: rerank.status(cfg.rerank),
       };
     },
     async update(patch) {
@@ -66,6 +71,19 @@ const server = createApp({
       return this.get();
     },
     indexOnInject: () => cfg.indexOnInject,
+  },
+  rerank: {
+    status: () => rerank.status(cfg.rerank),
+    async update(patch) {
+      if (patch.apiKey !== undefined) rerank.setKey(patch.apiKey);
+      const next = { enabled: patch.enabled ?? cfg.rerank.enabled, model: patch.model || cfg.rerank.model };
+      saveAppSettings({ rerank: next });
+      cfg = loadConfig();
+      rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== null);
+      await search.restart();
+      return rerank.status(cfg.rerank);
+    },
+    test: (apiKey) => rerank.testKey(apiKey ?? rerank.getKey() ?? ""),
   },
   embedding: {
     status: async () => embedding.health(),

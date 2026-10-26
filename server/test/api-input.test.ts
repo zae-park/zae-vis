@@ -17,6 +17,8 @@ let added: Array<Record<string, unknown>> = [];
 const queued: string[] = [];
 let indexOnInject = false;
 let embeddingOn = false;
+let rerankOn = false;
+let rerankKey: string | null = null;
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "zv-in-"));
@@ -58,6 +60,16 @@ before(async () => {
       indexOnInject: () => indexOnInject,
     },
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), jobs: () => [] },
+    rerank: {
+      status: () => ({ enabled: rerankOn, hasKey: rerankKey !== null, keyHint: rerankKey?.slice(-4) ?? null, model: "m", external: rerankOn && rerankKey ? "OpenRouter" : "없음" }),
+      update: async (p) => {
+        calls.push(`rerank:${JSON.stringify(p)}`);
+        if (p.apiKey !== undefined) rerankKey = p.apiKey || null;
+        if (p.enabled !== undefined) rerankOn = p.enabled;
+        return { enabled: rerankOn, hasKey: rerankKey !== null, keyHint: rerankKey?.slice(-4) ?? null, model: "m", external: "" };
+      },
+      test: async (k) => ({ ok: k === "good", message: k === "good" ? "연결됨." : "거부" }),
+    },
     embedding: {
       status: async () => ({ enabled: embeddingOn, state: embeddingOn ? "ready" : "off", available: true }),
       set: async (on) => {
@@ -167,4 +179,20 @@ test("embedding: /index reports the daemon; turning it on re-indexes from scratc
   assert.deepEqual(calls, ["embedding:true"]);
   await call("PUT", "/api/settings", { localEmbedding: false });
   assert.equal((await call("GET", "/api/index")).body.embedding.state, "off");
+});
+
+test("rerank: settings endpoints save the key without echoing it, test a key, 404 unknown sub-paths", async () => {
+  calls.length = 0;
+  const r = await call("PUT", "/api/settings/rerank", { enabled: true, apiKey: "sk-or-secret-9999", model: " voyageai/rerank-3-lite " });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.hasKey, true);
+  assert.equal(r.body.keyHint, "9999");
+  assert.ok(!JSON.stringify(r.body).includes("secret"), "key never returned");
+  assert.deepEqual(calls, ['rerank:{"enabled":true,"model":"voyageai/rerank-3-lite","apiKey":"sk-or-secret-9999"}']);
+  assert.equal((await call("POST", "/api/settings/rerank/test", { apiKey: "good" })).body.ok, true);
+  assert.equal((await call("POST", "/api/settings/rerank/test", { apiKey: "bad" })).body.ok, false);
+  assert.equal((await call("PUT", "/api/settings/other", {})).status, 404);
+  assert.equal((await call("POST", "/api/settings/rerank", {})).status, 404);
+  const off = await call("PUT", "/api/settings/rerank", { enabled: false, apiKey: "" });
+  assert.equal(off.body.hasKey, false);
 });

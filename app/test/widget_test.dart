@@ -59,6 +59,12 @@ WorklogApi _fakeApi() => WorklogApi(
               'audio': <Object>[],
               'jobs': <Object>[],
             });
+          case '/api/settings' when req.method == 'GET':
+            return _json({
+              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true,
+              'schedule': {'supported': true, 'installed': true, 'loaded': true},
+              'rerank': {'enabled': false, 'hasKey': false, 'keyHint': null, 'model': 'voyageai/rerank-3-lite', 'external': '없음 — 모든 검색은 이 맥 안에서 처리됩니다.'},
+            });
           case '/api/projects':
             return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
           case '/api/logs' when req.method == 'POST':
@@ -92,6 +98,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
     expect(find.textContaining('GA4 캠페인 매핑이 빠져서 — 박재'), findsWidgets);
+  });
+
+  testWidgets('settings shows the OpenRouter re-ranking section, off and local by default', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('의미 검색 (로컬 임베딩)'), findsOneWidget);
+    expect(find.text('검색 결과 재정렬 (OpenRouter)'), findsOneWidget);
+    expect(find.textContaining('지금 외부로 나가는 요청: 없음'), findsOneWidget);
+    expect(find.text('키 삭제'), findsNothing);
+    // nothing to save yet: the save button stays disabled until a key is typed
+    final save = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장'));
+    expect(save.onPressed, isNull);
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {

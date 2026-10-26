@@ -73,6 +73,10 @@ void main() {
     expect(EmbeddingStatus.fromJson({'enabled': false, 'state': 'off'}).label, contains('키워드'));
     expect(AppSettings.fromJson({'dailyAt': '18:30'}).localEmbedding, isTrue);
     expect(AppSettings.fromJson({'dailyAt': '18:30', 'localEmbedding': false}).localEmbedding, isFalse);
+    final r = AppSettings.fromJson({'dailyAt': '18:30', 'rerank': {'enabled': true, 'hasKey': true, 'keyHint': '9999', 'model': 'm', 'external': 'OpenRouter'}}).rerank!;
+    expect(r.active, isTrue);
+    expect(r.keyHint, '9999');
+    expect(AppSettings.fromJson({'dailyAt': '18:30'}).rerank, isNull);
     expect(s.stale, isTrue);
   });
 

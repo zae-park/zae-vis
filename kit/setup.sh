@@ -148,6 +148,12 @@ if [[ $WITH_AUTORAG -eq 1 ]]; then
     mkdir -p "$(dirname "$AUTORAG_CONFIG")"
     AUTORAG_CONFIG="$AUTORAG_CONFIG" "$ROOT_DIR/server/node_modules/.bin/autorag" lite init \
       --search-paths "$WORKLOG_DIR" --languages ko,en
+    # lite init writes OpenRouter defaults for rerank/jev/queryDecomposition. Nothing external until the
+    # user turns re-ranking on in the app: rerank off, and the two settings Lite never uses removed.
+    node -e '
+      const fs = require("node:fs"); const f = process.argv[1];
+      const c = JSON.parse(fs.readFileSync(f, "utf8")); delete c.jev; delete c.queryDecomposition; c.rerank = false;
+      fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");' "$AUTORAG_CONFIG"
   fi
   if ! command -v minsync >/dev/null; then
     echo "  MinSync 빌드 중 (처음 한 번, 수 분 걸림)…"

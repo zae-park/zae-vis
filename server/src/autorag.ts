@@ -117,11 +117,18 @@ export class AutoRAGMcp implements SearchBackend {
   private readonly configPath: string;
   private readonly roots: string[];
   private readonly bin: string;
+  private readonly extraEnv: () => Record<string, string>;
 
-  constructor(opts: { configPath: string; roots: string[]; bin?: string }) {
+  constructor(opts: { configPath: string; roots: string[]; bin?: string; env?: () => Record<string, string> }) {
     this.configPath = opts.configPath;
     this.roots = opts.roots;
     this.bin = opts.bin ?? defaultMcpBin();
+    this.extraEnv = opts.env ?? (() => ({}));
+  }
+
+  /** Drops the child so the next call starts a fresh one (new config file contents, new env). */
+  async restart(): Promise<void> {
+    await this.close();
   }
 
   private async connect(): Promise<Client> {
@@ -130,7 +137,7 @@ export class AutoRAGMcp implements SearchBackend {
       this.connecting = (async () => {
         const transport = new StdioClientTransport({
           command: this.bin,
-          env: { ...(process.env as Record<string, string>), AUTORAG_CONFIG: this.configPath },
+          env: { ...(process.env as Record<string, string>), ...this.extraEnv(), AUTORAG_CONFIG: this.configPath },
           stderr: "inherit",
         });
         const client = new Client({ name: "zaevis", version: "0.1.0" });
