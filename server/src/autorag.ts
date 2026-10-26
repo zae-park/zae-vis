@@ -58,6 +58,7 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 export function displayPath(raw: string, roots: string[]): string {
   for (const r of roots) {
     if (raw.startsWith(r + "/")) return raw.slice(r.length + 1);
+    if (raw.startsWith("/private" + r + "/")) return raw.slice("/private".length + r.length + 1); // macOS /tmp realpath
   }
   return raw.replace(/^\/[^/]+\//, "");
 }

@@ -31,18 +31,21 @@ const NOISE_LINE = /^\s*$|^<!--|^#\s|^\s*-{3,}\s*$/;
 
 /** Path → kind, label, date. Paths are relative to the worklog root (sources/git/2026-10-26.md). */
 export function classifyPath(path: string): { kind: HitKind; sourceLabel: string; date: string | null } {
+  // The worklog folders are matched anywhere in the path: AutoRAG may hand back an absolute path
+  // the server could not shorten (e.g. /private/tmp/… vs /tmp/…).
   const p = path.replace(/^\/+/, "");
-  const date = /(\d{4}-\d{2}-\d{2})/.exec(p)?.[1] ?? /(\d{4}-\d{2})(?!\d)/.exec(p)?.[1] ?? null;
+  const file = p.split("/").pop() ?? p;
+  const date = /(\d{4}-\d{2}-\d{2})/.exec(file)?.[1] ?? /(\d{4}-\d{2})(?!\d)/.exec(file)?.[1] ?? null;
   let m: RegExpExecArray | null;
-  if ((m = /^sources\/([^/]+)\//.exec(p))) {
+  if ((m = /(?:^|\/)sources\/([^/]+)\/[^/]+$/.exec(p))) {
     const name = m[1];
     if (name in SOURCE_LABELS) return { kind: name as HitKind, sourceLabel: SOURCE_LABELS[name], date };
     return { kind: "custom", sourceLabel: `${name} (커넥터)`, date };
   }
-  if (/^log\//.test(p)) return { kind: "log", sourceLabel: "한 줄 기록", date };
-  if (/^projects\//.test(p)) return { kind: "project", sourceLabel: "프로젝트", date: null };
-  if (/^summaries\//.test(p)) return { kind: "summary", sourceLabel: "월간 정리", date };
-  if (/^(inbox|processed)\//.test(p)) return { kind: "inbox", sourceLabel: /transcripts/.test(p) ? "회의 전사본" : "inbox", date };
+  if (/(?:^|\/)log\/[^/]+$/.test(p)) return { kind: "log", sourceLabel: "한 줄 기록", date };
+  if (/(?:^|\/)projects\/[^/]+$/.test(p)) return { kind: "project", sourceLabel: "프로젝트", date: null };
+  if (/(?:^|\/)summaries\/[^/]+$/.test(p)) return { kind: "summary", sourceLabel: "월간 정리", date };
+  if (/(?:^|\/)(inbox|processed)\//.test(p)) return { kind: "inbox", sourceLabel: /transcripts/.test(p) ? "회의 전사본" : "inbox", date };
   return { kind: "other", sourceLabel: "worklog", date };
 }
 
@@ -101,14 +104,17 @@ export function bestPassage(content: string, query: string, maxChars = 420): { p
   let lo = best;
   let hi = best;
   let size = picked[0].length;
+  // blank lines are skipped over, so a matching heading still brings its details along
   while (size < maxChars) {
-    const next = hi + 1 < lines.length && !/^##\s/.test(lines[hi + 1]) ? lines[hi + 1].trim() : null;
+    while (hi + 1 < lines.length && lines[hi + 1].trim() === "") hi++;
+    while (lo - 1 >= 0 && lines[lo - 1].trim() === "") lo--;
+    const next = hi + 1 < lines.length && !/^##\s/.test(lines[hi + 1]) && !NOISE_LINE.test(lines[hi + 1]) ? lines[hi + 1].trim() : null;
     const prev = lo - 1 >= 0 && !NOISE_LINE.test(lines[lo - 1]) && !/^##\s/.test(lines[lo - 1]) ? lines[lo - 1].trim() : null;
-    if (next !== null && next !== "" && size + next.length <= maxChars) {
+    if (next !== null && size + next.length <= maxChars) {
       picked.push(next);
       hi++;
       size += next.length + 1;
-    } else if (prev !== null && prev !== "" && size + prev.length <= maxChars) {
+    } else if (prev !== null && size + prev.length <= maxChars) {
       picked.unshift(prev);
       lo--;
       size += prev.length + 1;
