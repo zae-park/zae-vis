@@ -73,7 +73,8 @@ fi
 # ── 4) CLI, kit ────────────────────────────────────────────────────────────────
 cp "$ROOT/bin/zaevis" "$PAYLOAD/bin/zaevis"
 cp -R "$ROOT/kit" "$PAYLOAD/kit"
-echo "$VERSION" > "$PAYLOAD/VERSION"
+# "<version>+<build time>": `zaevis start` restarts a running server whose build differs from the bundle.
+echo "$VERSION+$(date +%Y%m%d%H%M%S)" > "$PAYLOAD/VERSION"
 
 # ── 5) Flutter: web (served by the bundled server) + macOS app ───────────────────
 say "Flutter 빌드"

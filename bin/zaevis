@@ -19,6 +19,7 @@ if [[ -x "$ROOT/node/bin/node" ]]; then
   BUNDLED=1
   export PATH="$ROOT/node/bin:$ROOT/bin:$PATH"
   export ZAEVIS_WEB_DIR="${ZAEVIS_WEB_DIR:-$ROOT/web}"
+  export ZAEVIS_BUILD="$(cat "$ROOT/VERSION" 2>/dev/null || true)"
 fi
 PID_FILE="$STATE/server.pid"
 LOG_FILE="$STATE/server.log"
@@ -113,9 +114,24 @@ open_url() {
 
 # ── server lifecycle ─────────────────────────────────────────────────────────
 server_up() { curl -sf -m 2 "$(url)/api/health" >/dev/null 2>&1; }
+# The server that is up was started by a different build (e.g. the app was replaced while it ran).
+server_stale() {
+  [[ -n "${ZAEVIS_BUILD:-}" ]] || return 1
+  local running
+  running="$(curl -sf -m 2 "$(url)/api/health" | sed -nE 's/.*"build":"([^"]*)".*/\1/p')"
+  [[ -n "$running" && "$running" != "$ZAEVIS_BUILD" ]]
+}
 
 server_start() {
-  if server_up; then return 0; fi
+  if server_up; then
+    if server_stale && [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      info "이전 빌드의 서버가 떠 있어 다시 시작합니다"
+      kill "$(cat "$PID_FILE")" && rm -f "$PID_FILE"
+      for _ in $(seq 1 20); do server_up || break; sleep 0.25; done
+    else
+      return 0
+    fi
+  fi
   need_node
   mkdir -p "$STATE"
   info "서버 시작 ($(url))"

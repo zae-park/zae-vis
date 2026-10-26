@@ -161,7 +161,7 @@ export function createApp(opts: AppOptions): Server {
 
       switch (route) {
         case "GET /health":
-          return send(res, 200, { ok: true, worklog: worklog.root });
+          return send(res, 200, { ok: true, worklog: worklog.root, build: process.env.ZAEVIS_BUILD ?? null });
 
         case "GET /logs":
           if (arg === undefined) return send(res, 200, { months: await worklog.months("log") });
