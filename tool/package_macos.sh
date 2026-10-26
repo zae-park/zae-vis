@@ -83,6 +83,9 @@ tool/setup_platforms.sh macos >/dev/null   # re-applies entitlements if the fold
 flutter pub get
 flutter build web --release
 cp -R build/web "$PAYLOAD/web"
+# Always a clean macOS build: Xcode's incremental state otherwise rejects an entitlements file whose
+# mtime is newer than the previous build ("Entitlements file was modified during the build").
+rm -rf build/macos
 flutter build macos --release
 APP_SRC="$ROOT/app/build/macos/Build/Products/Release/zaevis.app"
 [[ -d "$APP_SRC" ]] || die "macOS 빌드 결과가 없습니다: $APP_SRC"
