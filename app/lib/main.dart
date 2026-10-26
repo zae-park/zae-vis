@@ -10,18 +10,20 @@ import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/summaries_screen.dart';
+import 'shortcuts.dart';
 import 'theme.dart';
 import 'recording/recorder.dart';
 import 'widgets/input_dialogs.dart';
 import 'widgets/record_dialog.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await GlobalHotkey.prepare();
   runApp(ZaevisApp(api: WorklogApi(), backend: createBackend()));
 }
 
 class ZaevisApp extends StatelessWidget {
-  const ZaevisApp({super.key, required this.api, this.backend, this.recorder});
+  const ZaevisApp({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true});
   final WorklogApi api;
 
   /// null in tests / when the server is managed elsewhere.
@@ -30,6 +32,9 @@ class ZaevisApp extends StatelessWidget {
   /// Microphone source; tests pass a fake, the app uses the platform plugin.
   final Recorder? recorder;
 
+  /// Native menu bar and the system-wide hotkey (desktop builds only; tests turn it off).
+  final bool desktopIntegration;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -37,17 +42,20 @@ class ZaevisApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ZaevisTheme.of(Brightness.light),
       darkTheme: ZaevisTheme.of(Brightness.dark),
-      home: backend == null ? HomeShell(api: api, recorder: recorder) : _BootGate(api: api, backend: backend!, recorder: recorder),
+      home: backend == null
+          ? HomeShell(api: api, recorder: recorder, desktopIntegration: desktopIntegration)
+          : _BootGate(api: api, backend: backend!, recorder: recorder, desktopIntegration: desktopIntegration),
     );
   }
 }
 
 /// Packaged app: first-run wizard, then make sure the bundled server is up.
 class _BootGate extends StatefulWidget {
-  const _BootGate({required this.api, required this.backend, this.recorder});
+  const _BootGate({required this.api, required this.backend, this.recorder, this.desktopIntegration = true});
   final WorklogApi api;
   final Backend backend;
   final Recorder? recorder;
+  final bool desktopIntegration;
 
   @override
   State<_BootGate> createState() => _BootGateState();
@@ -62,7 +70,7 @@ class _BootGateState extends State<_BootGate> {
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
-    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder);
+    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration);
     if (!_configured) {
       return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() => _configured = true));
     }
@@ -94,7 +102,7 @@ class _BootGateState extends State<_BootGate> {
             ),
           );
         }
-        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder);
+        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration);
       },
     );
   }
@@ -117,10 +125,11 @@ const _dests = [
 ];
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.api, this.backend, this.recorder});
+  const HomeShell({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true});
   final WorklogApi api;
   final Backend? backend;
   final Recorder? recorder;
+  final bool desktopIntegration;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -129,8 +138,40 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   int _generation = 0; // bumped when the server address changes, to reload every screen
+  final _searchFocus = FocusNode();
 
   WorklogApi get api => widget.api;
+
+  bool get _native => widget.desktopIntegration && AppShortcuts.desktop;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_native) GlobalHotkey.register(_quickCapture);
+  }
+
+  @override
+  void dispose() {
+    if (_native) GlobalHotkey.unregister();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  /// ⌘K: the search tab with the field focused and its text selected.
+  void _focusSearch() {
+    setState(() => _index = 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _searchFocus.requestFocus());
+  }
+
+  /// Global hotkey: the window is already in front; open 한 줄 기록 unless a dialog is up.
+  void _quickCapture() {
+    if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+    _addLog();
+  }
+
+  void _selectTab(int i) {
+    if (i >= 0 && i < _dests.length) setState(() => _index = i);
+  }
 
   void _openProject(String slug) => openProject(context, api, slug);
 
@@ -152,7 +193,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _screen() => switch (_index) {
-        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api)),
+        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), focusNode: _searchFocus),
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
         3 => SummariesScreen(api: api, onOpenProject: _openProject),
@@ -166,6 +207,40 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final shell = ShortcutScope(
+      onSearch: _focusSearch,
+      onNewLog: _addLog,
+      onRecord: _record,
+      onSettings: _openSettings,
+      onTab: _selectTab,
+      child: _layout(context),
+    );
+    if (!_native) return shell;
+    // macOS menu bar: the same actions, discoverable with their shortcuts
+    return PlatformMenuBar(
+      menus: [
+        PlatformMenu(label: 'zaevis', menus: [
+          PlatformMenuItem(label: '설정…', shortcut: AppShortcuts.settings, onSelected: _openSettings),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+        ]),
+        PlatformMenu(label: '기록', menus: [
+          PlatformMenuItem(label: '한 줄 기록', shortcut: AppShortcuts.newLog, onSelected: _addLog),
+          PlatformMenuItem(label: '녹음', shortcut: AppShortcuts.record, onSelected: _record),
+        ]),
+        PlatformMenu(label: '보기', menus: [
+          PlatformMenuItem(label: '검색', shortcut: AppShortcuts.search, onSelected: _focusSearch),
+          PlatformMenuItemGroup(members: [
+            for (var i = 0; i < _dests.length; i++)
+              PlatformMenuItem(label: _dests[i].label, shortcut: AppShortcuts.tabs[i], onSelected: () => _selectTab(i)),
+          ]),
+        ]),
+      ],
+      child: shell,
+    );
+  }
+
+  Widget _layout(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 760;
     final body = KeyedSubtree(key: ValueKey('$_index/$_generation'), child: _screen());
     final fab = _index == 1

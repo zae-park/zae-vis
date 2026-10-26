@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../backend/backend.dart';
 import '../models.dart';
+import '../shortcuts.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
@@ -90,6 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
       body: Readable(
@@ -214,6 +216,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: () => widget.backend!.open('${widget.backend!.home}/.zaevis'),
                   ),
                 ],
+                const SizedBox(height: 16),
+                Text('단축키', style: t.titleMedium),
+                const SizedBox(height: 6),
+                for (final (keys, what) in AppShortcuts.describe())
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(children: [
+                      Container(
+                        constraints: const BoxConstraints(minWidth: 110),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(6)),
+                        child: Text(keys, style: ZaevisTheme.mono.copyWith(fontSize: 12, color: scheme.onSurface), textAlign: TextAlign.center),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(what, style: t.bodyMedium)),
+                    ]),
+                  ),
                 const SizedBox(height: 16),
                 Text('worklog 폴더', style: t.titleMedium),
                 SelectableText(s.worklogDir, style: ZaevisTheme.mono),

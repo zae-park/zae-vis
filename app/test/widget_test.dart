@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -129,7 +129,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.enterText(find.byType(TextField), 'GA4 매핑');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
@@ -152,7 +152,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
 
@@ -185,7 +185,7 @@ void main() {
     posted.clear();
     final rec = _FakeRecorder();
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi(), recorder: rec));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: rec));
     await tester.tap(find.byTooltip('녹음'));
     await tester.pumpAndSettle();
     expect(find.text('눌러서 녹음 시작'), findsOneWidget);
@@ -209,7 +209,7 @@ void main() {
     addTearDown(tester.view.reset);
     final rec = _FakeRecorder()..permission = false;
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi(), recorder: rec));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: rec));
     await tester.tap(find.byTooltip('녹음'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('녹음 시작'));
@@ -220,12 +220,42 @@ void main() {
     expect(find.text('눌러서 녹음 시작'), findsNothing, reason: 'dialog closed');
   });
 
+  testWidgets('keyboard shortcuts: ⌘2 switches tab, ⌘K returns to search and focuses it, ⌘N opens 한 줄 기록', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    // Flutter test on macOS maps ⌘ to the meta key
+    Future<void> cmd(LogicalKeyboardKey key, {bool shift = false}) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(key);
+      if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await cmd(LogicalKeyboardKey.digit2);
+    expect(find.text('날짜순 한 줄 기록 — 내가 쓴 줄과 정리가 쓴 줄'), findsOneWidget, reason: 'log tab header');
+
+    await cmd(LogicalKeyboardKey.keyK);
+    expect(find.text('기록 전체를 뜻과 단어로 찾습니다'), findsOneWidget, reason: 'back on search');
+    final field = tester.widget<TextField>(find.byType(TextField).first);
+    expect(field.focusNode?.hasFocus, isTrue, reason: 'search field focused');
+
+    await cmd(LogicalKeyboardKey.keyN);
+    expect(find.text('한 줄 기록'), findsWidgets);
+    expect(find.text('무엇을 했고, 왜 그렇게 했는지'), findsOneWidget, reason: 'the add-log dialog is open');
+  });
+
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('로그').first);
     await tester.pumpAndSettle();
 
@@ -244,7 +274,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
   });
@@ -254,7 +284,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('수집').first);
     await tester.pumpAndSettle();
 
@@ -271,7 +301,7 @@ void main() {
     addTearDown(tester.view.reset);
     posted.clear();
 
-    await tester.pumpWidget(ZaevisApp(api: _fakeApi()));
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('로그').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('한 줄 기록'));

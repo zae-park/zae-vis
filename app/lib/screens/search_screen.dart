@@ -8,9 +8,12 @@ import '../widgets/markdown_view.dart';
 import 'file_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, required this.api, required this.onOpenIndex});
+  const SearchScreen({super.key, required this.api, required this.onOpenIndex, this.focusNode});
   final WorklogApi api;
   final VoidCallback onOpenIndex;
+
+  /// Owned by the shell so ⌘K can focus the field from anywhere.
+  final FocusNode? focusNode;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -45,6 +48,7 @@ class _SearchScreenState extends State<SearchScreen> {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
             child: SearchBar(
               controller: _controller,
+              focusNode: widget.focusNode,
               autoFocus: true,
               hintText: '무엇을 했는지, 왜 그렇게 정했는지 물어보세요 (예: GA4 캠페인 매핑)',
               leading: const Icon(Icons.search),
