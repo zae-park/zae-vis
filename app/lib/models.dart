@@ -427,3 +427,70 @@ class KeyCheck {
   final bool ok;
   final String message;
 }
+
+/// An agent the weekly digest can run with: a CLI on this Mac (user's own subscription) or the OpenRouter key.
+class AgentInfo {
+  const AgentInfo({required this.id, required this.title, required this.available, required this.detail});
+  factory AgentInfo.fromJson(Json j) =>
+      AgentInfo(id: _str(j['id']), title: _str(j['title']), available: j['available'] == true, detail: _str(j['detail']));
+  final String id; // claude | codex | gemini | openrouter
+  final String title;
+  final bool available;
+  final String detail;
+}
+
+class DigestRun {
+  const DigestRun({required this.at, required this.agent, required this.ok, required this.report});
+  factory DigestRun.fromJson(Json j) => DigestRun(
+        at: DateTime.tryParse(_str(j['lastRun'])),
+        agent: _str(j['agent']),
+        ok: j['ok'] == true,
+        report: _str(j['report']),
+      );
+  final DateTime? at;
+  final String agent;
+  final bool ok;
+  final String report;
+}
+
+/// GET /api/digest: detected agents, the setting, what would run, and the last run.
+class DigestStatus {
+  const DigestStatus({
+    required this.running,
+    required this.agent,
+    required this.model,
+    required this.weekly,
+    required this.agents,
+    this.chosen,
+    this.runningAgent,
+    this.last,
+    this.nextWeekly,
+  });
+
+  factory DigestStatus.fromJson(Json j) {
+    final s = j['setting'] is Json ? j['setting'] as Json : const <String, dynamic>{};
+    return DigestStatus(
+      running: j['running'] == true,
+      runningAgent: _strOrNull(j['agent']),
+      agent: _str(s['agent']).isEmpty ? 'auto' : _str(s['agent']),
+      model: _str(s['model']),
+      weekly: s['weekly'] != false,
+      agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
+      chosen: _strOrNull(j['chosen']),
+      last: j['last'] is Json ? DigestRun.fromJson(j['last'] as Json) : null,
+      nextWeekly: _strOrNull(j['nextWeekly']),
+    );
+  }
+
+  final bool running;
+  final String? runningAgent;
+  final String agent; // auto | claude | codex | gemini | openrouter
+  final String model;
+  final bool weekly;
+  final List<AgentInfo> agents;
+
+  /// The agent "auto" (or the explicit choice) resolves to right now; null when nothing can run.
+  final String? chosen;
+  final DigestRun? last;
+  final String? nextWeekly;
+}

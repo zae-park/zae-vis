@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -26,7 +28,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _reload() => setState(() => _future = widget.api.settings());
+  void _reload() => setState(() {
+        _future = widget.api.settings();
+      });
 
   bool get _managed => widget.backend?.managed == true;
 
@@ -162,6 +166,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (v) => _update(localEmbedding: v),
                 ),
                 if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
+                const SizedBox(height: 16),
+                Text('정리 (지식화)', style: t.titleMedium),
+                _DigestSection(api: widget.api),
                 const SizedBox(height: 16),
                 Text('확장', style: t.titleMedium),
                 ListTile(
@@ -325,5 +332,141 @@ class _RerankSectionState extends State<_RerankSection> {
         ]),
       ),
     ]);
+  }
+}
+
+/// Weekly digest ("지식화"): which agent on this Mac turns inbox + sources into log lines, project
+/// updates and monthly summaries. Runs with what the user already has — an installed agent CLI on
+/// their own subscription, or the saved OpenRouter key — and never asks for a new account.
+class _DigestSection extends StatefulWidget {
+  const _DigestSection({required this.api});
+  final WorklogApi api;
+
+  @override
+  State<_DigestSection> createState() => _DigestSectionState();
+}
+
+class _DigestSectionState extends State<_DigestSection> {
+  late Future<DigestStatus> _future = widget.api.digest();
+  Timer? _poll;
+  late final _model = TextEditingController();
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    _model.dispose();
+    super.dispose();
+  }
+
+  void _reload() => setState(() {
+        _future = widget.api.digest();
+      });
+
+  void _watch(DigestStatus s) {
+    _poll?.cancel();
+    if (s.running) _poll = Timer(const Duration(seconds: 4), _reload);
+  }
+
+  Future<void> _update({String? agent, String? model, bool? weekly}) async {
+    try {
+      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly);
+      if (mounted) toast(context, '저장했습니다');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    }
+    _reload();
+  }
+
+  Future<void> _run() async {
+    try {
+      await widget.api.runDigest();
+      if (mounted) toast(context, '정리를 시작했습니다. 몇 분 걸립니다.');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    }
+    _reload();
+  }
+
+  static const _labels = {'auto': '자동 (설치된 것 중 첫 번째)', 'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter API'};
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return FutureBuilder<DigestStatus>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) return const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator());
+        if (snap.hasError) return ErrorPane(error: snap.error!, onRetry: _reload);
+        final s = snap.data!;
+        _watch(s);
+        if (_model.text.isEmpty && s.model.isNotEmpty) _model.text = s.model;
+        final chosen = s.agents.where((a) => a.id == s.chosen).firstOrNull;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. '
+              '이 맥에 설치된 에이전트(본인 구독)나 저장된 OpenRouter 키 중 쓸 수 있는 것으로 돌립니다.', style: t.bodySmall),
+          const SizedBox(height: 8),
+          for (final a in s.agents)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(a.available ? Icons.check_circle_outline : Icons.radio_button_unchecked, color: a.available ? scheme.primary : scheme.outline),
+              title: Text(a.title),
+              subtitle: Text(a.detail, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: s.chosen == a.id ? const Chip(label: Text('사용'), visualDensity: VisualDensity.compact) : null,
+            ),
+          Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: s.agent,
+                decoration: const InputDecoration(labelText: '정리 에이전트'),
+                items: [for (final e in _labels.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+                onChanged: s.running ? null : (v) => v == null ? null : _update(agent: v),
+              ),
+            ),
+            if (s.agent == 'openrouter' || s.chosen == 'openrouter') ...[
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  controller: _model,
+                  decoration: const InputDecoration(labelText: 'OpenRouter 모델', hintText: 'anthropic/claude-sonnet-4.5'),
+                  onSubmitted: (v) => _update(model: v.trim()),
+                ),
+              ),
+            ],
+          ]),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.event_repeat),
+            title: const Text('매주 월요일 자동 정리'),
+            subtitle: Text(s.weekly ? '다음 실행: ${s.nextWeekly ?? '다음 월요일'} (매일 수집 뒤에 이어서)' : '끄면 아래 버튼으로만 실행합니다'),
+            value: s.weekly,
+            onChanged: s.running ? null : (v) => _update(weekly: v),
+          ),
+          Row(children: [
+            FilledButton.icon(
+              onPressed: s.running || chosen == null ? null : _run,
+              icon: s.running ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.auto_awesome),
+              label: Text(s.running ? '정리 중… (${_labels[s.runningAgent] ?? s.runningAgent})' : '지금 정리하기'),
+            ),
+            const SizedBox(width: 12),
+            if (chosen == null) Expanded(child: Text('쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI를 설치하거나 위에서 OpenRouter 키를 저장하세요.', style: t.bodySmall?.copyWith(color: scheme.error))),
+          ]),
+          if (s.last != null) ...[
+            const SizedBox(height: 8),
+            Text('마지막 정리: ${s.last!.ok ? '완료' : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
+                style: t.bodySmall?.copyWith(color: s.last!.ok ? null : scheme.error)),
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
+              child: SelectableText(s.last!.report.length > 1200 ? '…${s.last!.report.substring(s.last!.report.length - 1200)}' : s.last!.report,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12), maxLines: 14),
+            ),
+          ],
+        ]);
+      },
+    );
   }
 }

@@ -257,6 +257,20 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
       const month = args[0] ?? (await latest(api, "summaries"));
       return String((await api.get(`/summaries/${encodeURIComponent(month)}`)).markdown ?? "");
     }
+    case "digest": {
+      if (args.includes("--run")) {
+        const r = await api.post("/digest/run", {});
+        return r.started ? "정리를 시작했습니다. `zaevis digest`로 상태를 확인하세요." : c.yellow(String(r.reason ?? "시작하지 못했습니다"));
+      }
+      const s = await api.get("/digest");
+      const setting = (s.setting ?? {}) as J;
+      const agents = ((s.agents ?? []) as J[]).map((a) => `  ${a.available ? c.green("✓") : c.dim("○")} ${a.title}  ${c.dim(String(a.detail ?? ""))}${s.chosen === a.id ? c.cyan("  ← 사용") : ""}`);
+      const last = s.last as J | null;
+      const out = [`정리 에이전트: ${String(setting.agent ?? "auto")}${setting.weekly ? " · 매주 월요일 자동" : ""}`, ...agents];
+      if (s.running) out.push(c.yellow(`실행 중… (${String(s.agent)}, ${String(s.startedAt)})`));
+      if (last) out.push(`마지막: ${last.ok ? c.green("완료") : c.red("실패")} ${String(last.lastRun).slice(0, 16)} (${String(last.agent)})`, wrapIndent(String(last.report ?? "").slice(-600), "  "));
+      return out.join("\n");
+    }
     case "index":
       if (args.includes("--refresh") || args.includes("--force")) {
         await api.post("/index", { force: args.includes("--force") });

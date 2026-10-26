@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
+import { DigestRunner, detectAgents, pickAgent } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import * as rerank from "./rerank.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
@@ -29,6 +30,7 @@ rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== n
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
 const queue = new TranscribeQueue();
+const digest = new DigestRunner();
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
 const server = createApp({
@@ -71,6 +73,26 @@ const server = createApp({
       return this.get();
     },
     indexOnInject: () => cfg.indexOnInject,
+  },
+  digest: {
+    async status() {
+      const agents = await detectAgents();
+      const chosen = pickAgent(cfg.digest, agents);
+      return { ...digest.status(cfg.digest, cfg.worklogDir), setting: cfg.digest, agents, chosen: chosen?.id ?? null };
+    },
+    async update(patch) {
+      const agent = (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === patch.agent) ?? cfg.digest.agent;
+      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly } });
+      cfg = loadConfig();
+      return this.status();
+    },
+    async run() {
+      const chosen = pickAgent(cfg.digest, await detectAgents());
+      if (!chosen) return { started: false, reason: "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요." };
+      if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
+      void digest.run(cfg, cfg.digest, chosen);
+      return { started: true };
+    },
   },
   rerank: {
     status: () => rerank.status(cfg.rerank),

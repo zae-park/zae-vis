@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
+import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
@@ -70,6 +71,17 @@ async function main(): Promise<void> {
     const state = loadState();
     state.daily = { lastRun: new Date().toISOString(), ok: report.every((r) => r.ok), index };
     saveState(state);
+  }
+
+  // Mondays: the weekly digest, with whatever agent the user has (see digest.ts).
+  if (!only.length && weeklyDue(cfg.digest, cfg.worklogDir)) {
+    const chosen = pickAgent(cfg.digest, await detectAgents());
+    if (!chosen) console.log(`[${ts()}] 주간 정리 건너뜀: 쓸 수 있는 에이전트가 없습니다 (Claude Code·Codex·Gemini CLI 또는 OpenRouter 키).`);
+    else {
+      console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
+      const r = await new DigestRunner().run(cfg, cfg.digest, chosen);
+      console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
+    }
   }
   if (argv.includes("--json")) console.log(JSON.stringify({ report, index }));
   console.log(`[${ts()}] 끝`);

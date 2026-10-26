@@ -56,7 +56,7 @@ class WorklogApi {
       String? message;
       try {
         final j = jsonDecode(body);
-        if (j is Json && j['message'] is String) message = j['message'] as String;
+        if (j is Json) message = (j['message'] ?? j['reason']) is String ? (j['message'] ?? j['reason']) as String : null;
       } catch (_) {}
       throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'));
     }
@@ -197,6 +197,22 @@ class WorklogApi {
   /// Asks the server to check a key with OpenRouter (the stored key when [apiKey] is null).
   Future<KeyCheck> testRerankKey([String? apiKey]) async =>
       KeyCheck.fromJson(await _send('POST', '/settings/rerank/test', {if (apiKey != null) 'apiKey': apiKey}));
+
+  // ── weekly digest ────────────────────────────────────────────────────────
+  Future<DigestStatus> digest() async => DigestStatus.fromJson(await _get('/digest'));
+
+  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly}) async => DigestStatus.fromJson(
+        await _send('PUT', '/digest', {
+          if (agent != null) 'agent': agent,
+          if (model != null) 'model': model,
+          if (weekly != null) 'weekly': weekly,
+        }),
+      );
+
+  /// Starts a digest run; the server answers 409 (an [ApiException]) when nothing can run.
+  Future<void> runDigest() async {
+    await _send('POST', '/digest/run', {});
+  }
 
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 

@@ -68,6 +68,21 @@ WorklogApi _fakeApi() => WorklogApi(
               'schedule': {'supported': true, 'installed': true, 'loaded': true},
               'rerank': {'enabled': false, 'hasKey': false, 'keyHint': null, 'model': 'voyageai/rerank-3-lite', 'external': '없음 — 모든 검색은 이 맥 안에서 처리됩니다.'},
             });
+          case '/api/digest' when req.method == 'GET':
+            return _json({
+              'running': false, 'nextWeekly': '2026-11-02', 'chosen': 'claude',
+              'setting': {'agent': 'auto', 'model': '', 'weekly': true},
+              'agents': [
+                {'id': 'claude', 'title': 'Claude Code', 'available': true, 'detail': '2.1.304 (Claude Code)'},
+                {'id': 'codex', 'title': 'Codex CLI', 'available': false, 'detail': '설치되지 않음'},
+                {'id': 'gemini', 'title': 'Gemini CLI', 'available': false, 'detail': '설치되지 않음'},
+                {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
+              ],
+              'last': {'lastRun': '2026-10-26T12:00:00Z', 'agent': 'claude', 'ok': true, 'report': '로그 3줄 추가, inbox 1개 처리'},
+            });
+          case '/api/digest/run':
+            posted.add(req);
+            return _json({'started': true}, 202);
           case '/api/projects':
             return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
           case '/api/inbox/audio':
@@ -145,6 +160,19 @@ void main() {
     expect(find.text('검색 결과 재정렬 (OpenRouter)'), findsOneWidget);
     expect(find.textContaining('지금 외부로 나가는 요청: 없음'), findsOneWidget);
     expect(find.text('키 삭제'), findsNothing);
+
+    // the digest section lists detected agents, marks the one that will run, shows the last report
+    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('Claude Code'), findsOneWidget);
+    expect(find.text('Codex CLI'), findsOneWidget);
+    expect(find.text('사용'), findsOneWidget);
+    expect(find.textContaining('로그 3줄 추가'), findsOneWidget);
+    await tester.ensureVisible(find.text('지금 정리하기'));
+    await tester.pumpAndSettle();
+    // FilledButton.icon builds a private subclass, so match by predicate rather than exact type
+    await tester.tap(find.ancestor(of: find.text('지금 정리하기'), matching: find.byWidgetPredicate((w) => w is FilledButton)));
+    await tester.pumpAndSettle();
+    expect(posted.where((r) => r.url.path == '/api/digest/run').length, 1);
     // nothing to save yet: the save button stays disabled until a key is typed
     final save = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장'));
     expect(save.onPressed, isNull);

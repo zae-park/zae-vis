@@ -29,6 +29,13 @@ export type AppOptions = {
     update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
+  /** Weekly digest: agents found on this machine and the run itself. */
+  digest?: {
+    status(): Promise<Record<string, unknown>>;
+    update(patch: { agent?: string; model?: string; weekly?: boolean }): Promise<Record<string, unknown>>;
+    /** Starts a run in the background; `started: false` with a reason when nothing can run. */
+    run(): Promise<{ started: boolean; reason?: string }>;
+  };
   /** Optional OpenRouter re-ranking of search results. */
   rerank?: {
     status(): Record<string, unknown>;
@@ -356,6 +363,27 @@ export function createApp(opts: AppOptions): Server {
         case "GET /settings":
           if (!opts.settings) return notFound(res);
           return send(res, 200, await opts.settings.get());
+
+        case "GET /digest":
+          if (!opts.digest) return notFound(res);
+          return send(res, 200, await opts.digest.status());
+
+        case "PUT /digest": {
+          if (!opts.digest) return notFound(res);
+          const b = await readJson(req);
+          const patch: { agent?: string; model?: string; weekly?: boolean } = {};
+          if (typeof b.agent === "string") patch.agent = b.agent;
+          if (typeof b.model === "string") patch.model = b.model.trim();
+          if (typeof b.weekly === "boolean") patch.weekly = b.weekly;
+          return send(res, 200, await opts.digest.update(patch));
+        }
+
+        case "POST /digest": {
+          // POST /api/digest/run
+          if (arg !== "run" || !opts.digest) return notFound(res);
+          const r = await opts.digest.run();
+          return send(res, r.started ? 202 : 409, r);
+        }
 
         case "POST /settings": {
           // POST /api/settings/rerank/test — checks a key with OpenRouter without saving it

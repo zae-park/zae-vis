@@ -29,6 +29,7 @@ export type AppConfig = {
   indexOnInject: boolean; // re-index right after a log line / transcript is added
   localEmbedding: boolean; // keep a local `minsync serve` embedding daemon for semantic search (default on)
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
+  digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter"; model: string; weekly: boolean }; // weekly digest runner
   worklogDir: string;
   reposRoot: string;
   autoragConfig: string;
@@ -46,6 +47,11 @@ export function loadConfig(): AppConfig {
     indexOnInject: fc.indexOnInject === true,
     localEmbedding: fc.localEmbedding !== false,
     rerank: { enabled: fc.rerank?.enabled === true, model: typeof fc.rerank?.model === "string" && fc.rerank.model ? fc.rerank.model : "voyageai/rerank-3-lite" },
+    digest: {
+      agent: (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === fc.digest?.agent) ?? "auto",
+      model: typeof fc.digest?.model === "string" ? fc.digest.model : "",
+      weekly: fc.digest?.weekly !== false,
+    },
     worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
@@ -123,7 +129,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "rerank">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "rerank" | "digest">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }
@@ -134,6 +140,8 @@ export type CollectState = {
   daily?: { lastRun: string; ok: boolean; index: string };
   /** Vectors were built from scratch for this embedding model (so a first start re-indexes once). */
   embedding?: { model: string; builtAt: string };
+  /** Last weekly digest run. */
+  digest?: { lastRun: string; agent: string; ok: boolean; report: string };
 };
 
 export const stateFile = (): string => join(stateDir(), "state.json");

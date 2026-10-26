@@ -35,6 +35,8 @@
 | GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`) 포함 |
 | PUT | `/api/settings/rerank` | OpenRouter 재정렬 `{ enabled?, model?, apiKey? }` — `apiKey: ""`는 키 삭제. 키는 `secrets.json`(0600)에 저장되고 응답엔 끝 4자리만. AutoRAG 설정의 `rerank`를 다시 쓰고 검색 자식 프로세스를 재시작 |
 | POST | `/api/settings/rerank/test` | `{ apiKey? }` 키를 OpenRouter에 확인 (`{ ok, message }`), 저장하지 않음 |
+| GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키), 설정(`agent: auto|…`, `model`, `weekly`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last` |
+| POST | `/api/digest/run` | 지금 정리 시작 (202). 쓸 수 있는 에이전트가 없거나 이미 실행 중이면 409 `{ started: false, reason }` |
 
 GET이 아닌 요청은 `x-zaevis: 1` 헤더가 있어야 하고, 다른 사이트(Origin)나 다른 호스트 이름에서 온 요청은 거절합니다. 사용자 커넥터가 명령을 실행하기 때문에 넣은 보호 장치입니다.
 

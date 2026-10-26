@@ -19,6 +19,7 @@ let indexOnInject = false;
 let embeddingOn = false;
 let rerankOn = false;
 let rerankKey: string | null = null;
+let digestAgent = "auto";
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "zv-in-"));
@@ -60,6 +61,18 @@ before(async () => {
       indexOnInject: () => indexOnInject,
     },
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), jobs: () => [] },
+    digest: {
+      status: async () => ({ running: false, last: null, nextWeekly: null, setting: { agent: digestAgent, model: "", weekly: true }, agents: [{ id: "claude", title: "Claude Code", available: true, detail: "1.0" }], chosen: "claude" }),
+      update: async (p) => {
+        if (p.agent) digestAgent = p.agent;
+        calls.push(`digest:${JSON.stringify(p)}`);
+        return { setting: { agent: digestAgent, model: p.model ?? "", weekly: p.weekly ?? true } };
+      },
+      run: async () => {
+        calls.push("digest:run");
+        return digestAgent === "gemini" ? { started: false, reason: "없음" } : { started: true };
+      },
+    },
     rerank: {
       status: () => ({ enabled: rerankOn, hasKey: rerankKey !== null, keyHint: rerankKey?.slice(-4) ?? null, model: "m", external: rerankOn && rerankKey ? "OpenRouter" : "없음" }),
       update: async (p) => {
@@ -195,4 +208,19 @@ test("rerank: settings endpoints save the key without echoing it, test a key, 40
   assert.equal((await call("POST", "/api/settings/rerank", {})).status, 404);
   const off = await call("PUT", "/api/settings/rerank", { enabled: false, apiKey: "" });
   assert.equal(off.body.hasKey, false);
+});
+
+test("digest endpoints: status, update, run (202 / 409)", async () => {
+  const st = await call("GET", "/api/digest");
+  assert.equal(st.body.chosen, "claude");
+  assert.equal(st.body.agents[0].title, "Claude Code");
+  calls.length = 0;
+  assert.equal((await call("PUT", "/api/digest", { agent: "openrouter", model: " m ", weekly: false })).body.setting.agent, "openrouter");
+  assert.deepEqual(calls, ['digest:{"agent":"openrouter","model":"m","weekly":false}']);
+  assert.equal((await call("POST", "/api/digest/run", {})).status, 202);
+  await call("PUT", "/api/digest", { agent: "gemini" });
+  const r = await call("POST", "/api/digest/run", {});
+  assert.equal(r.status, 409);
+  assert.equal(r.body.reason, "없음");
+  assert.equal((await call("POST", "/api/digest", {})).status, 404);
 });
