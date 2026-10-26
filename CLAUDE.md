@@ -27,6 +27,7 @@
 - GUI 자체는 `ZAEVIS_HOME`을 바꿔 띄워 확인: 설정이 있으면 `zaevis start` 후 API를 호출하고, 없으면 마법사 화면(서버 호출 없음)
 - 의미 검색: 서버가 `minsync serve`(Qwen3-Embedding-0.6B, Metal)를 자식으로 띄운다(`server/src/embedding.ts`). AutoRAG는 `~/.cache/minsync/serve/*/port`와 `/health`로 데몬을 찾아 채택한다.
   설정 `localEmbedding`(기본 켬), 켜면 force 재색인. 일일 작업은 idle 300초짜리 데몬을 detached로 띄운다. 모델은 `~/.cache/minsync/models`(1.1GB)
+- 검색 결과 맥락: `server/src/context.ts`가 경로로 출처·날짜, 청크 안에서 질의에 가장 잘 맞는 문단(한국어 2글자 조각 매칭), 위쪽 `## 제목`(섹션), git 줄의 작성자를 뽑는다. 상위 대비 0.2 미만은 `weak`. 원문은 `GET /api/file?path=` → 앱 `file_screen.dart`
 - whisperX: `zaevis ext install whisperx`로 uv(`UV_UNMANAGED_INSTALL` → `$ZAEVIS_HOME/ext/uv`)·whisperx 3.8.6·imageio-ffmpeg 링크 확인, 설정 API `whisperx: true`
 
 남은 일
