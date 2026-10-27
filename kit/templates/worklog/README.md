@@ -38,7 +38,7 @@ worklog/
 - 유형 태그는 `#done`, `#decision`, `#blocked`, `#learned` 네 가지만 쓴다.
 - 프로젝트는 `[[slug]]` 링크로 적는다. slug는 `projects/` 파일명과 같다.
 - Claude가 쓴 줄은 끝에 `(src: …)`로 출처를 붙인다. 출처 없는 줄은 내가 쓴 줄이다.
-  - 전사본: `(src: 2026-10-06_회의명)` · 세션: `(src: claude-code 2026-10-06)` · 커밋: `(src: git <저장소> <해시 7자리>)` · 셸: `(src: shell 2026-10-06)` · 그 밖의 커넥터: `(src: <이름> 2026-10-06)`
+  - 전사본: `(src: 2026-10-06_회의명)` · 세션: `(src: agent-sessions 2026-10-06)` · 커밋: `(src: git <저장소> <해시 7자리>)` · 셸: `(src: shell 2026-10-06)` · 그 밖의 커넥터: `(src: <이름> 2026-10-06)`
 - 날짜순으로 쌓는다. 내가 쓴 줄은 Claude가 고치거나 지우지 않는다.
 
 ## 프로젝트 파일 형식 (`projects/<slug>.md`)
@@ -50,7 +50,7 @@ worklog/
 
 1. `.state.md`에서 마지막 정리 날짜를 읽는다. 없으면 7일 전부터.
 2. 입력을 읽는다.
-   - `sources/*/YYYY-MM-DD.md` 중 마지막 정리 날짜 이후 파일 전부 (git, claude-code, shell-history, transcripts, 사용자 커넥터)
+   - `sources/*/YYYY-MM-DD.md` 중 마지막 정리 날짜 이후 파일 전부 (git, agent-sessions, shell-history, transcripts, 사용자 커넥터)
    - `inbox/transcripts/`, `inbox/claude-sessions/`의 모든 파일
    - `sources/git/`이 비어 있으면(zaevis 수집 전) `{{REPOS_ROOT}}` 아래 git 저장소의 모든 커밋을 작성자와 함께 직접 읽는다 (`git log --all --format='%h %an %s'`)
 3. 완료·결정·블로커·배운 점을 뽑아 해당 월의 `log/YYYY-MM.md`에 한 줄씩 추가한다.

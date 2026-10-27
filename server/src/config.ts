@@ -79,7 +79,7 @@ export const sourcesFile = (): string => join(stateDir(), "sources.json");
 export function defaultSources(cfg: AppConfig): SourcesConfig {
   return {
     git: { enabled: true, reposRoot: cfg.reposRoot, depth: 3 },
-    "claude-code": { enabled: true, projectsDir: "~/.claude/projects" },
+    "agent-sessions": { enabled: true, claude: true, codex: true, gemini: true, chatgptExportDir: "" },
     "shell-history": { enabled: true, historyFile: "~/.zsh_history" },
     transcripts: {
       enabled: true,

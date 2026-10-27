@@ -139,7 +139,7 @@ export async function runSetup(opts: SetupOptions, ctx: SetupContext): Promise<v
       render(join(kit, "claude", "CLAUDE.md"), dest, vars, log);
     }
   } else {
-    log("2) Claude Code 작업은 claude-code 데이터소스가 세션 기록에서 직접 모읍니다 (CLAUDE.md 불필요)");
+    log("2) Claude Code·Codex·Gemini CLI 작업은 에이전트 세션 데이터소스가 로컬 기록에서 직접 모읍니다 (CLAUDE.md 불필요)");
   }
   excludeFromGit([worklog, join(repos, "CLAUDE.md")], [worklog, repos], log);
 

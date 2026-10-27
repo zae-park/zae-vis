@@ -187,7 +187,7 @@ export function runCli(bin: string, args: string[], cwd: string, opts: RunOpts =
 
 const RULES = `너는 개인 작업 기록(worklog)을 정리하는 비서다. 입력(수집 원본·전사본·세션 노트)을 읽고 JSON 하나만 출력한다.
 규칙: 한국어. 원본을 그대로 옮기지 않고 같은 날 같은 일은 의미 단위로 묶어 한 줄, 왜 했는지가 보이게. 셸 명령 이력은 다른 기록의 맥락 보충에만 쓴다.
-이미 있는 로그 줄과 같은 내용은 넣지 않는다. 로그·원본에 없는 사실은 쓰지 않는다. 각 줄의 src 는 근거 원본(파일명이나 "git <저장소> <해시7>", "claude-code YYYY-MM-DD").
+이미 있는 로그 줄과 같은 내용은 넣지 않는다. 로그·원본에 없는 사실은 쓰지 않는다. 각 줄의 src 는 근거 원본(파일명이나 "git <저장소> <해시7>", "claude-code YYYY-MM-DD", "agent-sessions YYYY-MM-DD").
 tags 는 done / decision / blocked / learned 중에서만. projects 의 slug 는 기존 프로젝트 slug 를 우선 쓰고, 분명히 새 프로젝트일 때만 새 slug(영문 소문자·숫자·하이픈)를 만든다.
 출력 형식:
 {"logLines":[{"date":"YYYY-MM-DD","projects":["slug"],"tags":["done"],"text":"…","src":"…"}],
