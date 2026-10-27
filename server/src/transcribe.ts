@@ -84,6 +84,9 @@ export class TranscribeQueue {
   private chain: Promise<unknown> = Promise.resolve();
   readonly jobs: Array<{ file: string; state: "queued" | "running" | "done" | "failed"; result?: string; error?: string; at: string }> = [];
 
+  /** Called when a job finishes either way (the server turns this into an OS notification). */
+  onDone?: (job: TranscribeQueue["jobs"][number]) => void;
+
   enqueue(audio: string, worklogDir: string, opts: TranscribeOptions): void {
     const job = { file: basename(audio), state: "queued" as const, at: new Date().toISOString() } as (typeof this.jobs)[number];
     this.jobs.unshift(job);
@@ -97,6 +100,9 @@ export class TranscribeQueue {
         job.state = "failed";
         job.error = (err as Error).message;
       }
+      try {
+        this.onDone?.(job);
+      } catch {}
     });
   }
 

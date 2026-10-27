@@ -22,7 +22,7 @@ export type Source = {
   title: string;
   description: string;
   /** Option keys shown in the front-end settings form, with labels. */
-  options: Array<{ key: string; label: string; kind: "text" | "path" | "paths" | "number" }>;
+  options: Array<{ key: string; label: string; kind: "text" | "path" | "paths" | "number" | "bool"; /** one line under the field in the app */ help?: string }>;
   /** Event-style sources (each run reports only what it just did) append to the day file instead of replacing it. */
   append?: boolean;
   collect(ctx: CollectContext): Promise<CollectResult>;

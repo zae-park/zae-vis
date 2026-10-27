@@ -11,7 +11,9 @@ import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
 import { DigestRunner, detectAgents, pickAgent } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
+import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
+import * as review from "./review.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
@@ -30,7 +32,8 @@ rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== n
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
 const queue = new TranscribeQueue();
-const digest = new DigestRunner();
+const digest = new DigestRunner({ notify });
+queue.onDone = (job) => notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
 const server = createApp({
@@ -60,6 +63,8 @@ const server = createApp({
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
         localEmbedding: cfg.localEmbedding,
+        notifications: cfg.notifications,
+        hotkey: cfg.hotkey,
         rerank: rerank.status(cfg.rerank),
       };
     },
@@ -82,9 +87,34 @@ const server = createApp({
     },
     async update(patch) {
       const agent = (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === patch.agent) ?? cfg.digest.agent;
-      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly } });
+      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly, review: patch.review ?? cfg.digest.review } });
       cfg = loadConfig();
       return this.status();
+    },
+    proposals: () => review.listProposals(),
+    proposal: (id) => review.loadProposal(id),
+    async act(id, body) {
+      const p = await review.loadProposal(id);
+      if (!p || p.status !== "pending") return null;
+      if (body.action === "dismiss") {
+        p.status = "dismissed";
+        await review.saveProposal(p);
+        return { ok: true, status: p.status };
+      }
+      const nums = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : undefined);
+      const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined);
+      const applied = await review.applyProposal(cfg.worklogDir, p, {
+        lines: nums(body.lines),
+        projects: strs(body.projects),
+        summaries: typeof body.summaries === "boolean" ? body.summaries : undefined,
+        processed: typeof body.processed === "boolean" ? body.processed : undefined,
+      });
+      p.status = "applied";
+      p.appliedAt = new Date().toISOString();
+      await review.saveProposal(p);
+      if (cfg.indexOnInject) void search.refresh(false).catch(() => {});
+      notify("정리 적용", `로그 ${applied.lines}줄 · 프로젝트 ${applied.projects.length}개가 worklog에 들어갔습니다.`);
+      return { ok: true, status: p.status, applied };
     },
     async run() {
       const chosen = pickAgent(cfg.digest, await detectAgents());

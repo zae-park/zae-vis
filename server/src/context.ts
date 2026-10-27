@@ -23,6 +23,7 @@ export type HitContext = {
 const SOURCE_LABELS: Record<string, string> = {
   git: "git 커밋",
   "claude-code": "Claude Code 세션",
+  "agent-sessions": "에이전트 세션",
   "shell-history": "터미널 명령",
   transcripts: "회의 전사본",
 };

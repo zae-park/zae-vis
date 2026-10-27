@@ -40,8 +40,8 @@ export function parseZshHistory(text: string): { entries: HistoryEntry[]; extend
 export const shellHistorySource: Source = {
   name: "shell-history",
   title: "셸 명령 이력",
-  description: "zsh 히스토리에서 의미 있는 명령을 시간순으로 모읍니다. 비밀번호·토큰은 가립니다.",
-  options: [{ key: "historyFile", label: "히스토리 파일", kind: "path" }],
+  description: "터미널에서 친 명령(zsh 히스토리)을 시간순으로 모읍니다. 어떤 저장소에서 무엇을 빌드·배포·실행했는지의 흔적이며, cd·ls 같은 잡음과 비밀번호·토큰은 거릅니다. 시각이 남으려면 zsh에 `setopt EXTENDED_HISTORY`가 켜져 있어야 합니다.",
+  options: [{ key: "historyFile", label: "히스토리 파일", kind: "path", help: "기본 ~/.zsh_history. bash는 지원하지 않습니다." }],
   async collect({ from, to, settings }) {
     const file = expandHome(String(settings.historyFile ?? "~/.zsh_history"));
     let buf: Buffer;

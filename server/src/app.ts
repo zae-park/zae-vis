@@ -26,15 +26,20 @@ export type AppOptions = {
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
-    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean }): Promise<Record<string, unknown>>;
+    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
   /** Weekly digest: agents found on this machine and the run itself. */
   digest?: {
     status(): Promise<Record<string, unknown>>;
-    update(patch: { agent?: string; model?: string; weekly?: boolean }): Promise<Record<string, unknown>>;
+    update(patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean }): Promise<Record<string, unknown>>;
     /** Starts a run in the background; `started: false` with a reason when nothing can run. */
     run(): Promise<{ started: boolean; reason?: string }>;
+    /** Review flow: proposals a run left for the user to approve. */
+    proposals(): Promise<unknown[]>;
+    proposal(id: string): Promise<unknown | null>;
+    /** `apply` with a selection, or `dismiss`. Null when the proposal does not exist or is not pending. */
+    act(id: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   };
   /** Optional OpenRouter re-ranking of search results. */
   rerank?: {
@@ -396,25 +401,43 @@ export function createApp(opts: AppOptions): Server {
           if (!opts.settings) return notFound(res);
           return send(res, 200, await opts.settings.get());
 
-        case "GET /digest":
+        case "GET /digest": {
           if (!opts.digest) return notFound(res);
+          if (arg === "proposals") {
+            // GET /api/digest/proposals · GET /api/digest/proposals/:id
+            const id = parts[3];
+            if (!id) return send(res, 200, { proposals: await opts.digest.proposals() });
+            const p = await opts.digest.proposal(id);
+            return p ? send(res, 200, p) : notFound(res);
+          }
+          if (arg) return notFound(res);
           return send(res, 200, await opts.digest.status());
+        }
 
         case "PUT /digest": {
           if (!opts.digest) return notFound(res);
           const b = await readJson(req);
-          const patch: { agent?: string; model?: string; weekly?: boolean } = {};
+          const patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean } = {};
           if (typeof b.agent === "string") patch.agent = b.agent;
           if (typeof b.model === "string") patch.model = b.model.trim();
           if (typeof b.weekly === "boolean") patch.weekly = b.weekly;
+          if (typeof b.review === "boolean") patch.review = b.review;
           return send(res, 200, await opts.digest.update(patch));
         }
 
         case "POST /digest": {
-          // POST /api/digest/run
-          if (arg !== "run" || !opts.digest) return notFound(res);
-          const r = await opts.digest.run();
-          return send(res, r.started ? 202 : 409, r);
+          if (!opts.digest) return notFound(res);
+          if (arg === "run") {
+            const r = await opts.digest.run();
+            return send(res, r.started ? 202 : 409, r);
+          }
+          if (arg === "proposals" && parts[3]) {
+            // POST /api/digest/proposals/:id { action: "apply", lines?, projects?, summaries?, processed? } | { action: "dismiss" }
+            const b = await readJson(req);
+            const r = await opts.digest.act(parts[3], b);
+            return r ? send(res, 200, r) : send(res, 409, { error: "not_pending", message: "검토할 제안이 없거나 이미 처리됐습니다." });
+          }
+          return notFound(res);
         }
 
         case "POST /settings": {
@@ -438,10 +461,12 @@ export function createApp(opts: AppOptions): Server {
           if (arg) return notFound(res);
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
-          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean } = {};
+          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string } = {};
           if (typeof b.dailyAt === "string") patch.dailyAt = b.dailyAt;
           if (typeof b.indexOnInject === "boolean") patch.indexOnInject = b.indexOnInject;
           if (typeof b.localEmbedding === "boolean") patch.localEmbedding = b.localEmbedding;
+          if (typeof b.notifications === "boolean") patch.notifications = b.notifications;
+          if (typeof b.hotkey === "string" && /^[a-z0-9+]{0,60}$/i.test(b.hotkey)) patch.hotkey = b.hotkey; // "meta+shift+space", "" = default
           try {
             const out = await opts.settings.update(patch);
             if (patch.localEmbedding !== undefined && opts.embedding) {

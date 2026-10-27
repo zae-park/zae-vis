@@ -16,10 +16,12 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
+import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
 import { Worklog } from "./worklog.ts";
 
 export type AgentId = "claude" | "codex" | "gemini" | "openrouter";
-export type DigestSetting = { agent: "auto" | AgentId; model: string; weekly: boolean };
+/** `review`: lift the run's changes into a proposal the user approves in the app (default), or apply directly. */
+export type DigestSetting = { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean };
 
 export type AgentInfo = {
   id: AgentId;
@@ -30,7 +32,7 @@ export type AgentInfo = {
   bin?: string;
 };
 
-export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string };
+export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string };
 export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; last: DigestRun | null; nextWeekly: string | null };
 
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5";
@@ -337,9 +339,9 @@ export async function runOpenRouter(cfg: Pick<AppConfig, "worklogDir">, model: s
 
 export class DigestRunner {
   private running: { startedAt: string; agent: AgentId; promise: Promise<DigestRun> } | null = null;
-  private readonly opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch };
+  private readonly opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; notify?: (title: string, body: string) => void };
 
-  constructor(opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch } = {}) {
+  constructor(opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; notify?: (title: string, body: string) => void } = {}) {
     this.opts = opts;
   }
 
@@ -363,7 +365,9 @@ export class DigestRunner {
       void appendFile(logFile, `[${new Date().toLocaleString("sv-SE")}] ${line}\n`).catch(() => {});
     };
     const promise = (async (): Promise<DigestRun> => {
-      log(`정리 시작 (${agent.title})`);
+      log(`정리 시작 (${agent.title}${setting.review ? ", 검토 후 적용" : ""})`);
+      // Review mode: remember the worklog, let the agent work, then lift its changes into a proposal.
+      const before = setting.review ? await takeSnapshot(cfg.worklogDir) : null;
       let r: { ok: boolean; output: string };
       try {
         if (agent.id === "openrouter") r = await runOpenRouter(cfg, setting.model || DEFAULT_OPENROUTER_MODEL, { fetchImpl: this.opts.fetchImpl, log });
@@ -371,8 +375,26 @@ export class DigestRunner {
       } catch (err) {
         r = { ok: false, output: (err as Error).message };
       }
+      let proposalId: string | undefined;
+      if (before) {
+        const diff = await diffSnapshot(cfg.worklogDir, before);
+        await restoreSnapshot(cfg.worklogDir, before);
+        if (!isEmptyProposal(diff)) {
+          proposalId = newProposalId();
+          await saveProposal({ id: proposalId, createdAt: new Date().toISOString(), agent: agent.id, report: r.output.slice(-4000), status: "pending", ...diff });
+          const summary = `검토 대기: 로그 ${diff.logLines.length}줄 · 프로젝트 ${diff.projects.length}개 · inbox ${diff.processed.length}개${diff.summaries.length ? ` · 월간 초안 ${diff.summaries.length}` : ""}${diff.removedLines.length ? ` · 지운 줄 ${diff.removedLines.length}(검토 필요)` : ""}`;
+          log(summary);
+          r = { ok: r.ok, output: `${summary}\n\n${r.output}` };
+        } else if (r.ok) {
+          r = { ok: true, output: `바뀐 것이 없습니다.\n\n${r.output}` };
+        }
+      }
       log(`정리 ${r.ok ? "완료" : "실패"}: ${r.output.split("\n").slice(-3).join(" / ")}`);
-      const run: DigestRun = { lastRun: new Date().toISOString(), agent: agent.id, ok: r.ok, report: r.output.slice(-4000) };
+      const run: DigestRun = { lastRun: new Date().toISOString(), agent: agent.id, ok: r.ok, report: r.output.slice(-4000), ...(proposalId ? { proposalId } : {}) };
+      this.opts.notify?.(
+        proposalId ? "정리 제안이 준비됐습니다" : r.ok ? "정리 완료" : "정리 실패",
+        proposalId ? "앱의 로그 탭이나 설정 → 정리에서 검토하고 적용하세요." : r.output.split("\n").find((l) => l.trim()) ?? "",
+      );
       const state = loadState() as Record<string, unknown>;
       state.digest = run;
       saveState(state as never);

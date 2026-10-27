@@ -72,6 +72,12 @@ before(async () => {
         calls.push("digest:run");
         return digestAgent === "gemini" ? { started: false, reason: "없음" } : { started: true };
       },
+      proposals: async () => [{ id: "p1", status: "pending", lines: 2 }],
+      proposal: async (id) => (id === "p1" ? { id, status: "pending", logLines: [{ month: "2026-10", line: "- 10-20 x" }] } : null),
+      act: async (id, body) => {
+        calls.push(`act:${id}:${JSON.stringify(body)}`);
+        return id === "p1" ? { ok: true, status: body.action === "dismiss" ? "dismissed" : "applied" } : null;
+      },
     },
     rerank: {
       status: () => ({ enabled: rerankOn, hasKey: rerankKey !== null, keyHint: rerankKey?.slice(-4) ?? null, model: "m", external: rerankOn && rerankKey ? "OpenRouter" : "없음" }),
@@ -208,6 +214,20 @@ test("rerank: settings endpoints save the key without echoing it, test a key, 40
   assert.equal((await call("POST", "/api/settings/rerank", {})).status, 404);
   const off = await call("PUT", "/api/settings/rerank", { enabled: false, apiKey: "" });
   assert.equal(off.body.hasKey, false);
+});
+
+test("digest proposals: list, get, apply with a selection, dismiss, 409 when gone", async () => {
+  assert.deepEqual((await call("GET", "/api/digest/proposals")).body.proposals.map((p: { id: string }) => p.id), ["p1"]);
+  assert.equal((await call("GET", "/api/digest/proposals/p1")).body.logLines.length, 1);
+  assert.equal((await call("GET", "/api/digest/proposals/nope")).status, 404);
+  calls.length = 0;
+  const r = await call("POST", "/api/digest/proposals/p1", { action: "apply", lines: [0], projects: ["a"], summaries: false });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, "applied");
+  assert.deepEqual(calls, ['act:p1:{"action":"apply","lines":[0],"projects":["a"],"summaries":false}']);
+  assert.equal((await call("POST", "/api/digest/proposals/p1", { action: "dismiss" })).body.status, "dismissed");
+  assert.equal((await call("POST", "/api/digest/proposals/gone", { action: "apply" })).status, 409);
+  assert.equal((await call("PUT", "/api/digest", { review: false })).status, 200);
 });
 
 test("digest endpoints: status, update, run (202 / 409)", async () => {

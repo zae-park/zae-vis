@@ -28,8 +28,10 @@ export type AppConfig = {
   dailyAt: string;        // "18:30" — daily collect + index (launchd)
   indexOnInject: boolean; // re-index right after a log line / transcript is added
   localEmbedding: boolean; // keep a local `minsync serve` embedding daemon for semantic search (default on)
+  notifications: boolean; // OS notifications for digest / collect / transcription results (default on)
+  hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
-  digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter"; model: string; weekly: boolean }; // weekly digest runner
+  digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter"; model: string; weekly: boolean; review: boolean }; // weekly digest runner
   worklogDir: string;
   reposRoot: string;
   autoragConfig: string;
@@ -46,11 +48,14 @@ export function loadConfig(): AppConfig {
     dailyAt: /^\d{2}:\d{2}$/.test(String(fc.dailyAt)) ? String(fc.dailyAt) : "18:30",
     indexOnInject: fc.indexOnInject === true,
     localEmbedding: fc.localEmbedding !== false,
+    notifications: fc.notifications !== false,
+    hotkey: typeof fc.hotkey === "string" ? fc.hotkey : "",
     rerank: { enabled: fc.rerank?.enabled === true, model: typeof fc.rerank?.model === "string" && fc.rerank.model ? fc.rerank.model : "voyageai/rerank-3-lite" },
     digest: {
       agent: (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === fc.digest?.agent) ?? "auto",
       model: typeof fc.digest?.model === "string" ? fc.digest.model : "",
       weekly: fc.digest?.weekly !== false,
+      review: fc.digest?.review !== false,
     },
     worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
@@ -129,7 +134,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "rerank" | "digest">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }

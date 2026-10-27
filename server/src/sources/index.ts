@@ -5,14 +5,16 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadSources, loadState, saveState, type AppConfig, type SourceSettings } from "../config.ts";
-import { claudeCodeSource } from "./claudeCode.ts";
+import { agentsSource } from "./agents.ts";
 import { commandSource, SAFE_NAME } from "./command.ts";
 import { gitSource } from "./git.ts";
 import { shellHistorySource } from "./shellHistory.ts";
 import { transcriptsSource } from "./transcripts.ts";
 import { startOfDay, type Source } from "./types.ts";
 
-export const BUILTIN: Source[] = [gitSource, claudeCodeSource, shellHistorySource, transcriptsSource];
+// "agent-sessions" replaced the "claude-code" card (2026-10-27); day files it wrote stay under
+// worklog/sources/claude-code/ and remain searchable.
+export const BUILTIN: Source[] = [gitSource, agentsSource, shellHistorySource, transcriptsSource];
 
 export type SourceInfo = {
   name: string;

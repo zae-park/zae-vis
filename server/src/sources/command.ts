@@ -3,7 +3,8 @@
 //   ~/.zaevis/sources.json
 //   { "custom": [ { "name": "slack", "command": "python3 ~/bin/slack_export.py --since {from} --until {to}" } ] }
 //
-// {from} / {to} are replaced with ISO timestamps. Output goes to today's file, or split by
+// {from} / {to} are replaced with ISO timestamps, {fromDate} / {toDate} with YYYY-MM-DD (for tools
+// like `find -newermt` that do not parse the long form). Output goes to today's file, or split by
 // lines of the form "<!-- zaevis:date 2026-10-21 -->" to place sections on specific days.
 
 import { exec } from "node:child_process";
@@ -40,7 +41,11 @@ export function commandSource(name: string, command: string, description?: strin
     description: description ?? `사용자 커넥터: ${command}`,
     options: [{ key: "command", label: "실행할 명령", kind: "text" }],
     async collect({ from, to }) {
-      const cmd = command.replaceAll("{from}", from.toISOString()).replaceAll("{to}", to.toISOString());
+      const cmd = command
+        .replaceAll("{fromDate}", dayKey(from))
+        .replaceAll("{toDate}", dayKey(to))
+        .replaceAll("{from}", from.toISOString())
+        .replaceAll("{to}", to.toISOString());
       const stdout = await new Promise<string>((resolve, reject) => {
         exec(cmd, { shell: process.env.SHELL || "/bin/sh", maxBuffer: 32 * 1024 * 1024, timeout: 10 * 60_000 }, (err, so, se) =>
           err ? reject(new Error(`명령 실패: ${String(se || err.message).trim().split("\n").slice(-2).join(" ")}`)) : resolve(so),

@@ -71,7 +71,9 @@ test("claude-code: summarise prompts, files, commands, last answer; skip noise",
   assert.match(md, /폴더: `~\/jaepark\/roas` · 브랜치 `main`/);
   assert.match(md, /수정한 파일 \(1\): `~\/jaepark\/roas\/score.py`/);
   assert.match(md, /`pytest -q`/);
-  assert.match(md, /마지막 응답: 분리 채점을 추가했습니다\./);
+  assert.match(md, /- 요청과 응답 \(\d+\):\n  - 요청: /);
+  assert.match(md, /    응답: 분리 채점을 추가했습니다\./);
+  assert.doesNotMatch(md, /마지막 응답/);
   assert.equal(userText({ type: "user", message: { content: [{ type: "tool_result" }] } }), null);
 });
 
@@ -144,7 +146,7 @@ test("collect(): writes day files, appends for event sources, records state; whi
     join(process.env.ZAEVIS_HOME, "sources.json"),
     JSON.stringify({
       git: { enabled: false },
-      "claude-code": { enabled: false },
+      "agent-sessions": { enabled: false },
       "shell-history": { enabled: false },
       transcripts: { importDirs: [exportDir] },
       custom: [{ name: "memo", command: "printf '<!-- zaevis:date 2026-10-21 -->\\n- 메모 하나\\n'" }, { name: "Bad Name!", command: "true" }],
@@ -172,7 +174,7 @@ test("collect(): writes day files, appends for event sources, records state; whi
 
   assert.equal(loadState().sources.memo.lastOk, true);
   const names = listSources(cfg).map((s) => s.name);
-  assert.deepEqual(names, ["git", "claude-code", "shell-history", "transcripts", "memo"]); // invalid custom name skipped
+  assert.deepEqual(names, ["git", "agent-sessions", "shell-history", "transcripts", "memo"]); // invalid custom name skipped
 
   delete process.env.ZAEVIS_HOME;
   delete process.env.ZAEVIS_WHISPERX;

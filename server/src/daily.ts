@@ -8,6 +8,7 @@ import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
+import { notify } from "./notify.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
 
@@ -54,6 +55,8 @@ async function main(): Promise<void> {
   for (const r of report) {
     console.log(r.ok ? `  ✓ ${r.name}: ${r.note ?? ""}${r.days.length ? ` (${r.days.join(", ")})` : ""}` : `  ✗ ${r.name}: ${r.error}`);
   }
+  const failed = report.filter((r) => !r.ok && !/시각이 없습니다/.test(r.error ?? "")); // the zsh timestamp hint is not news
+  if (!only.length && failed.length) notify("수집 실패", failed.map((r) => `${r.name}: ${r.error}`).join(" · "));
 
   let index = "건너뜀";
   if (!argv.includes("--no-index")) {
@@ -79,7 +82,7 @@ async function main(): Promise<void> {
     if (!chosen) console.log(`[${ts()}] 주간 정리 건너뜀: 쓸 수 있는 에이전트가 없습니다 (Claude Code·Codex·Gemini CLI 또는 OpenRouter 키).`);
     else {
       console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
-      const r = await new DigestRunner().run(cfg, cfg.digest, chosen);
+      const r = await new DigestRunner({ notify }).run(cfg, cfg.digest, chosen);
       console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
     }
   }
