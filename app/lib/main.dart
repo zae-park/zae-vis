@@ -4,9 +4,9 @@ import 'api.dart';
 import 'backend/backend.dart';
 import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
-import 'screens/log_screen.dart';
+import 'screens/memory_screen.dart';
 import 'screens/onboarding_screen.dart';
-import 'screens/projects_screen.dart';
+import 'screens/projects_screen.dart' show openProject;
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/reports_screen.dart';
@@ -118,8 +118,7 @@ class _Dest {
 
 const _dests = [
   _Dest('검색', Icons.search, Icons.search, '기록 전체를 뜻과 단어로 찾습니다'),
-  _Dest('로그', Icons.list_alt_outlined, Icons.list_alt, '날짜순 한 줄 기록 — 내가 쓴 줄과 정리가 쓴 줄'),
-  _Dest('프로젝트', Icons.folder_outlined, Icons.folder, '프로젝트별 현재 상태 · 결정 · 열린 문제'),
+  _Dest('메모리', Icons.memory_outlined, Icons.memory, '기록 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'),
   _Dest('리포트', Icons.summarize_outlined, Icons.summarize, '일간 · 주간 · 월간 리포트'),
   _Dest('연결', Icons.hub_outlined, Icons.hub, '데이터소스와 외부 서비스 연결, inbox, 바로 넣기'),
 ];
@@ -203,9 +202,8 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _screen() => switch (_index) {
         0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), onOpenSettings: _openSettings, focusNode: _searchFocus),
-        1 => LogScreen(api: api, onOpenProject: _openProject),
-        2 => ProjectsScreen(api: api),
-        3 => ReportsScreen(api: api, onOpenProject: _openProject),
+        1 => MemoryScreen(api: api, onOpenProject: _openProject),
+        2 => ReportsScreen(api: api, onOpenProject: _openProject),
         _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
       };
 

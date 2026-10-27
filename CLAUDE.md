@@ -50,6 +50,8 @@
 남은 일
 - Claude Code 세션엔 손쉬운 사용·화면 녹화 권한이 없어 GUI 클릭·스크린샷은 자동화하지 못했다. 마법사 버튼 클릭은 사람이 한 번 눌러 확인할 것
 - shell-history는 `setopt EXTENDED_HISTORY`가 없는 zsh 이력에서 시각이 없어 실패한다 (안내 메시지는 나온다)
+- 외부 소스 CLI 설치(2026-10-27): openclaw 크롤러(slacrawl·notcrawl·discrawl·wacrawl·telecrawl)는 **npm에 없다** — `brew install openclaw/tap/<이름>`. lazykatok은 GitHub 릴리스 tar.gz(aarch64-apple-darwin). mailcrawl·clawgallery는 자동 경로 없음. `zaevis ext install <cli>`(zaevis.ts `extInstallCli`)가 `datasources.ts installPlan()`대로 설치하고, 앱 카드의 설치 버튼이 `runBackendTask`(widgets/task_dialog.dart)로 그것을 돌린다. 토큰은 `secrets.json`의 `env:<NAME>`(rerank.ts `setEnvSecret`)에 두고 main.ts가 검색 자식 env에 `secretsEnv()`+`cliPath()`를 넣는다. 레이아웃: `Readable`은 기본으로 창 너비를 채우고 산문 화면만 `maxWidth`를 준다
+- 메모리 탭(2026-10-27): 로그·프로젝트 탭을 `screens/memory_screen.dart` 하나로 합쳤다 — 기록(LogScreen 재사용; `_EntryTile`에 내 기록/정리 표시와 `출처` 링크 → `GET /api/origin?src=` → FileScreen), 원본(`GET /api/origins`로 날짜별 파일 칩 + 기록 줄의 src로 인용 수 계산), 상태(프로젝트 패널, 폭 1040 이상은 오른쪽). 위 안내 띠 `_FlowStrip`. 탭은 검색·메모리·리포트·연결 넷, 단축키 ⌘1~4. `Worklog.origins()/resolveSource()`, `file()`은 .txt도 허용
 - 질문 모드는 격리 환경(ZAEVIS_HOME=/tmp/zv-test, Claude Code)에서만 실제 확인했다. Codex·Gemini는 이 Mac에 없어 인자만 테스트로 고정했으니 설치된 곳에서 한 번 돌려볼 것
 
 ## 규칙

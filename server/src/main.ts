@@ -29,7 +29,9 @@ if (!existsSync(cfg.worklogDir)) {
 }
 
 // The search child only sees the OpenRouter key while re-ranking is turned on.
-const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => rerank.childEnv(cfg.rerank) });
+// the search child spawns connector CLIs (slacrawl, rclone …) and reads their tokens from env: give it
+// the stored secrets and a PATH that covers Homebrew, npm and zaevis's own ext folder
+const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => ({ ...datasources.secretsEnv(), ...rerank.childEnv(cfg.rerank), PATH: datasources.cliPath() }) });
 // Keep AutoRAG's config in step with the setting (also clears the lite-init defaults on first start).
 rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== null);
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.

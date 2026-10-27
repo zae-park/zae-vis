@@ -287,6 +287,17 @@ export function createApp(opts: AppOptions): Server {
           return send(res, 200, r.result);
         }
 
+        case "GET /origins":
+          // GET /api/origins?limit= → { files[{ path, source, kind, date, name, bytes }] } newest first
+          return send(res, 200, { files: await worklog.origins(Math.min(Math.max(Number(url.searchParams.get("limit")) || 400, 1), 2000)) });
+
+        case "GET /origin": {
+          // GET /api/origin?src=<the (src: …) text> → { paths[] } — the files a log line came from
+          const src = (url.searchParams.get("src") ?? "").trim();
+          if (!src) return send(res, 400, { error: "missing_src" });
+          return send(res, 200, { src, paths: await worklog.resolveSource(src) });
+        }
+
         case "GET /file": {
           const rel = (url.searchParams.get("path") ?? "").trim();
           if (!rel) return send(res, 400, { error: "missing_path" });
@@ -447,6 +458,7 @@ export function createApp(opts: AppOptions): Server {
           if (typeof b.type === "string" && b.type) patch.type = b.type;
           if (b.connector && typeof b.connector === "object" && !Array.isArray(b.connector)) patch.connector = b.connector;
           if (b.channels && typeof b.channels === "object" && !Array.isArray(b.channels)) patch.channels = b.channels;
+          if (b.secrets && typeof b.secrets === "object" && !Array.isArray(b.secrets)) patch.secrets = b.secrets;
           let saved;
           try {
             saved = await opts.datasources.save(arg, patch);
