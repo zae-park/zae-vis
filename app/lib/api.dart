@@ -216,13 +216,46 @@ class WorklogApi {
   // ── weekly digest ────────────────────────────────────────────────────────
   Future<DigestStatus> digest() async => DigestStatus.fromJson(await _get('/digest'));
 
-  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly}) async => DigestStatus.fromJson(
+  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly, bool? review}) async => DigestStatus.fromJson(
         await _send('PUT', '/digest', {
           if (agent != null) 'agent': agent,
           if (model != null) 'model': model,
           if (weekly != null) 'weekly': weekly,
+          if (review != null) 'review': review,
         }),
       );
+
+  // ── review of a digest run ───────────────────────────────────────────────
+  /// Pending/applied/dismissed digest runs, newest first. An older server without the review flow
+  /// answers 404, which reads as "none".
+  Future<List<ProposalSummary>> proposals() async {
+    final Json j;
+    try {
+      j = await _get('/digest/proposals');
+    } on ApiException catch (e) {
+      if (e.status == 404) return const [];
+      rethrow;
+    }
+    final list = j['proposals'] is List ? j['proposals'] as List : const <Object?>[];
+    return list.whereType<Json>().map(ProposalSummary.fromJson).toList();
+  }
+
+  Future<Proposal> proposal(String id) async => Proposal.fromJson(await _get('/digest/proposals/${Uri.encodeComponent(id)}'));
+
+  /// Writes the chosen parts of a proposal into the worklog. Null selections mean "everything".
+  Future<void> applyProposal(String id, {List<int>? lines, List<String>? projects, bool? summaries, bool? processed}) async {
+    await _send('POST', '/digest/proposals/${Uri.encodeComponent(id)}', {
+      'action': 'apply',
+      if (lines != null) 'lines': lines,
+      if (projects != null) 'projects': projects,
+      if (summaries != null) 'summaries': summaries,
+      if (processed != null) 'processed': processed,
+    });
+  }
+
+  Future<void> dismissProposal(String id) async {
+    await _send('POST', '/digest/proposals/${Uri.encodeComponent(id)}', {'action': 'dismiss'});
+  }
 
   /// Starts a digest run; the server answers 409 (an [ApiException]) when nothing can run.
   Future<void> runDigest() async {
@@ -231,11 +264,14 @@ class WorklogApi {
 
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
-  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding}) async => AppSettings.fromJson(
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async =>
+      AppSettings.fromJson(
         await _send('PUT', '/settings', {
           if (dailyAt != null) 'dailyAt': dailyAt,
           if (indexOnInject != null) 'indexOnInject': indexOnInject,
           if (localEmbedding != null) 'localEmbedding': localEmbedding,
+          if (notifications != null) 'notifications': notifications,
+          if (hotkey != null) 'hotkey': hotkey,
         }),
       );
 }

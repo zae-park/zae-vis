@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../backend/backend.dart';
@@ -9,6 +10,7 @@ import '../shortcuts.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
+import 'review_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.api, required this.onServerChanged, this.backend});
@@ -78,9 +80,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding}) async {
+  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async {
     try {
-      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding);
+      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, hotkey: hotkey);
+      if (hotkey != null) await GlobalHotkey.update(hotkey);
       if (mounted) toast(context, '저장했습니다');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
@@ -173,6 +176,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('정리 (지식화)', style: t.titleMedium),
                 _DigestSection(api: widget.api),
                 const SizedBox(height: 16),
+                Text('알림', style: t.titleMedium),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.notifications_outlined),
+                  title: const Text('시스템 알림'),
+                  subtitle: const Text('정리가 끝나 검토할 것이 생겼을 때, 수집이 실패했을 때, 녹음 전사가 끝났을 때 알립니다. '
+                      '서버가 보내므로 앱 창이 닫혀 있어도 옵니다.'),
+                  value: s.notifications,
+                  onChanged: (v) => _update(notifications: v),
+                ),
+                const SizedBox(height: 16),
                 Text('확장', style: t.titleMedium),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -219,7 +233,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 Text('단축키', style: t.titleMedium),
                 const SizedBox(height: 6),
-                for (final (keys, what) in AppShortcuts.describe())
+                for (final (keys, what) in AppShortcuts.describe(hotkey: s.hotkey))
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
                     child: Row(children: [
@@ -231,6 +245,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(child: Text(what, style: t.bodyMedium)),
+                      if (what.contains('전역')) ...[
+                        TextButton(
+                          onPressed: () async {
+                            final spec = await showHotkeyDialog(context, current: s.hotkey);
+                            if (spec != null) await _update(hotkey: spec);
+                          },
+                          child: const Text('바꾸기'),
+                        ),
+                        if (s.hotkey.isNotEmpty) TextButton(onPressed: () => _update(hotkey: ''), child: const Text('기본값')),
+                      ],
                     ]),
                   ),
                 const SizedBox(height: 16),
@@ -368,6 +392,9 @@ class _DigestSection extends StatefulWidget {
 
 class _DigestSectionState extends State<_DigestSection> {
   late Future<DigestStatus> _future = widget.api.digest();
+  late Future<List<ProposalSummary>> _proposals = _fetchProposals();
+
+  Future<List<ProposalSummary>> _fetchProposals() => widget.api.proposals().catchError((_) => <ProposalSummary>[]);
   Timer? _poll;
   late final _model = TextEditingController();
 
@@ -380,16 +407,21 @@ class _DigestSectionState extends State<_DigestSection> {
 
   void _reload() => setState(() {
         _future = widget.api.digest();
+        _proposals = _fetchProposals();
       });
+
+  Future<void> _review(String id) async {
+    if (await ReviewScreen.open(context, widget.api, id)) _reload();
+  }
 
   void _watch(DigestStatus s) {
     _poll?.cancel();
     if (s.running) _poll = Timer(const Duration(seconds: 4), _reload);
   }
 
-  Future<void> _update({String? agent, String? model, bool? weekly}) async {
+  Future<void> _update({String? agent, String? model, bool? weekly, bool? review}) async {
     try {
-      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly);
+      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly, review: review);
       if (mounted) toast(context, '저장했습니다');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
@@ -458,6 +490,16 @@ class _DigestSectionState extends State<_DigestSection> {
           ]),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.rule),
+            title: const Text('적용 전에 검토'),
+            subtitle: Text(s.review
+                ? '정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.'
+                : '끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.'),
+            value: s.review,
+            onChanged: s.running ? null : (v) => _update(review: v),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
             secondary: const Icon(Icons.event_repeat),
             title: const Text('매주 월요일 자동 정리'),
             subtitle: Text(s.weekly ? '다음 실행: ${s.nextWeekly ?? '다음 월요일'} (매일 수집 뒤에 이어서)' : '끄면 아래 버튼으로만 실행합니다'),
@@ -473,9 +515,29 @@ class _DigestSectionState extends State<_DigestSection> {
             const SizedBox(width: 12),
             if (chosen == null) Expanded(child: Text('쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI를 설치하거나 위에서 OpenRouter 키를 저장하세요.', style: t.bodySmall?.copyWith(color: scheme.error))),
           ]),
+          FutureBuilder<List<ProposalSummary>>(
+            future: _proposals,
+            builder: (context, ps) {
+              final pending = (ps.data ?? const <ProposalSummary>[]).where((p) => p.pending).toList();
+              if (pending.isEmpty) return const SizedBox.shrink();
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const SizedBox(height: 8),
+                Text('검토 대기 ${pending.length}건', style: t.labelLarge?.copyWith(color: scheme.primary)),
+                for (final p in pending)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.rule),
+                    title: Text('${p.createdAt?.toLocal().toString().split('.').first ?? p.id} · ${_labels[p.agent] ?? p.agent}'),
+                    subtitle: Text('로그 ${p.lines}줄 · 프로젝트 ${p.projects}개 · 월간 정리 ${p.summaries}개 · inbox ${p.processed}개'),
+                    trailing: FilledButton.tonal(onPressed: () => _review(p.id), child: const Text('검토하기')),
+                  ),
+              ]);
+            },
+          ),
           if (s.last != null) ...[
             const SizedBox(height: 8),
-            Text('마지막 정리: ${s.last!.ok ? '완료' : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
+            Text('마지막 정리: ${s.last!.ok ? (s.last!.proposalId != null ? '검토 대기' : '완료') : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
                 style: t.bodySmall?.copyWith(color: s.last!.ok ? null : scheme.error)),
             Container(
               margin: const EdgeInsets.only(top: 6),
@@ -489,4 +551,72 @@ class _DigestSectionState extends State<_DigestSection> {
       },
     );
   }
+}
+
+/// Records a new global hotkey: the user presses the combination, the dialog shows it and saves the
+/// spec ("meta+shift+space"). A key without a modifier is refused — it would swallow typing everywhere.
+Future<String?> showHotkeyDialog(BuildContext context, {required String current}) {
+  return showDialog<String>(
+    context: context,
+    builder: (context) {
+      String? spec = current.isEmpty ? null : current;
+      String? warning;
+      final focus = FocusNode();
+      return StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('전역 단축키 바꾸기'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('쓰고 싶은 조합을 지금 누르세요. 수정키(⌘·⌃·⌥·⇧ 또는 Ctrl·Alt·Shift)와 글자·숫자·F키·Space를 조합합니다.'),
+              const SizedBox(height: 16),
+              Focus(
+                focusNode: focus,
+                autofocus: true,
+                onKeyEvent: (_, event) {
+                  if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                  final got = HotkeySpec.fromEvent(event);
+                  setLocal(() {
+                    if (got == null) {
+                      warning = HotkeySpec.isModifier(event) ? null : '수정키와 함께 눌러야 합니다';
+                    } else {
+                      spec = got;
+                      warning = null;
+                    }
+                  });
+                  return KeyEventResult.handled;
+                },
+                child: Builder(
+                  builder: (context) {
+                    final scheme = Theme.of(context).colorScheme;
+                    final focused = Focus.of(context).hasFocus;
+                    return InkWell(
+                      onTap: () => focus.requestFocus(),
+                      child: Container(
+                        key: const ValueKey('hotkey-recorder'),
+                        height: 56,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: focused ? scheme.primary : scheme.outlineVariant, width: focused ? 2 : 1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(spec == null ? '여기에서 키를 누르세요' : HotkeySpec.label(spec!),
+                            style: spec == null ? TextStyle(color: scheme.outline) : ZaevisTheme.mono.copyWith(fontSize: 18)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (warning != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(warning!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text('기본값: ${HotkeySpec.label('')}', style: Theme.of(context).textTheme.bodySmall)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+            FilledButton(onPressed: spec == null || !HotkeySpec.isValid(spec!) ? null : () => Navigator.pop(context, spec), child: const Text('저장')),
+          ],
+        ),
+      );
+    },
+  );
 }

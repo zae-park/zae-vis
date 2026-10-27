@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
+import 'package:zaevis/screens/search_screen.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -17,6 +18,8 @@ http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
     );
 
 final posted = <http.Request>[];
+int indexPolls = 0;
+String mockHotkey = '';
 
 WorklogApi _fakeApi() => WorklogApi(
       baseUrl: 'http://127.0.0.1:4710',
@@ -50,7 +53,7 @@ WorklogApi _fakeApi() => WorklogApi(
             });
           case '/api/file':
             return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## roas\n\n- GA4 캠페인 매핑이 빠져서 — 박재'});
-          case '/api/sources':
+          case '/api/sources' when req.method == 'GET':
             return _json({
               'collecting': false,
               'sources': [
@@ -67,7 +70,7 @@ WorklogApi _fakeApi() => WorklogApi(
             });
           case '/api/settings' when req.method == 'GET':
             return _json({
-              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true,
+              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true, 'hotkey': mockHotkey,
               'schedule': {'supported': true, 'installed': true, 'loaded': true},
               'rerank': {'enabled': false, 'hasKey': false, 'keyHint': null, 'model': 'voyageai/rerank-3-lite', 'external': '없음 — 모든 검색은 이 맥 안에서 처리됩니다.'},
             });
@@ -94,6 +97,50 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/logs' when req.method == 'POST':
             posted.add(req);
             return _json({'month': '2026-10', 'line': '- 10-23 #done x'}, 201);
+          case '/api/digest/proposals':
+            return _json({
+              'proposals': [
+                {'id': '20261027-100000', 'createdAt': '2026-10-27T01:00:00Z', 'agent': 'claude', 'status': 'pending', 'lines': 2, 'projects': 1, 'summaries': 0, 'processed': 1},
+              ],
+            });
+          case '/api/digest/proposals/20261027-100000' when req.method == 'GET':
+            return _json({
+              'id': '20261027-100000', 'createdAt': '2026-10-27T01:00:00Z', 'agent': 'claude', 'status': 'pending', 'report': '로그 2줄',
+              'logLines': [
+                {'month': '2026-10', 'line': '- 10-26 [[roas]] #done 채점 분리 (src: s1)', 'entry': {'date': '10-26', 'projects': ['roas'], 'tags': ['done'], 'text': '채점 분리', 'source': 's1', 'author': 'claude', 'raw': ''}},
+                {'month': '2026-10', 'line': '- 10-27 #learned 토큰 상한', 'entry': {'date': '10-27', 'projects': <Object>[], 'tags': ['learned'], 'text': '토큰 상한', 'source': null, 'author': 'claude', 'raw': ''}},
+              ],
+              'removedLines': <Object>[],
+              'projects': [{'slug': 'roas', 'before': '# ROAS\n\n옛 상태', 'after': '# ROAS\n\n새 상태'}],
+              'summaries': <Object>[],
+              'processed': [{'from': 'inbox/transcripts/a.txt', 'to': 'processed/transcripts/a.txt'}],
+            });
+          case '/api/digest/proposals/20261027-100000' when req.method == 'POST':
+            posted.add(req);
+            return _json({'ok': true, 'applied': {'lines': 1}});
+          case '/api/settings' when req.method == 'PUT':
+            posted.add(req);
+            mockHotkey = (jsonDecode(req.body) as Map<String, dynamic>)['hotkey'] as String? ?? mockHotkey;
+            return _json({
+              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true,
+              'notifications': false, 'hotkey': 'meta+shift+j',
+              'schedule': {'supported': true, 'installed': true, 'loaded': true},
+            });
+          case '/api/index' when req.method == 'GET':
+            indexPolls++;
+            return _json(indexPolls == 1
+                ? {
+                    'refreshing': true,
+                    'autorag': {'state': 'indexing', 'inFlight': true, 'stale': true, 'diagnostics': <Object>[],
+                      'progress': {'phase': 'parsed', 'sourceFiles': {'total': 40}, 'parsedCounts': {'scanned': 20, 'written': 3, 'deleted': 0, 'skipped': 0}}},
+                  }
+                : {'refreshing': false, 'lastRefresh': {'ok': true}, 'autorag': {'state': 'success', 'inFlight': false, 'stale': false, 'diagnostics': <Object>[]}});
+          case '/api/sources' when req.method == 'POST':
+            posted.add(req);
+            return _json({'ok': true}, 201);
+          case '/api/collect':
+            posted.add(req);
+            return _json({'started': true}, 202);
           default:
             return _json({'error': 'not_found'}, 404);
         }
@@ -361,5 +408,160 @@ void main() {
     expect(body['tags'], ['decision']);
     expect(body['projects'], ['roas']);
     expect(posted.single.headers['x-zaevis'], '1');
+  });
+
+  testWidgets('log tab shows the pending proposal; the review screen applies only the chosen lines', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('로그').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('정리 제안 1건이 검토를 기다립니다'), findsOneWidget);
+
+    await tester.tap(find.text('검토하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('정리 결과 검토'), findsOneWidget);
+    expect(find.text('채점 분리'), findsOneWidget);
+    expect(find.text('토큰 상한'), findsOneWidget);
+    expect(find.text('로그 줄 (2/2)'), findsOneWidget);
+    expect(find.text('새 상태'), findsNothing); // project diff is collapsed until expanded
+
+    // drop the second line, keep the project and the inbox move
+    await tester.tap(find.text('토큰 상한'));
+    await tester.pump();
+    expect(find.text('로그 줄 (1/2)'), findsOneWidget);
+    expect(find.text('선택 3개'), findsOneWidget);
+
+    await tester.tap(find.text('선택한 것 적용'));
+    await tester.pumpAndSettle();
+    final body = jsonDecode(posted.single.body) as Map<String, dynamic>;
+    expect(body['action'], 'apply');
+    expect(body['lines'], [0]);
+    expect(body.containsKey('projects'), isFalse); // all projects = omitted
+    expect(body['summaries'], isTrue);
+    expect(body['processed'], isTrue);
+    expect(find.text('정리 결과 검토'), findsNothing); // back on the log
+  });
+
+  testWidgets('search filters hits by source kind', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.enterText(find.byType(TextField), 'GA4 매핑');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    expect(find.text('2건'), findsOneWidget);
+    expect(find.widgetWithText(FilterChip, 'git 커밋 1'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilterChip, '한 줄 기록 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 2건'), findsOneWidget);
+    expect(find.text('무관한 줄'), findsOneWidget);
+    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilterChip, '한 줄 기록 1')); // kind filter off again
+    SearchScreen.clock = () => DateTime(2026, 10, 27);
+    addTearDown(() => SearchScreen.clock = DateTime.now);
+    await tester.tap(find.widgetWithText(ChoiceChip, '7일')); // 10-09 is out; the 2026-10 month file counts by its last day
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 2건'), findsOneWidget);
+    expect(find.text('무관한 줄'), findsOneWidget);
+    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsNothing);
+  });
+
+  testWidgets('settings: notification switch saves; the hotkey dialog records ⌘⇧J', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockHotkey = '';
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+
+    // the page's ListView, not the server-address TextField's own Scrollable
+    final scrollable = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
+    // a non-lazy ListView already holds every child, so scroll until the tile is actually hit-testable
+    await tester.dragUntilVisible(find.text('시스템 알림').hitTestable(), scrollable, const Offset(0, -250));
+    await tester.tap(find.text('시스템 알림'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.single.body), {'notifications': false});
+
+    await tester.dragUntilVisible(find.text('바꾸기').last.hitTestable(), scrollable, const Offset(0, -250));
+    await tester.tap(find.text('바꾸기').last);
+    await tester.pumpAndSettle();
+    expect(find.text('전역 단축키 바꾸기'), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.text('⌘⇧J'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('저장')));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.last.body), {'hotkey': 'meta+shift+j'});
+    expect(find.text('⌘⇧J'), findsOneWidget); // now listed under 단축키
+  });
+
+  testWidgets('index sheet shows the phase and file counts while refreshing, then completion', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    indexPolls = 0;
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('색인'));
+    // not pumpAndSettle: the spinner in the button animates until the 2s poll fires
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('본문 읽는 중 20/40 파일'), findsOneWidget);
+    expect(find.textContaining('30%'), findsOneWidget); // 0.6 × 20/40
+    expect(find.text('색인 중…'), findsOneWidget);
+    final bar = tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
+    expect(bar.value, closeTo(0.3, 0.001));
+
+    await tester.pump(const Duration(seconds: 2)); // poll → finished
+    await tester.pumpAndSettle();
+    expect(find.text('색인 완료'), findsOneWidget);
+    expect(find.text('색인 갱신'), findsOneWidget);
+  });
+
+  testWidgets('collect tab: a connector preset fills the form, adds the source and collects it once', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('수집').first);
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(find.text('커넥터 추가').hitTestable(), find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
+    await tester.tap(find.text('커넥터 추가'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('추가하고 수집'), findsOneWidget);
+    await tester.tap(find.text('폴더의 노트 (Markdown·텍스트)'));
+    await tester.pumpAndSettle();
+    expect(find.text('notes'), findsOneWidget); // name filled from the preset
+    expect(find.textContaining('{fromDate}'), findsWidgets);
+
+    await tester.tap(find.text('추가하고 수집'));
+    await tester.pumpAndSettle();
+    expect(posted.map((r) => r.url.path).toList(), ['/api/sources', '/api/collect']);
+    final added = jsonDecode(posted.first.body) as Map<String, dynamic>;
+    expect(added['name'], 'notes');
+    expect(added['command'], contains('-newermt {fromDate}'));
+    expect(jsonDecode(posted.last.body), {'sources': ['notes']});
   });
 }

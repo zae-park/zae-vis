@@ -166,6 +166,7 @@ class IndexStatus {
     required this.messages,
     this.lastError,
     this.embedding,
+    this.progress,
   });
 
   factory IndexStatus.fromJson(Json j) {
@@ -181,6 +182,7 @@ class IndexStatus {
       messages: diags.whereType<Json>().map((d) => _str(d['message'])).where((m) => m.isNotEmpty).toList(),
       lastError: lastError,
       embedding: j['embedding'] is Json ? EmbeddingStatus.fromJson(j['embedding'] as Json) : null,
+      progress: a['progress'] is Json ? IndexProgress.fromJson(a['progress'] as Json) : null,
     );
   }
 
@@ -192,6 +194,9 @@ class IndexStatus {
 
   /// Local embedding daemon for semantic search; null when the server does not manage one.
   final EmbeddingStatus? embedding;
+
+  /// Phase and counts while a refresh runs.
+  final IndexProgress? progress;
 }
 
 /// `minsync serve` (local Qwen3 embedding model) as reported by GET /index.
@@ -226,12 +231,13 @@ bool? _boolOrNull(Object? v) => v is bool ? v : null;
 String? _strOrNull(Object? v) => v is String && v.isNotEmpty ? v : null;
 
 class SourceOption {
-  const SourceOption({required this.key, required this.label, required this.kind});
+  const SourceOption({required this.key, required this.label, required this.kind, this.help});
   factory SourceOption.fromJson(Json j) =>
-      SourceOption(key: _str(j['key']), label: _str(j['label']), kind: _str(j['kind']));
+      SourceOption(key: _str(j['key']), label: _str(j['label']), kind: _str(j['kind']), help: _strOrNull(j['help']));
   final String key;
   final String label;
-  final String kind; // text | path | paths | number
+  final String kind; // text | path | paths | number | bool
+  final String? help;
 }
 
 class SourceInfo {
@@ -365,6 +371,8 @@ class AppSettings {
     required this.scheduleLoaded,
     required this.whisperx,
     this.localEmbedding = true,
+    this.notifications = true,
+    this.hotkey = '',
     this.rerank,
     this.scheduleHint,
     this.lastDaily,
@@ -383,6 +391,8 @@ class AppSettings {
       scheduleHint: _strOrNull(s['hint']),
       whisperx: j['whisperx'] == true,
       localEmbedding: j['localEmbedding'] != false,
+      notifications: j['notifications'] != false,
+      hotkey: _str(j['hotkey']),
       rerank: j['rerank'] is Json ? RerankStatus.fromJson(j['rerank'] as Json) : null,
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
     );
@@ -391,6 +401,10 @@ class AppSettings {
   final String dailyAt;
   final bool indexOnInject;
   final bool localEmbedding;
+  final bool notifications;
+
+  /// Global quick-capture hotkey as "meta+shift+space"; empty = platform default.
+  final String hotkey;
 
   /// Optional OpenRouter re-ranking; null when the server does not offer it.
   final RerankStatus? rerank;
@@ -445,17 +459,21 @@ class AgentInfo {
 }
 
 class DigestRun {
-  const DigestRun({required this.at, required this.agent, required this.ok, required this.report});
+  const DigestRun({required this.at, required this.agent, required this.ok, required this.report, this.proposalId});
   factory DigestRun.fromJson(Json j) => DigestRun(
         at: DateTime.tryParse(_str(j['lastRun'])),
         agent: _str(j['agent']),
         ok: j['ok'] == true,
         report: _str(j['report']),
+        proposalId: _strOrNull(j['proposalId']),
       );
   final DateTime? at;
   final String agent;
   final bool ok;
   final String report;
+
+  /// Set when the run was held for review instead of being written to the worklog.
+  final String? proposalId;
 }
 
 /// GET /api/digest: detected agents, the setting, what would run, and the last run.
@@ -466,6 +484,7 @@ class DigestStatus {
     required this.model,
     required this.weekly,
     required this.agents,
+    this.review = true,
     this.chosen,
     this.runningAgent,
     this.last,
@@ -480,6 +499,7 @@ class DigestStatus {
       agent: _str(s['agent']).isEmpty ? 'auto' : _str(s['agent']),
       model: _str(s['model']),
       weekly: s['weekly'] != false,
+      review: s['review'] != false,
       agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
       chosen: _strOrNull(j['chosen']),
       last: j['last'] is Json ? DigestRun.fromJson(j['last'] as Json) : null,
@@ -498,4 +518,161 @@ class DigestStatus {
   final String? chosen;
   final DigestRun? last;
   final String? nextWeekly;
+
+  /// Review before apply: a run leaves a proposal instead of writing the worklog directly.
+  final bool review;
+}
+
+/// One row of GET /api/digest/proposals.
+class ProposalSummary {
+  const ProposalSummary({required this.id, required this.createdAt, required this.agent, required this.status, required this.lines, required this.projects, required this.summaries, required this.processed});
+  factory ProposalSummary.fromJson(Json j) => ProposalSummary(
+        id: _str(j['id']),
+        createdAt: DateTime.tryParse(_str(j['createdAt'])),
+        agent: _str(j['agent']),
+        status: _str(j['status']),
+        lines: (j['lines'] as num?)?.toInt() ?? 0,
+        projects: (j['projects'] as num?)?.toInt() ?? 0,
+        summaries: (j['summaries'] as num?)?.toInt() ?? 0,
+        processed: (j['processed'] as num?)?.toInt() ?? 0,
+      );
+  final String id;
+  final DateTime? createdAt;
+  final String agent;
+  final String status; // pending | applied | dismissed
+  final int lines;
+  final int projects;
+  final int summaries;
+  final int processed;
+  bool get pending => status == 'pending';
+}
+
+class ProposedLine {
+  const ProposedLine({required this.month, required this.line, required this.entry});
+  factory ProposedLine.fromJson(Json j) => ProposedLine(
+        month: _str(j['month']),
+        line: _str(j['line']),
+        entry: j['entry'] is Json ? LogEntry.fromJson(j['entry'] as Json) : LogEntry(date: '', projects: const [], tags: const [], text: _str(j['line']), source: null, byClaude: true),
+      );
+  final String month;
+  final String line;
+  final LogEntry entry;
+}
+
+class ProposedProject {
+  const ProposedProject({required this.slug, required this.before, required this.after});
+  factory ProposedProject.fromJson(Json j) => ProposedProject(slug: _str(j['slug']), before: j['before'] is String ? j['before'] as String : null, after: _str(j['after']));
+  final String slug;
+  final String? before;
+  final String after;
+  bool get isNew => before == null;
+}
+
+class ProposedFile {
+  const ProposedFile({required this.path, required this.before, required this.after});
+  factory ProposedFile.fromJson(Json j) => ProposedFile(path: _str(j['path']), before: j['before'] is String ? j['before'] as String : null, after: _str(j['after']));
+  final String path;
+  final String? before;
+  final String after;
+}
+
+/// A digest run's changes, waiting for the user to pick what to keep.
+class Proposal {
+  const Proposal({
+    required this.id,
+    required this.createdAt,
+    required this.agent,
+    required this.report,
+    required this.status,
+    required this.logLines,
+    required this.removedLines,
+    required this.projects,
+    required this.summaries,
+    required this.processed,
+  });
+
+  factory Proposal.fromJson(Json j) {
+    List<T> list<T>(String k, T Function(Json) f) => (j[k] is List ? j[k] as List : const <Object?>[]).whereType<Json>().map(f).toList();
+    return Proposal(
+      id: _str(j['id']),
+      createdAt: DateTime.tryParse(_str(j['createdAt'])),
+      agent: _str(j['agent']),
+      report: _str(j['report']),
+      status: _str(j['status']),
+      logLines: list('logLines', ProposedLine.fromJson),
+      removedLines: list('removedLines', ProposedLine.fromJson),
+      projects: list('projects', ProposedProject.fromJson),
+      summaries: list('summaries', ProposedFile.fromJson),
+      processed: list('processed', (m) => (from: _str(m['from']), to: _str(m['to']))),
+    );
+  }
+
+  final String id;
+  final DateTime? createdAt;
+  final String agent;
+  final String report;
+  final String status;
+  final List<ProposedLine> logLines;
+  final List<ProposedLine> removedLines;
+  final List<ProposedProject> projects;
+  final List<ProposedFile> summaries;
+  final List<({String from, String to})> processed;
+  bool get pending => status == 'pending';
+}
+
+/// Progress of a running index refresh, from AutoRAG's progress file. Phases run in order:
+/// parsed (read every file) → minsync (embed + index) → datasources → jikji → everything → fsearch → finalizing.
+class IndexProgress {
+  const IndexProgress({required this.phase, this.total, this.scanned, this.written, this.synced});
+  factory IndexProgress.fromJson(Json j) {
+    final src = j['sourceFiles'] is Json ? j['sourceFiles'] as Json : const <String, dynamic>{};
+    final counts = j['parsedCounts'] is Json ? j['parsedCounts'] as Json : const <String, dynamic>{};
+    final ms = j['minsync'] is Json ? j['minsync'] as Json : const <String, dynamic>{};
+    return IndexProgress(
+      phase: _str(j['phase']),
+      total: (src['total'] as num?)?.toInt(),
+      scanned: (counts['scanned'] as num?)?.toInt(),
+      written: (counts['written'] as num?)?.toInt(),
+      synced: (ms['synced'] as num?)?.toInt(),
+    );
+  }
+  final String phase;
+  final int? total;
+  final int? scanned;
+  final int? written;
+  final int? synced;
+
+  static const _order = ['parsed', 'minsync', 'datasources', 'jikji', 'everything', 'fsearch', 'finalizing'];
+
+  /// Overall 0..1: reading files is the first 60%, embedding the next 30%, the rest the last 10%.
+  /// Null (indeterminate) before the first count arrives.
+  double? get fraction {
+    final i = _order.indexOf(phase);
+    if (i < 0) return null;
+    if (phase == 'parsed') {
+      if (total == null || total! <= 0 || scanned == null) return null;
+      return 0.6 * (scanned! / total!).clamp(0, 1);
+    }
+    if (phase == 'minsync') {
+      if (total == null || total! <= 0 || synced == null) return 0.6;
+      return 0.6 + 0.3 * (synced! / total!).clamp(0, 1);
+    }
+    return 0.9 + 0.1 * ((i - 1) / (_order.length - 2)); // datasources … finalizing → 0.92 … 1.0
+  }
+
+  /// "본문 읽는 중 12/40 파일"
+  String get label {
+    final files = total != null && scanned != null ? ' $scanned/$total 파일' : '';
+    final emb = synced != null ? ' $synced개' : '';
+    return switch (phase) {
+      'parsed' => '본문 읽는 중$files',
+      'minsync' => '임베딩·색인 중$emb',
+      'datasources' => '커넥터 색인 중',
+      'jikji' => '키워드 색인 정리 중',
+      'everything' || 'fsearch' => '파일 이름 색인 중',
+      'finalizing' => '마무리 중',
+      '' => '준비 중',
+      _ => phase,
+    };
+  }
 }

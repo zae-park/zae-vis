@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zaevis/models.dart';
+import 'package:zaevis/screens/search_screen.dart';
+import 'package:zaevis/shortcuts.dart';
 import 'package:zaevis/widgets/markdown_view.dart';
 
 void main() {
@@ -117,5 +119,37 @@ void main() {
     expect(spans[0].style?.fontWeight, FontWeight.w700);
     expect(spans[1].style?.fontWeight, isNull);
     expect(highlightSpans('그대로', const [], mark).single.text, '그대로');
+  });
+
+  test('SearchPeriod.accepts: daily and monthly dates, undated hits only in 전체', () {
+    final now = DateTime(2026, 10, 27);
+    expect(SearchPeriod.all.accepts(null, now), isTrue);
+    expect(SearchPeriod.week.accepts(null, now), isFalse);
+    expect(SearchPeriod.week.accepts('2026-10-21', now), isTrue);
+    expect(SearchPeriod.week.accepts('2026-10-19', now), isFalse);
+    expect(SearchPeriod.month.accepts('2026-10-01', now), isTrue);
+    expect(SearchPeriod.month.accepts('2026-09-20', now), isFalse);
+    expect(SearchPeriod.week.accepts('2026-10', now), isTrue); // a month file counts by its last day
+    expect(SearchPeriod.thisMonth.accepts('2026-10-03', now), isTrue);
+    expect(SearchPeriod.thisMonth.accepts('2026-09-30', now), isFalse);
+  });
+
+  test('HotkeySpec parses, rejects bare keys and labels for the platform', () {
+    expect(HotkeySpec.isValid('meta+shift+space'), isTrue);
+    expect(HotkeySpec.isValid('control+alt+f5'), isTrue);
+    expect(HotkeySpec.isValid('space'), isFalse); // no modifier
+    expect(HotkeySpec.isValid('meta+meta+k'), isFalse);
+    expect(HotkeySpec.isValid('meta+emoji'), isFalse);
+    expect(HotkeySpec.parse('meta+shift+space')!.modifiers.length, 2);
+    expect(HotkeySpec.label('meta+shift+space'), '⌘⇧Space'); // tests run on macOS
+    expect(HotkeySpec.label(''), HotkeySpec.label(HotkeySpec.platformDefault));
+  });
+
+  test('IndexProgress maps AutoRAG phases to one bar', () {
+    expect(IndexProgress.fromJson({'phase': 'parsed', 'sourceFiles': {'total': 10}, 'parsedCounts': {'scanned': 5}}).fraction, closeTo(0.3, 1e-9));
+    expect(IndexProgress.fromJson({'phase': 'parsed'}).fraction, isNull);
+    expect(IndexProgress.fromJson({'phase': 'minsync', 'sourceFiles': {'total': 10}, 'minsync': {'synced': 10}}).fraction, closeTo(0.9, 1e-9));
+    expect(IndexProgress.fromJson({'phase': 'finalizing'}).fraction, closeTo(1.0, 1e-9));
+    expect(IndexProgress.fromJson({'phase': 'minsync', 'minsync': {'synced': 7}}).label, '임베딩·색인 중 7개');
   });
 }

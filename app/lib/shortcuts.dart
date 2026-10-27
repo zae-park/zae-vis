@@ -9,7 +9,9 @@ import 'package:window_manager/window_manager.dart';
 /// Keyboard shortcuts, in one place so the menu, the settings page and the handlers agree.
 ///
 /// In-app (⌘ on macOS/web, Ctrl elsewhere):  ⌘K 검색 · ⌘N 한 줄 기록 · ⌘⇧R 녹음 · ⌘1–5 탭 · ⌘, 설정
-/// System-wide (desktop only):                ⌘⇧Space 빠른 기록 — brings the window up and opens 한 줄 기록
+/// System-wide (desktop only):                ⌘⇧Space 빠른 기록 by default — brings the window up and
+///                                            opens 한 줄 기록; changeable in 설정 (stored on the server
+///                                            as a spec like "meta+shift+space").
 class AppShortcuts {
   static bool get _mac => !kIsWeb && Platform.isMacOS;
 
@@ -36,15 +38,122 @@ class AppShortcuts {
     LogicalKeyboardKey.digit5,
   ].map(mod).toList();
 
-  /// For the settings page.
-  static List<(String, String)> describe() => [
+  /// For the settings page. [hotkey] is the stored global hotkey spec ("" = platform default).
+  static List<(String, String)> describe({String hotkey = ''}) => [
         ('${modLabel}K', '검색으로 이동해 입력'),
         ('${modLabel}N', '한 줄 기록'),
         ('$modLabel⇧R', '녹음'),
         ('${modLabel}1 … ${modLabel}5', '검색 · 로그 · 프로젝트 · 월간 정리 · 수집 탭'),
         ('$modLabel,', '설정'),
-        if (desktop) ('$modLabel⇧Space', '어디서든 창을 띄우고 한 줄 기록 (전역)'),
+        if (desktop) (HotkeySpec.label(hotkey), '어디서든 창을 띄우고 한 줄 기록 (전역)'),
       ];
+}
+
+/// The global hotkey as text, the way the server stores it: lowercase modifier and key names joined
+/// with "+", e.g. "meta+shift+space" or "control+alt+k". Platform-neutral so one settings file works
+/// on a Mac and a Windows machine; "" means the platform default.
+class HotkeySpec {
+  HotkeySpec._();
+
+  static const _mods = {'meta': HotKeyModifier.meta, 'control': HotKeyModifier.control, 'alt': HotKeyModifier.alt, 'shift': HotKeyModifier.shift};
+
+  /// Key names → physical keys. Letters, digits, function keys, space and the common punctuation.
+  static final Map<String, PhysicalKeyboardKey> _keys = {
+    for (var c = 0; c < 26; c++) String.fromCharCode(97 + c): PhysicalKeyboardKey.findKeyByCode(0x00070004 + c)!,
+    for (var d = 1; d <= 9; d++) '$d': PhysicalKeyboardKey.findKeyByCode(0x0007001e + d - 1)!,
+    '0': PhysicalKeyboardKey.digit0,
+    for (var f = 1; f <= 12; f++) 'f$f': PhysicalKeyboardKey.findKeyByCode(0x0007003a + f - 1)!,
+    'space': PhysicalKeyboardKey.space,
+    'enter': PhysicalKeyboardKey.enter,
+    'tab': PhysicalKeyboardKey.tab,
+    'escape': PhysicalKeyboardKey.escape,
+    'backquote': PhysicalKeyboardKey.backquote,
+    'minus': PhysicalKeyboardKey.minus,
+    'equal': PhysicalKeyboardKey.equal,
+    'bracketleft': PhysicalKeyboardKey.bracketLeft,
+    'bracketright': PhysicalKeyboardKey.bracketRight,
+    'semicolon': PhysicalKeyboardKey.semicolon,
+    'quote': PhysicalKeyboardKey.quote,
+    'comma': PhysicalKeyboardKey.comma,
+    'period': PhysicalKeyboardKey.period,
+    'slash': PhysicalKeyboardKey.slash,
+    'backslash': PhysicalKeyboardKey.backslash,
+    'arrowup': PhysicalKeyboardKey.arrowUp,
+    'arrowdown': PhysicalKeyboardKey.arrowDown,
+    'arrowleft': PhysicalKeyboardKey.arrowLeft,
+    'arrowright': PhysicalKeyboardKey.arrowRight,
+  };
+
+  /// What the platform uses when nothing is stored: ⌘⇧Space on macOS, Ctrl+Shift+Space elsewhere
+  /// (the Windows key is reserved by the OS).
+  static String get platformDefault => AppShortcuts.nativeMenu ? 'meta+shift+space' : 'control+shift+space';
+
+  /// Parses a spec. Returns null when it has no key, an unknown key, or no modifier
+  /// (a bare key would swallow typing system-wide).
+  static ({List<HotKeyModifier> modifiers, PhysicalKeyboardKey key, String name})? parse(String spec) {
+    final parts = spec.toLowerCase().split('+').map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return null;
+    final mods = <HotKeyModifier>[];
+    for (final p in parts.sublist(0, parts.length - 1)) {
+      final m = _mods[p];
+      if (m == null || mods.contains(m)) return null;
+      mods.add(m);
+    }
+    final key = _keys[parts.last];
+    if (key == null || mods.isEmpty) return null;
+    return (modifiers: mods, key: key, name: parts.last);
+  }
+
+  static bool isValid(String spec) => parse(spec) != null;
+
+  /// True for a modifier key on its own (⌘, Ctrl, …): not an error while recording, just not done yet.
+  static bool isModifier(KeyEvent event) => HotKeyModifier.values.any((m) => m.physicalKeys.contains(event.physicalKey));
+
+  /// A spec from a key event, or null when the event is a lone modifier or an unsupported key.
+  static String? fromEvent(KeyEvent event) {
+    final name = _keys.entries.where((e) => e.value == event.physicalKey).map((e) => e.key).firstOrNull;
+    if (name == null) return null;
+    final pressed = HardwareKeyboard.instance.physicalKeysPressed;
+    final mods = [
+      for (final e in _mods.entries)
+        if (e.value.physicalKeys.any(pressed.contains)) e.key,
+    ];
+    if (mods.isEmpty) return null;
+    return [...mods, name].join('+');
+  }
+
+  /// Human-readable: "⌘⇧Space" on macOS, "Ctrl+Shift+Space" elsewhere.
+  static String label(String spec) {
+    final p = parse(spec.isEmpty ? platformDefault : spec);
+    if (p == null) return spec;
+    final mac = AppShortcuts.nativeMenu;
+    const macSym = {'meta': '⌘', 'control': '⌃', 'alt': '⌥', 'shift': '⇧'};
+    const winSym = {'meta': 'Win', 'control': 'Ctrl', 'alt': 'Alt', 'shift': 'Shift'};
+    final keyName = switch (p.name) {
+      'space' => 'Space',
+      'enter' => 'Enter',
+      'tab' => 'Tab',
+      'escape' => 'Esc',
+      'backquote' => '`',
+      'minus' => '-',
+      'equal' => '=',
+      'bracketleft' => '[',
+      'bracketright' => ']',
+      'semicolon' => ';',
+      'quote' => "'",
+      'comma' => ',',
+      'period' => '.',
+      'slash' => '/',
+      'backslash' => r'\',
+      'arrowup' => '↑',
+      'arrowdown' => '↓',
+      'arrowleft' => '←',
+      'arrowright' => '→',
+      final k => k.toUpperCase(),
+    };
+    final mods = p.modifiers.map((m) => (mac ? macSym : winSym)[m.name] ?? m.name);
+    return mac ? '${mods.join()}$keyName' : [...mods, keyName].join('+');
+  }
 }
 
 /// Wires the in-app shortcuts around the home shell. Handlers run only when nothing else consumed
@@ -84,13 +193,15 @@ class ShortcutScope extends StatelessWidget {
 /// The system-wide "quick capture" hotkey. Registered once per app run; a no-op on the web.
 class GlobalHotkey {
   static HotKey? _registered;
+  static VoidCallback? _onCapture;
 
-  // ⌘⇧Space on macOS; Ctrl+Shift+Space on Windows/Linux (the Windows key is reserved by the OS)
-  static final hotKey = HotKey(
-    key: PhysicalKeyboardKey.space,
-    modifiers: [AppShortcuts.nativeMenu ? HotKeyModifier.meta : HotKeyModifier.control, HotKeyModifier.shift],
-    scope: HotKeyScope.system,
-  );
+  /// The spec in effect ("" until [register] ran).
+  static String current = '';
+
+  static HotKey _hotKey(String spec) {
+    final p = HotkeySpec.parse(spec) ?? HotkeySpec.parse(HotkeySpec.platformDefault)!;
+    return HotKey(key: p.key, modifiers: p.modifiers, scope: HotKeyScope.system);
+  }
 
   /// Call before runApp on desktop: clears stale registrations (hot reload) and prepares the window.
   static Future<void> prepare() async {
@@ -103,18 +214,30 @@ class GlobalHotkey {
     }
   }
 
-  static Future<void> register(VoidCallback onCapture) async {
-    if (!AppShortcuts.desktop || _registered != null) return;
+  /// Registers [spec] (or the platform default when empty / invalid).
+  static Future<void> register(VoidCallback onCapture, {String spec = ''}) async {
+    if (!AppShortcuts.desktop) return;
+    _onCapture = onCapture;
+    if (_registered != null) await unregister();
+    final h = _hotKey(spec);
     try {
-      await hotKeyManager.register(hotKey, keyDownHandler: (_) async {
+      await hotKeyManager.register(h, keyDownHandler: (_) async {
         try {
           await windowManager.show();
           await windowManager.focus();
         } catch (_) {}
-        onCapture();
+        _onCapture?.call();
       });
-      _registered = hotKey;
+      _registered = h;
+      current = spec;
     } catch (_) {}
+  }
+
+  /// Re-registers with a new spec (after the user changed it in 설정).
+  static Future<void> update(String spec) async {
+    final cb = _onCapture;
+    if (cb == null) return;
+    await register(cb, spec: spec);
   }
 
   static Future<void> unregister() async {

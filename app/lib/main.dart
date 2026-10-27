@@ -147,7 +147,16 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
-    if (_native) GlobalHotkey.register(_quickCapture);
+    if (_native) _registerHotkey();
+  }
+
+  /// The stored spec when the server answers, the platform default otherwise.
+  Future<void> _registerHotkey() async {
+    var spec = '';
+    try {
+      spec = (await api.settings()).hotkey;
+    } catch (_) {}
+    if (mounted) await GlobalHotkey.register(_quickCapture, spec: spec);
   }
 
   @override
