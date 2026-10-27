@@ -2,7 +2,7 @@
 //
 //   node src/cli.ts repl
 //   node src/cli.ts search <query…> | ask <question…> | log [YYYY-MM] | projects | project <slug>
-//                   summary [YYYY-MM] | index | refresh [--force] | health
+//                   summary [YYYY-MM] | report [daily|weekly|monthly] [기간] [--run] | index | refresh [--force] | health
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -109,6 +109,39 @@ export function formatAnswer(r: J): string {
   const answer = String(r.answer ?? "").replace(/\[(\d+)\]/g, (_m, n: string) => c.cyan(`[${n}]`));
   const foot = c.dim(`— ${String(r.agent ?? "")}, ${((Number(r.ms) || 0) / 1000).toFixed(1)}초`);
   return [answer, "", c.bold("근거"), ...sources, foot].join("\n");
+}
+
+const KIND_LABEL_KO: Record<string, string> = { daily: "일간", weekly: "주간", monthly: "월간" };
+const DAY_KO: Record<string, string> = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
+
+/** `zaevis report`: the schedule, the last run of each kind and the newest periods on disk. */
+export function formatReports(s: J): string {
+  const setting = (s.setting ?? {}) as J;
+  const reports = (s.reports ?? {}) as Record<string, J[]>;
+  const lastRun = (s.lastRun ?? {}) as Record<string, J>;
+  const out: string[] = [];
+  if (s.running) out.push(c.yellow(`실행 중… ${KIND_LABEL_KO[String(s.running.kind)] ?? s.running.kind} ${String(s.running.period)} (${String(s.running.agent)})`));
+  for (const kind of ["daily", "weekly", "monthly"]) {
+    const st = (setting[kind] ?? {}) as J;
+    const when =
+      kind === "daily" ? ((st.days ?? []) as string[]).map((d) => DAY_KO[d] ?? d).join("·") || "요일 없음" : kind === "weekly" ? `매주 ${DAY_KO[String(st.day)] ?? st.day}요일` : `매월 ${String(st.day)}일`;
+    const last = lastRun[kind];
+    const list = (reports[kind] ?? []).slice(0, 5).map((r) => String(r.period));
+    out.push(
+      `${c.bold(KIND_LABEL_KO[kind].padEnd(3))} ${st.enabled ? c.green("켬") : c.dim("끔")} ${c.dim(when)}` +
+        (last ? `  마지막: ${last.ok ? c.green("완료") : c.red("실패")} ${String(last.period)}${last.ok ? "" : c.dim(` ${String(last.error ?? "")}`)}` : "") +
+        (list.length ? `
+     ${c.dim(list.join("  "))}${(reports[kind] ?? []).length > 5 ? c.dim(" …") : ""}` : `
+     ${c.dim("아직 없음")}`),
+    );
+  }
+  out.push(c.dim("zaevis report daily [YYYY-MM-DD] · weekly [YYYY-Www] · monthly [YYYY-MM] — 보기 (없으면 만듦; --run 다시 만듦)"));
+  return out.join("\n");
+}
+
+export function formatReport(r: J): string {
+  const head = c.dim(`${String(r.path ?? "")} · ${String(r.createdAt ?? "").slice(0, 16).replace("T", " ")}${r.agent ? ` · ${String(r.agent)}` : ""}`);
+  return `${head}\n${String(r.markdown ?? "")}`;
 }
 
 export function formatLog(month: string, entries: J[]): string {
@@ -277,6 +310,42 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
       const month = args[0] ?? (await latest(api, "summaries"));
       return String((await api.get(`/summaries/${encodeURIComponent(month)}`)).markdown ?? "");
     }
+    case "report": {
+      // zaevis report                       설정·마지막 실행·종류별 목록
+      // zaevis report daily [2026-10-27]    그 리포트를 보여 주고, 없으면 만들어서 보여 줌 (--run: 다시 만듦)
+      const KIND_ALIAS: Record<string, string> = { daily: "daily", weekly: "weekly", monthly: "monthly", 일간: "daily", 주간: "weekly", 월간: "monthly", day: "daily", week: "weekly", month: "monthly" };
+      const words = args.filter((a) => !a.startsWith("--"));
+      if (!words.length) return formatReports(await api.get("/reports"));
+      const kind = KIND_ALIAS[words[0]];
+      if (!kind) throw new CliError(`종류는 daily·weekly·monthly 중 하나입니다: zaevis report daily [YYYY-MM-DD]`);
+      let period = words[1];
+      const force = args.includes("--run");
+      if (!force) {
+        const st = await api.get("/reports");
+        const latest = ((st.reports?.[kind] ?? []) as J[])[0]?.period as string | undefined;
+        const want = period ?? latest;
+        if (want) {
+          try {
+            return formatReport(await api.get(`/reports/${kind}/${encodeURIComponent(want)}`));
+          } catch (err) {
+            if (!(err instanceof CliError) || period === undefined) throw err; // not found → make it below
+          }
+        }
+      }
+      const r = await api.post("/reports/run", { kind, ...(period ? { period } : {}) });
+      if (r.error) throw new CliError(String(r.message ?? r.reason ?? r.error));
+      period = String(r.period);
+      console.log(c.dim(`${KIND_LABEL_KO[kind]} 리포트 ${period} 를 만드는 중… (${String(r.agent ?? "")}, 수십 초~수 분)`));
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 2000));
+        const st = await api.get("/reports");
+        if (st.running) continue;
+        const last = (st.lastRun?.[kind] ?? null) as J | null;
+        if (last?.period !== period) throw new CliError("리포트 실행 결과를 찾지 못했습니다.");
+        if (!last.ok) throw new CliError(String(last.error ?? "리포트 생성에 실패했습니다."));
+        return formatReport(await api.get(`/reports/${kind}/${encodeURIComponent(period)}`));
+      }
+    }
     case "digest": {
       if (args.includes("--run")) {
         const r = await api.post("/digest/run", {});
@@ -323,6 +392,7 @@ const REPL_HELP = `${c.bold("zaevis")} — 그냥 입력하면 검색합니다.
   :ask <질문>         기록을 근거로 답 (설치된 에이전트 CLI나 OpenRouter)
   :log [YYYY-MM]      월별 로그          :projects        프로젝트 목록
   :project <slug>     프로젝트 상세      :summary [YYYY-MM] 월간 정리
+  :report [종류] [기간] 리포트 보기·만들기 (daily|weekly|monthly)
   :index              색인 상태          :refresh         색인 갱신
   :add <내용>         한 줄 기록 (#태그 [[프로젝트]])
   :inbox              inbox 보기         :sources         데이터소스 상태

@@ -9,7 +9,7 @@
 | 위치 | 내용 |
 |---|---|
 | 내 `worklog/README.md` | 태그 목록과 설명 (Claude가 읽음) |
-| `app/lib/screens/log_screen.dart` | `_tags` 목록 (필터 칩) |
+| `app/lib/screens/log_screen.dart` | `_tags` 목록 (필터 칩). 메모리 탭(`memory_screen.dart`)이 이 화면을 '기록' 층으로 품고, '원본'(`_OriginsView`)·'상태'(`_ProjectsPanel`)를 더한다 |
 | `app/lib/widgets/common.dart` | `tagColor`, `tagLabel` |
 
 서버는 `#태그`를 형식에 상관없이 읽으므로 고칠 필요가 없습니다.
@@ -23,10 +23,16 @@
 | GET | `/api/health` | `{ ok, worklog }` |
 | GET | `/api/logs` · `/api/logs/:YYYY-MM` | 월 목록 · `{ month, entries[] }` |
 | GET | `/api/projects` · `/api/projects/:slug` | 프로젝트 요약 목록 · 프로젝트 본문 |
-| GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` |
+| GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` (리포트가 쓴 front matter는 뺀 본문) |
+| GET | `/api/reports` | 리포트: 설정 `setting{daily{enabled,days[mon…sun]},weekly{enabled,day},monthly{enabled,day 1~28}}`, 진행 중 `running{kind,period,startedAt,agent}`, 종류별 마지막 실행 `lastRun{daily?,weekly?,monthly?: {period,at,ok,agent,ms,path?,error?}}`, 종류별 목록 `reports{daily[],weekly[],monthly[]: {kind,period,path,createdAt,agent}}`(월간은 정리가 쓴 `summaries/`도 포함, agent null), 지금 기본 기간 `defaults{daily,weekly,monthly}` (`server/src/reports.ts`) |
+| GET | `/api/reports/:kind/:period` | 리포트 하나 `{ kind, period, path, createdAt, agent, range{from,to,label}, markdown }`. kind는 daily·weekly·monthly, period는 `YYYY-MM-DD` · `YYYY-Www`(ISO 주, 월~일) · `YYYY-MM`. 파일은 `reports/daily/`, `reports/weekly/`, `summaries/` |
+| PUT | `/api/reports/settings` | `{ daily?: { enabled?, days? }, weekly?: { enabled?, day? }, monthly?: { enabled?, day? } }` 부분 갱신 → GET과 같은 응답. 요일이 아니거나 날짜가 1~28 밖이면 400. `daily.ts`가 수집 뒤 due인 것(일간: 보고할 날의 요일이 days에 있을 때, 아침 실행은 전날 · 주간: day 요일에 전날이 든 주 · 월간: day 날에 지난달; 파일이 있거나 같은 기간을 이미 돌렸으면 건너뜀)을 차례로 만들고 알림 |
+| POST | `/api/reports/run` | `{ kind, period? }` 지금 만들기 (202 `{ started, kind, period, agent }`; period 생략 = defaults). 실행 중·에이전트 없음 409 `{ error: busy|no_agent, reason }`, 종류·기간 형식 오류 400. 입력(그 기간의 log 줄, `sources/*/<날짜>.md`, inbox·processed의 전사본·세션 노트, 주간·월간은 하위 리포트)을 12만 자 상한에 최근 것부터 모아 "이 기록만 근거로 한 일·결정·막힌 것·다음 할 일, 항목 끝에 (근거: 날짜 파일)" 프롬프트를 질문 모드와 같은 읽기 전용 경로(`ask.ts generateText`)로 돌리고, 결과를 front matter(kind·period·range·createdAt·agent·inputs)와 함께 씀. 기록이 없는 기간은 실패로 기록 |
 | GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite). hit마다 `context`(출처·날짜·섹션·작성자·매치 단어)와 가장 잘 맞는 문단 `snippet`, 상위 대비 점수가 낮으면 `weak` |
 | GET / POST | `/api/ask` | 질문(RAG): GET은 쓸 수 있는 에이전트(`agents[]`, 정리와 같은 감지), 답할 에이전트 `chosen`, 진행 중 `running{q,startedAt,agent}`, 마지막 답 `last`, 대화 목록 `conversations[{id,title,updatedAt,turns}]`. POST `{ q, topK? (기본 10, 최대 20), conversationId? }` → `{ q, answer, sources[{ n, path, label, passage }], agent, ms, at, conversationId, turn }`. `conversationId`가 있으면 그 대화의 앞 턴(최근 4개, 답 600자)을 프롬프트에 넣고, 16자 이하 짧은 질문은 앞 질문과 함께 검색한다. 모르는 id면 새 대화. 대화는 `$ZAEVIS_HOME/ask/<id>.json`(최근 50개). `GET /api/ask/:id` 대화 전체, `DELETE /api/ask/:id` 삭제. 검색 상위 문단(약한 일치 제외, 발췌 1000자)을 `[n]`으로 번호 매겨 "발췌만 근거로 한국어로, 문장마다 [n]" 프롬프트로 에이전트에 넘긴다(`server/src/ask.ts`). CLI는 worklog를 cwd로 읽기 전용(claude `--tools ""`, codex `--sandbox read-only`, gemini `--yolo` 없이)으로 실행. 에이전트 없음·실행 중 409, 질문 없음 400, 검색 결과 없음 404, 검색·에이전트 실패 502 |
-| GET | `/api/file?path=` | worklog 안의 markdown 원문 `{ path, markdown }` (검색 결과 원문 보기) |
+| GET | `/api/file?path=` | worklog 안의 markdown·txt 원문 `{ path, markdown }` (검색 결과·기록 줄의 원문 보기) |
+| GET | `/api/origins?limit=` | 수집된 원본 목록 `{ files[{ path, source, kind: source\|inbox\|processed, date, name, bytes }] }` 최신순 — `sources/<이름>/<날짜>.md`, inbox·processed의 전사본·세션 노트 (메모리 탭 "원본") |
+| GET | `/api/origin?src=` | 기록 줄의 `(src: …)` 텍스트 → `{ paths[] }`. `git <저장소> <해시>`는 git 날짜 파일에서 해시를 찾고, `<소스> YYYY-MM-DD`는 그 날짜 파일(`claude-code`는 agent-sessions로 폴백), `YYYY-MM-DD_제목`은 processed/inbox의 전사본·세션 노트 (`Worklog.resolveSource`) |
 | GET / POST | `/api/index` | 색인 상태(+ `embedding`: 로컬 임베딩 데몬 상태 off/starting/ready/failed) · 색인 갱신 시작 (`{ force?: true }`) |
 | POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
 | PUT / DELETE | `/api/logs/:YYYY-MM` | 한 줄 편집 `{ raw, text?, tags?, projects?, date? }` · 삭제 `{ raw }`. `raw`는 파일에 있는 현재 줄 그대로이며, 못 찾으면 409(다른 곳에서 바뀜). 정리가 쓴 줄의 `(src: …)`는 보존 |

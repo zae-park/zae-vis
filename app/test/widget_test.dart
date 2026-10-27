@@ -126,6 +126,16 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/digest/run':
             posted.add(req);
             return _json({'started': true}, 202);
+          case '/api/origins':
+            return _json({
+              'files': [
+                {'path': 'sources/git/2026-10-09.md', 'source': 'git', 'kind': 'source', 'date': '2026-10-09', 'name': '2026-10-09.md', 'bytes': 2048},
+                {'path': 'processed/transcripts/2026-10-09_회의.txt', 'source': 'transcripts', 'kind': 'processed', 'date': '2026-10-09', 'name': '2026-10-09_회의.txt', 'bytes': 4096},
+                {'path': 'sources/agent-sessions/2026-10-08.md', 'source': 'agent-sessions', 'kind': 'source', 'date': '2026-10-08', 'name': '2026-10-08.md', 'bytes': 1024},
+              ],
+            });
+          case '/api/origin':
+            return _json({'src': req.url.queryParameters['src'], 'paths': ['processed/transcripts/2026-10-09_회의.txt']});
           case '/api/projects':
             return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
           case '/api/inbox/audio':
@@ -479,7 +489,7 @@ void main() {
     }
 
     await cmd(LogicalKeyboardKey.digit2);
-    expect(find.text('날짜순 한 줄 기록 — 내가 쓴 줄과 정리가 쓴 줄'), findsOneWidget, reason: 'log tab header');
+    expect(find.text('기록 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'), findsOneWidget, reason: 'memory tab header');
 
     await cmd(LogicalKeyboardKey.keyK);
     expect(find.text('기록 전체를 뜻과 단어로 찾습니다'), findsOneWidget, reason: 'back on search');
@@ -498,7 +508,7 @@ void main() {
     posted.clear();
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('로그').first);
+    await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
 
     // newest first: the 10-08 line (written by the digest) is on top
@@ -535,12 +545,14 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('로그').first);
+    await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
 
     expect(find.text('GA4 매핑 누락'), findsOneWidget);
     expect(find.text('MCP 연결 완료'), findsOneWidget);
-    expect(find.textContaining('Claude 정리'), findsOneWidget);
+    expect(find.textContaining('출처 2026-10-09_회의'), findsOneWidget); // the digest's line links to its origin
+    expect(find.text('내 기록'), findsOneWidget);
+    expect(find.text('정리'), findsOneWidget);
 
     await tester.tap(find.text('내가 쓴 줄만'));
     await tester.pumpAndSettle();
@@ -581,7 +593,7 @@ void main() {
     posted.clear();
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('로그').first);
+    await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('한 줄 기록'));
     await tester.pumpAndSettle();
@@ -608,7 +620,7 @@ void main() {
     posted.clear();
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('로그').first);
+    await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('정리 제안 1건이 검토를 기다립니다'), findsOneWidget);
 
@@ -843,5 +855,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(posted.last.method, 'DELETE');
     expect(posted.last.url.path, '/api/datasources/obsidian');
+  });
+
+  testWidgets('메모리 tab: 원본 layer lists collected files by day with citation counts; a line\'s 출처 opens its origin', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('메모리').first);
+    await tester.pumpAndSettle();
+    expect(find.text('프로젝트 상태'), findsOneWidget); // side panel on a wide window
+    expect(find.text('ROAS'), findsOneWidget);
+    expect(find.textContaining('정리 에이전트는 고치지 못하고'), findsOneWidget); // flow strip
+
+    // 출처 on the digest's line → its transcript
+    await tester.tap(find.textContaining('출처 2026-10-09_회의'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-09_회의.txt'), findsOneWidget); // file screen title
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('원본'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-09'), findsOneWidget);
+    expect(find.text('기록 1줄의 근거'), findsOneWidget); // the transcript is cited by one line
+    expect(find.text('아직 정리 안 됨'), findsOneWidget); // 2026-10-08 agent sessions, cited by nothing
+    expect(find.text('3개 파일 · 2일'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilterChip, 'git 커밋'));
+    await tester.pumpAndSettle();
+    expect(find.text('1개 파일 · 1일'), findsOneWidget);
   });
 }

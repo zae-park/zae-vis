@@ -62,6 +62,7 @@ export function classifyPath(path: string, datasourceId?: string | null): { kind
   if (/(?:^|\/)log\/[^/]+$/.test(p)) return local("log", "한 줄 기록");
   if (/(?:^|\/)projects\/[^/]+$/.test(p)) return local("project", "프로젝트", null);
   if (/(?:^|\/)summaries\/[^/]+$/.test(p)) return local("summary", "월간 정리");
+  if ((m = /(?:^|\/)reports\/(daily|weekly)\/[^/]+$/.exec(p))) return local("summary", m[1] === "daily" ? "일간 리포트" : "주간 리포트");
   if (/(?:^|\/)(inbox|processed)\//.test(p)) return local("inbox", /transcripts/.test(p) ? "회의 전사본" : "inbox");
   return local("other", "worklog");
 }

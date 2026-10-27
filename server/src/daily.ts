@@ -9,6 +9,7 @@ import { AutoRAGMcp } from "./autorag.ts";
 import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
+import { KIND_LABEL, ReportRunner, dueReports } from "./reports.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
 
@@ -84,6 +85,22 @@ async function main(): Promise<void> {
       console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
       const r = await new DigestRunner({ notify }).run(cfg, cfg.digest, chosen);
       console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
+    }
+  }
+  // Reports that are due today (reports.ts): the day's, the week's on its day, last month's on its day.
+  if (!only.length) {
+    const due = dueReports(cfg.reports, cfg.worklogDir, loadState().reports);
+    if (due.length) {
+      const chosen = pickAgent(cfg.digest, await detectAgents());
+      if (!chosen) console.log(`[${ts()}] 리포트 건너뜀 (${due.map((d) => `${KIND_LABEL[d.kind]} ${d.period}`).join(", ")}): 쓸 수 있는 에이전트가 없습니다.`);
+      else {
+        const runner = new ReportRunner({ notify });
+        for (const d of due) {
+          console.log(`[${ts()}] ${KIND_LABEL[d.kind]} 리포트 ${d.period} 시작 (${chosen.title})`);
+          const r = await runner.run(cfg, chosen, d.kind, d.period);
+          console.log(`  ${r.ok ? `✓ ${r.path}` : `✗ ${r.error}`}`);
+        }
+      }
     }
   }
   if (argv.includes("--json")) console.log(JSON.stringify({ report, index }));

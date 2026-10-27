@@ -9,7 +9,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/projects_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/summaries_screen.dart';
+import 'screens/reports_screen.dart';
 import 'shortcuts.dart';
 import 'theme.dart';
 import 'recording/recorder.dart';
@@ -205,7 +205,7 @@ class _HomeShellState extends State<HomeShell> {
         0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), onOpenSettings: _openSettings, focusNode: _searchFocus),
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
-        3 => SummariesScreen(api: api, onOpenProject: _openProject),
+        3 => ReportsScreen(api: api, onOpenProject: _openProject),
         _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
       };
 

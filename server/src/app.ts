@@ -81,6 +81,17 @@ export type AppOptions = {
     /** Outcome of a `datasources` refresh phase (AutoRAG's result, or the error). */
     recordSync(result: unknown, error?: string): void;
   };
+  /** Daily / weekly / monthly reports written by an agent from the period's records — see reports.ts. */
+  reports?: {
+    /** Setting, the run in progress, the last run per kind, every report on disk, default periods. */
+    status(): Promise<Record<string, unknown>>;
+    /** One report (`markdown` without its front matter), or null. */
+    read(kind: string, period: string): Promise<Record<string, unknown> | null>;
+    /** Saves a settings patch and returns the status. Throws on a bad value (→ 400). */
+    update(patch: Record<string, unknown>): Promise<Record<string, unknown>>;
+    /** Starts a run in the background; `started: false` with an error code and reason when it cannot. */
+    run(kind: string, period?: string): Promise<{ started: boolean; status?: number; error?: string; reason?: string; kind?: string; period?: string; agent?: string }>;
+  };
 };
 
 const MIME: Record<string, string> = {
@@ -499,6 +510,35 @@ export function createApp(opts: AppOptions): Server {
         case "GET /settings":
           if (!opts.settings) return notFound(res);
           return send(res, 200, await opts.settings.get());
+
+        // ── reports ─────────────────────────────────────────────────────────
+        case "GET /reports": {
+          // GET /api/reports → { setting, running, lastRun, reports{daily[],weekly[],monthly[]}, defaults }  ·  GET /api/reports/:kind/:period → the report
+          if (!opts.reports) return notFound(res);
+          if (!arg) return send(res, 200, await opts.reports.status());
+          if (!parts[3]) return notFound(res);
+          const r = await opts.reports.read(arg, parts[3]);
+          return r ? send(res, 200, r) : notFound(res);
+        }
+
+        case "PUT /reports": {
+          // PUT /api/reports/settings { daily?: { enabled?, days? }, weekly?: { enabled?, day? }, monthly?: { enabled?, day? } }
+          if (!opts.reports || arg !== "settings") return notFound(res);
+          const b = await readJson(req);
+          try {
+            return send(res, 200, await opts.reports.update(b));
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
+          }
+        }
+
+        case "POST /reports": {
+          // POST /api/reports/run { kind, period? } → 202 { started, kind, period, agent } · 409 busy / no_agent · 400 bad kind or period
+          if (!opts.reports || arg !== "run") return notFound(res);
+          const b = await readJson(req);
+          const r = await opts.reports.run(String(b.kind ?? ""), typeof b.period === "string" && b.period ? b.period : undefined);
+          return send(res, r.started ? 202 : (r.status ?? 409), r);
+        }
 
         case "GET /digest": {
           if (!opts.digest) return notFound(res);

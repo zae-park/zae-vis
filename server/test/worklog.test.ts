@@ -70,3 +70,33 @@ test("Worklog reads folders, sorts months newest first, rejects traversal", asyn
   assert.equal(await wl.project("../log/2026-10"), null);
   assert.equal((await wl.project("p1"))?.title, "P1");
 });
+
+test("origins lists collected day files newest first; resolveSource maps (src: …) markers to files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "zv-origins-"));
+  for (const [rel, text] of [
+    ["sources/git/2026-10-20.md", "# git\n- 10:00 `abc1234` 커밋 — 나\n"],
+    ["sources/git/2026-10-21.md", "# git\n- 10:00 `def5678` 다른 커밋 — 나\n"],
+    ["sources/agent-sessions/2026-10-21.md", "# 세션\n"],
+    ["processed/transcripts/2026-10-19_회의.txt", "회의"],
+    ["inbox/claude-sessions/2026-10-21_zaevis.md", "노트"],
+  ] as const) {
+    await mkdir(join(root, rel, ".."), { recursive: true });
+    await writeFile(join(root, rel), text);
+  }
+  const w = new Worklog(root);
+  const files = await w.origins();
+  assert.deepEqual(files.map((f) => [f.date, f.source, f.kind]), [
+    ["2026-10-21", "session-notes", "inbox"], // same day: by path (inbox/ < sources/)
+    ["2026-10-21", "agent-sessions", "source"],
+    ["2026-10-21", "git", "source"],
+    ["2026-10-20", "git", "source"],
+    ["2026-10-19", "transcripts", "processed"],
+  ]);
+  assert.deepEqual(await w.resolveSource("git zaevis abc1234"), ["sources/git/2026-10-20.md"]);
+  assert.deepEqual(await w.resolveSource("agent-sessions 2026-10-21"), ["sources/agent-sessions/2026-10-21.md"]);
+  assert.deepEqual(await w.resolveSource("claude-code 2026-10-21"), ["sources/agent-sessions/2026-10-21.md"], "old marker falls through to the agent-sessions file");
+  assert.deepEqual(await w.resolveSource("2026-10-19_회의"), ["processed/transcripts/2026-10-19_회의.txt"]);
+  assert.deepEqual(await w.resolveSource("2026-10-21_zaevis, git zaevis def5678"), ["inbox/claude-sessions/2026-10-21_zaevis.md", "sources/git/2026-10-21.md"]);
+  assert.deepEqual(await w.resolveSource("없는것 2026-01-01"), []);
+  assert.equal((await w.file("processed/transcripts/2026-10-19_회의.txt"))?.markdown, "회의", ".txt originals open too");
+});

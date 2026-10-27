@@ -164,10 +164,10 @@ export function askCliArgs(agent: Exclude<AgentId, "openrouter">, prompt: string
 
 // ── running ────────────────────────────────────────────────────────────────────
 
-export type Exec = (bin: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
+export type Exec = (bin: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv, timeoutMs?: number) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
 
 /** Like digest.runCli but keeps stdout (the answer) apart from stderr (progress chatter). */
-export const execCli: Exec = (bin, args, cwd, env) =>
+export const execCli: Exec = (bin, args, cwd, env, timeoutMs = RUN_TIMEOUT_MS) =>
   new Promise((res) => {
     const child = spawn(bin, args, { cwd, env: { ...(env ?? process.env), PATH: searchDirs(env).join(delimiter), NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -177,7 +177,7 @@ export const execCli: Exec = (bin, args, cwd, env) =>
     const t = setTimeout(() => {
       child.kill("SIGTERM");
       stderr += "\n[시간 초과]";
-    }, RUN_TIMEOUT_MS);
+    }, timeoutMs);
     child.on("error", (e) => {
       clearTimeout(t);
       res({ ok: false, stdout, stderr: e.message });
@@ -188,12 +188,12 @@ export const execCli: Exec = (bin, args, cwd, env) =>
     });
   });
 
-export async function chatText(key: string, model: string, prompt: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function chatText(key: string, model: string, prompt: string, fetchImpl: typeof fetch = fetch, timeoutMs = RUN_TIMEOUT_MS): Promise<string> {
   const res = await fetchImpl("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "HTTP-Referer": "https://github.com/zae-park/zaevis", "X-Title": "zaevis" },
     body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.2 }),
-    signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -272,28 +272,38 @@ export class AskRunner {
     }
   }
 
-  private async answer(agent: AgentInfo, prompt: string, model: string, cwd: string): Promise<string> {
-    if (agent.id === "openrouter") {
-      const key = openrouterKey();
-      if (!key) throw new Error("OpenRouter 키가 없습니다.");
-      const text = await chatText(key, model || DEFAULT_OPENROUTER_MODEL, prompt, this.opts.fetchImpl);
-      if (!text) throw new Error("모델이 빈 답을 돌려줬습니다.");
-      return text;
-    }
-    const exec = this.opts.exec ?? execCli;
-    // Codex writes its final message to a file; stdout carries its progress log.
-    const tmp = agent.id === "codex" ? await mkdtemp(join(tmpdir(), "zv-ask-")) : null;
-    const outFile = tmp ? join(tmp, "answer.md") : undefined;
-    try {
-      const r = await exec(agent.bin!, askCliArgs(agent.id, prompt, { outFile }), cwd, this.opts.env);
-      let text = r.stdout;
-      if (outFile) text = await readFile(outFile, "utf8").catch(() => r.stdout);
-      text = cleanAnswer(text);
-      if (!r.ok && !text) throw new Error(`${agent.title} 실행 실패: ${(r.stderr || r.stdout).split("\n").slice(-3).join(" / ") || "출력 없음"}`);
-      if (!text) throw new Error(`${agent.title}가 답을 돌려주지 않았습니다. ${r.stderr.split("\n").slice(-2).join(" / ")}`.trim());
-      return text;
-    } finally {
-      if (tmp) await rm(tmp, { recursive: true, force: true });
-    }
+  private answer(agent: AgentInfo, prompt: string, model: string, cwd: string): Promise<string> {
+    return generateText(agent, prompt, model, cwd, this.opts);
+  }
+}
+
+export type GenerateOpts = { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; timeoutMs?: number };
+
+/**
+ * One read-only round trip to the chosen agent: the prompt in, plain text out. Shared by the
+ * question mode and the reports (reports.ts). The CLI runs with `cwd` but without tools.
+ */
+export async function generateText(agent: AgentInfo, prompt: string, model: string, cwd: string, opts: GenerateOpts = {}): Promise<string> {
+  if (agent.id === "openrouter") {
+    const key = openrouterKey();
+    if (!key) throw new Error("OpenRouter 키가 없습니다.");
+    const text = await chatText(key, model || DEFAULT_OPENROUTER_MODEL, prompt, opts.fetchImpl, opts.timeoutMs);
+    if (!text) throw new Error("모델이 빈 답을 돌려줬습니다.");
+    return text;
+  }
+  const exec = opts.exec ?? execCli;
+  // Codex writes its final message to a file; stdout carries its progress log.
+  const tmp = agent.id === "codex" ? await mkdtemp(join(tmpdir(), "zv-ask-")) : null;
+  const outFile = tmp ? join(tmp, "answer.md") : undefined;
+  try {
+    const r = await exec(agent.bin!, askCliArgs(agent.id, prompt, { outFile }), cwd, opts.env, opts.timeoutMs);
+    let text = r.stdout;
+    if (outFile) text = await readFile(outFile, "utf8").catch(() => r.stdout);
+    text = cleanAnswer(text);
+    if (!r.ok && !text) throw new Error(`${agent.title} 실행 실패: ${(r.stderr || r.stdout).split("\n").slice(-3).join(" / ") || "출력 없음"}`);
+    if (!text) throw new Error(`${agent.title}가 답을 돌려주지 않았습니다. ${r.stderr.split("\n").slice(-2).join(" / ")}`.trim());
+    return text;
+  } finally {
+    if (tmp) await rm(tmp, { recursive: true, force: true });
   }
 }

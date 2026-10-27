@@ -137,6 +137,18 @@ class WorklogApi {
     await _send('DELETE', '/ask/${Uri.encodeComponent(id)}');
   }
 
+  /// Collected day files and inbox/processed material, newest first.
+  Future<List<OriginFile>> origins({int limit = 400}) async {
+    final j = await _get('/origins', {'limit': '$limit'});
+    return (j['files'] is List ? j['files'] as List : const <Object?>[]).whereType<Json>().map(OriginFile.fromJson).toList();
+  }
+
+  /// The files a log line's "(src: …)" marker points at (empty when none exist any more).
+  Future<List<String>> origin(String src) async {
+    final j = await _get('/origin', {'src': src});
+    return (j['paths'] is List ? j['paths'] as List : const <Object?>[]).whereType<String>().toList();
+  }
+
   /// A markdown file inside the worklog (the original behind a search hit).
   Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));
 
@@ -311,6 +323,35 @@ class WorklogApi {
     await _send('POST', '/digest/run', {});
   }
 
+  // ── reports (daily / weekly / monthly) ──────────────────────────────────
+  Future<ReportsStatus> reports() async => ReportsStatus.fromJson(await _get('/reports'));
+
+  Future<Report> report(String kind, String period) async =>
+      Report.fromJson(await _get('/reports/${Uri.encodeComponent(kind)}/${Uri.encodeComponent(period)}'));
+
+  /// Partial update: only the given parts change. Days are weekday codes (mon…sun).
+  Future<ReportsStatus> updateReportSettings({
+    bool? dailyEnabled,
+    List<String>? dailyDays,
+    bool? weeklyEnabled,
+    String? weeklyDay,
+    bool? monthlyEnabled,
+    int? monthlyDay,
+  }) async =>
+      ReportsStatus.fromJson(await _send('PUT', '/reports/settings', {
+        if (dailyEnabled != null || dailyDays != null)
+          'daily': {if (dailyEnabled != null) 'enabled': dailyEnabled, if (dailyDays != null) 'days': dailyDays},
+        if (weeklyEnabled != null || weeklyDay != null)
+          'weekly': {if (weeklyEnabled != null) 'enabled': weeklyEnabled, if (weeklyDay != null) 'day': weeklyDay},
+        if (monthlyEnabled != null || monthlyDay != null)
+          'monthly': {if (monthlyEnabled != null) 'enabled': monthlyEnabled, if (monthlyDay != null) 'day': monthlyDay},
+      }));
+
+  /// Starts a report run; without [period] the server picks the current one. 409 (busy / no agent)
+  /// and 400 arrive as an [ApiException]. Returns the period the server is making.
+  Future<String> runReport(String kind, {String? period}) async =>
+      _str((await _send('POST', '/reports/run', {'kind': kind, if (period != null) 'period': period}))['period']);
+
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
   Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async =>
@@ -324,3 +365,5 @@ class WorklogApi {
         }),
       );
 }
+
+String _str(Object? v) => v is String ? v : '';

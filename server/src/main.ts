@@ -15,6 +15,7 @@ import { DigestRunner, detectAgents, pickAgent } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
+import { KIND_LABEL, ReportRunner, defaultPeriod, isKind, isValidPeriod, mergeReportsSetting, readReport } from "./reports.ts";
 import * as review from "./review.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
@@ -36,6 +37,7 @@ const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(
 const queue = new TranscribeQueue();
 const digest = new DigestRunner({ notify });
 const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
+const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
 queue.onDone = (job) => notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
@@ -139,6 +141,26 @@ const server = createApp({
     },
     conversation: (id) => ask.store.get(id),
     remove: (id) => ask.store.remove(id),
+  },
+  reports: {
+    status: () => reports.status(cfg),
+    read: async (kind, period) => (isKind(kind) ? readReport(cfg.worklogDir, kind, period) : null),
+    async update(patch) {
+      saveAppSettings({ reports: mergeReportsSetting(cfg.reports, patch) }); // throws on a bad value → 400
+      cfg = loadConfig();
+      return reports.status(cfg);
+    },
+    async run(kind, period) {
+      if (!isKind(kind)) return { started: false, status: 400, error: "bad_kind", reason: "종류는 daily·weekly·monthly 중 하나입니다." };
+      const p = period ?? defaultPeriod(kind);
+      if (!isValidPeriod(kind, p)) return { started: false, status: 400, error: "bad_period", reason: `기간 형식이 올바르지 않습니다: ${p} (${kind === "daily" ? "YYYY-MM-DD" : kind === "weekly" ? "YYYY-Www" : "YYYY-MM"})` };
+      const chosen = pickAgent(cfg.digest, await detectAgents());
+      if (!chosen) return { started: false, status: 409, error: "no_agent", reason: "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요." };
+      const cur = reports.current;
+      if (cur) return { started: false, status: 409, error: "busy", reason: `이미 ${KIND_LABEL[cur.kind]} 리포트 ${cur.period} 를 만드는 중입니다.` };
+      void reports.run(cfg, chosen, kind, p);
+      return { started: true, kind, period: p, agent: chosen.id };
+    },
   },
   rerank: {
     status: () => rerank.status(cfg.rerank),

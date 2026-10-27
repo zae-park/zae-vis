@@ -137,9 +137,11 @@ export class Worklog {
     return text === null ? null : parseLog(text);
   }
 
+  /** The month's summary without the front matter a report run puts on it (kind, createdAt, agent …). */
   async summary(month: string): Promise<string | null> {
     if (!MONTH_RE.test(month)) return null;
-    return this.read(join("summaries", `${month}.md`));
+    const md = await this.read(join("summaries", `${month}.md`));
+    return md === null ? null : parseFrontMatter(md).body;
   }
 
   async projects(): Promise<ProjectSummary[]> {
@@ -226,11 +228,101 @@ export class Worklog {
     return file;
   }
 
-  /** A markdown file inside the worklog, for showing a search hit's original. Rejects paths outside the root. */
+  /**
+   * What the daily collect and the inbox produced, newest first: every `sources/<name>/<date>.md`
+   * day file plus transcripts and session notes in inbox/ and processed/. This is the "원본" layer
+   * of the memory tab — the material the log lines and reports were written from.
+   */
+  async origins(limit = 400): Promise<OriginFile[]> {
+    const out: OriginFile[] = [];
+    const add = async (dir: string, source: string, kind: OriginFile["kind"]) => {
+      let names: string[];
+      try {
+        names = await readdir(join(this.root, dir));
+      } catch {
+        return;
+      }
+      for (const n of names) {
+        if (n.startsWith(".") || n.startsWith("_")) continue;
+        const date = /(\d{4}-\d{2}-\d{2})/.exec(n)?.[1];
+        if (!date) continue;
+        try {
+          const st = await stat(join(this.root, dir, n));
+          if (!st.isFile()) continue;
+          out.push({ path: `${dir}/${n}`, source, kind, date, name: n, bytes: st.size });
+        } catch {}
+      }
+    };
+    let sourceDirs: string[] = [];
+    try {
+      sourceDirs = (await readdir(join(this.root, "sources"))).filter((n) => !n.startsWith("."));
+    } catch {}
+    for (const s of sourceDirs) await add(`sources/${s}`, s, "source");
+    await add("inbox/transcripts", "transcripts", "inbox");
+    await add("processed/transcripts", "transcripts", "processed");
+    await add("inbox/claude-sessions", "session-notes", "inbox");
+    await add("processed/claude-sessions", "session-notes", "processed");
+    out.sort((a, b) => (a.date === b.date ? a.path.localeCompare(b.path) : a.date < b.date ? 1 : -1));
+    return out.slice(0, limit);
+  }
+
+  /**
+   * The file(s) behind a log line's `(src: …)` marker, so the memory tab can jump from a line to
+   * the material it was written from. Formats (kit/templates/worklog/README.md):
+   * "git <repo> <hash7>" · "<source> YYYY-MM-DD" (claude-code, agent-sessions, shell, 커넥터 이름) ·
+   * "YYYY-MM-DD_제목" (transcript or session note). Several may be joined with ", ".
+   */
+  async resolveSource(src: string): Promise<string[]> {
+    const found: string[] = [];
+    const exists = async (rel: string) => {
+      try {
+        return (await stat(join(this.root, rel))).isFile();
+      } catch {
+        return false;
+      }
+    };
+    for (const part of src.split(/\s*[,;]\s*/).map((p) => p.trim()).filter(Boolean)) {
+      let m: RegExpExecArray | null;
+      if ((m = /^git\s+\S+\s+([0-9a-f]{7,40})$/i.exec(part))) {
+        // the commit's day file: search the git day files, newest first
+        const hash = m[1].toLowerCase();
+        for (const n of (await this.listMd("sources/git")).sort().reverse()) {
+          const text = await this.read(`sources/git/${n}`);
+          if (text && text.toLowerCase().includes(hash)) {
+            found.push(`sources/git/${n}`);
+            break;
+          }
+        }
+        continue;
+      }
+      if ((m = /^([\w-]+)\s+(\d{4}-\d{2}-\d{2})$/.exec(part))) {
+        const name = { shell: "shell-history", "claude-code": "claude-code" }[m[1]] ?? m[1];
+        const candidates = [`sources/${name}/${m[2]}.md`, ...(name === "claude-code" ? [`sources/agent-sessions/${m[2]}.md`] : [])];
+        for (const c of candidates) if (await exists(c)) {
+          found.push(c);
+          break;
+        }
+        continue;
+      }
+      if (/^\d{4}-\d{2}-\d{2}[_ ]/.test(part) || /^\d{4}-\d{2}-\d{2}$/.test(part)) {
+        const base = part.replace(/\.(txt|md)$/, "");
+        for (const c of [
+          `processed/transcripts/${base}.txt`, `processed/transcripts/${base}.md`, `inbox/transcripts/${base}.txt`, `inbox/transcripts/${base}.md`,
+          `processed/claude-sessions/${base}.md`, `inbox/claude-sessions/${base}.md`,
+        ]) if (await exists(c)) {
+          found.push(c);
+          break;
+        }
+      }
+    }
+    return found;
+  }
+
+  /** A text file inside the worklog (.md or .txt), for showing a search hit's or a log line's original. Rejects paths outside the root. */
   async file(rel: string): Promise<{ path: string; markdown: string } | null> {
     const clean = normalize(rel).replace(/^([/\\])+/, "");
     const abs = join(this.root, clean);
-    if (!abs.startsWith(this.root + sep) || !clean.endsWith(".md")) return null;
+    if (!abs.startsWith(this.root + sep) || !/\.(md|txt)$/.test(clean)) return null;
     const markdown = await this.read(clean);
     return markdown === null ? null : { path: clean, markdown };
   }
@@ -248,6 +340,17 @@ export class Worklog {
 // ── real-time input ──────────────────────────────────────────────────────────
 
 export type NewLogLine = { text: string; tags?: string[]; projects?: string[]; date?: Date };
+
+/** One collected/ingested file, as the memory tab lists it. */
+export type OriginFile = {
+  path: string;
+  /** Source name: git, agent-sessions, shell-history, a connector name, "transcripts", "session-notes". */
+  source: string;
+  kind: "source" | "inbox" | "processed";
+  date: string;
+  name: string;
+  bytes: number;
+};
 
 const TAG_OK = /^[\p{L}\p{N}_-]{1,30}$/u;
 

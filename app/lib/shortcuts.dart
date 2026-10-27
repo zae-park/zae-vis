@@ -35,7 +35,6 @@ class AppShortcuts {
     LogicalKeyboardKey.digit2,
     LogicalKeyboardKey.digit3,
     LogicalKeyboardKey.digit4,
-    LogicalKeyboardKey.digit5,
   ].map(mod).toList();
 
   /// For the settings page. [hotkey] is the stored global hotkey spec ("" = platform default).
@@ -43,7 +42,7 @@ class AppShortcuts {
         ('${modLabel}K', '검색으로 이동해 입력'),
         ('${modLabel}N', '한 줄 기록'),
         ('$modLabel⇧R', '녹음'),
-        ('${modLabel}1 … ${modLabel}5', '검색 · 로그 · 프로젝트 · 월간 정리 · 수집 탭'),
+        ('${modLabel}1 … ${modLabel}4', '검색 · 메모리 · 리포트 · 연결 탭'),
         ('$modLabel,', '설정'),
         if (desktop) (HotkeySpec.label(hotkey), '어디서든 창을 띄우고 한 줄 기록 (전역)'),
       ];

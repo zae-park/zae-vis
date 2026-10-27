@@ -219,6 +219,35 @@ class AskStatus {
   AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
 }
 
+/// One collected or ingested file: the "원본" layer behind the log lines.
+class OriginFile {
+  const OriginFile({required this.path, required this.source, required this.kind, required this.date, required this.name, required this.bytes});
+  factory OriginFile.fromJson(Json j) => OriginFile(
+        path: _str(j['path']),
+        source: _str(j['source']),
+        kind: _str(j['kind']),
+        date: _str(j['date']),
+        name: _str(j['name']),
+        bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+      );
+  final String path;
+  final String source; // git | agent-sessions | shell-history | <connector> | transcripts | session-notes
+  final String kind; // source | inbox | processed
+  final String date;
+  final String name;
+  final int bytes;
+
+  String get sourceLabel => switch (source) {
+        'git' => 'git 커밋',
+        'agent-sessions' => '에이전트 세션',
+        'claude-code' => 'Claude Code 세션',
+        'shell-history' => '셸 명령',
+        'transcripts' => '전사본',
+        'session-notes' => '세션 노트',
+        _ => source,
+      };
+}
+
 class WorklogFile {
   const WorklogFile({required this.path, required this.markdown});
   factory WorklogFile.fromJson(Json j) => WorklogFile(path: _str(j['path']), markdown: _str(j['markdown']));
@@ -914,4 +943,198 @@ class DatasourcesState {
       );
   final List<ExternalDatasource> datasources;
   final bool syncing;
+}
+
+// ── reports (daily / weekly / monthly) ─────────────────────────────────────
+
+const reportKinds = ['daily', 'weekly', 'monthly'];
+const weekdayCodes = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const weekdayPresets = {
+  'weekdays': ['mon', 'tue', 'wed', 'thu', 'fri'],
+  'weekend': ['sat', 'sun'],
+  'everyday': weekdayCodes,
+};
+
+String reportKindLabel(String kind) => switch (kind) { 'daily' => '일간', 'weekly' => '주간', 'monthly' => '월간', _ => kind };
+
+String weekdayLabel(String code) =>
+    const {'mon': '월', 'tue': '화', 'wed': '수', 'thu': '목', 'fri': '금', 'sat': '토', 'sun': '일'}[code] ?? code;
+
+/// ISO week (Mon–Sun) of a day: the Thursday of the week decides the year.
+({int year, int week}) isoWeekOf(DateTime d) {
+  final day = DateTime(d.year, d.month, d.day, 12);
+  final thursday = day.add(Duration(days: 3 - (day.weekday - 1)));
+  final jan4 = DateTime(thursday.year, 1, 4, 12);
+  final week = 1 + ((thursday.difference(jan4).inDays - 3 + (jan4.weekday - 1)) / 7).round();
+  return (year: thursday.year, week: week);
+}
+
+String _two(int n) => n.toString().padLeft(2, '0');
+String dailyPeriod(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
+String weeklyPeriod(DateTime d) {
+  final w = isoWeekOf(d);
+  return '${w.year}-W${_two(w.week)}';
+}
+
+String monthlyPeriod(DateTime d) => '${d.year}-${_two(d.month)}';
+
+/// The "지금 만들기" choices: a kind and the period it means on day [now].
+class ReportChoice {
+  const ReportChoice(this.label, this.kind, this.period);
+  final String label;
+  final String kind;
+  final String period;
+
+  static List<ReportChoice> forNow(DateTime now) {
+    final yesterday = now.subtract(const Duration(days: 1));
+    final lastWeek = now.subtract(const Duration(days: 7));
+    final lastMonth = DateTime(now.year, now.month - 1, 1);
+    return [
+      ReportChoice('오늘', 'daily', dailyPeriod(now)),
+      ReportChoice('어제', 'daily', dailyPeriod(yesterday)),
+      ReportChoice('이번 주', 'weekly', weeklyPeriod(now)),
+      ReportChoice('지난주', 'weekly', weeklyPeriod(lastWeek)),
+      ReportChoice('이번 달', 'monthly', monthlyPeriod(now)),
+      ReportChoice('지난달', 'monthly', monthlyPeriod(lastMonth)),
+    ];
+  }
+}
+
+/// One report on disk, as GET /api/reports lists them per kind.
+class ReportEntry {
+  const ReportEntry({required this.kind, required this.period, required this.path, this.createdAt, this.agent});
+  factory ReportEntry.fromJson(Json j) => ReportEntry(
+        kind: _str(j['kind']),
+        period: _str(j['period']),
+        path: _str(j['path']),
+        createdAt: DateTime.tryParse(_str(j['createdAt'])),
+        agent: _strOrNull(j['agent']),
+      );
+  final String kind;
+  final String period;
+  final String path;
+  final DateTime? createdAt;
+
+  /// Null for a monthly summary the weekly digest wrote (no front matter).
+  final String? agent;
+}
+
+/// GET /api/reports/:kind/:period.
+class Report {
+  const Report({required this.kind, required this.period, required this.path, required this.markdown, this.createdAt, this.agent, this.rangeLabel});
+  factory Report.fromJson(Json j) {
+    final range = j['range'] is Json ? j['range'] as Json : const <String, dynamic>{};
+    return Report(
+      kind: _str(j['kind']),
+      period: _str(j['period']),
+      path: _str(j['path']),
+      markdown: _str(j['markdown']),
+      createdAt: DateTime.tryParse(_str(j['createdAt'])),
+      agent: _strOrNull(j['agent']),
+      rangeLabel: _strOrNull(range['label']),
+    );
+  }
+  final String kind;
+  final String period;
+  final String path;
+  final String markdown;
+  final DateTime? createdAt;
+  final String? agent;
+  final String? rangeLabel;
+}
+
+/// The last run of one kind (state.json), successful or not.
+class ReportRun {
+  const ReportRun({required this.kind, required this.period, required this.ok, this.at, this.agent, this.error, this.path});
+  factory ReportRun.fromJson(Json j) => ReportRun(
+        kind: _str(j['kind']),
+        period: _str(j['period']),
+        ok: j['ok'] == true,
+        at: DateTime.tryParse(_str(j['at'])),
+        agent: _strOrNull(j['agent']),
+        error: _strOrNull(j['error']),
+        path: _strOrNull(j['path']),
+      );
+  final String kind;
+  final String period;
+  final bool ok;
+  final DateTime? at;
+  final String? agent;
+  final String? error;
+  final String? path;
+}
+
+/// config.reports: when the daily job writes which report.
+class ReportSettings {
+  const ReportSettings({
+    this.dailyEnabled = false,
+    this.dailyDays = const ['mon', 'tue', 'wed', 'thu', 'fri'],
+    this.weeklyEnabled = false,
+    this.weeklyDay = 'mon',
+    this.monthlyEnabled = true,
+    this.monthlyDay = 1,
+  });
+  factory ReportSettings.fromJson(Json j) {
+    final d = j['daily'] is Json ? j['daily'] as Json : const <String, dynamic>{};
+    final w = j['weekly'] is Json ? j['weekly'] as Json : const <String, dynamic>{};
+    final m = j['monthly'] is Json ? j['monthly'] as Json : const <String, dynamic>{};
+    return ReportSettings(
+      dailyEnabled: d['enabled'] == true,
+      dailyDays: d['days'] is List ? _strList(d['days']) : const ['mon', 'tue', 'wed', 'thu', 'fri'],
+      weeklyEnabled: w['enabled'] == true,
+      weeklyDay: _str(w['day']).isEmpty ? 'mon' : _str(w['day']),
+      monthlyEnabled: m['enabled'] != false,
+      monthlyDay: m['day'] is int ? m['day'] as int : 1,
+    );
+  }
+  final bool dailyEnabled;
+  final List<String> dailyDays;
+  final bool weeklyEnabled;
+  final String weeklyDay;
+  final bool monthlyEnabled;
+  final int monthlyDay;
+
+  /// Which preset the chosen days are, or null for a custom set.
+  String? get dailyPreset {
+    for (final e in weekdayPresets.entries) {
+      if (e.value.length == dailyDays.length && e.value.every(dailyDays.contains)) return e.key;
+    }
+    return null;
+  }
+}
+
+/// GET /api/reports.
+class ReportsStatus {
+  const ReportsStatus({required this.settings, required this.reports, this.running, this.lastRun = const {}, this.defaults = const {}});
+  factory ReportsStatus.fromJson(Json j) {
+    final r = j['reports'] is Json ? j['reports'] as Json : const <String, dynamic>{};
+    final last = j['lastRun'] is Json ? j['lastRun'] as Json : const <String, dynamic>{};
+    final run = j['running'];
+    final defaults = j['defaults'] is Json ? j['defaults'] as Json : const <String, dynamic>{};
+    return ReportsStatus(
+      settings: ReportSettings.fromJson(j['setting'] is Json ? j['setting'] as Json : const <String, dynamic>{}),
+      reports: {
+        for (final k in reportKinds) k: (r[k] is List ? r[k] as List : const <Object?>[]).whereType<Json>().map(ReportEntry.fromJson).toList(),
+      },
+      running: run is Json ? ReportRunning(kind: _str(run['kind']), period: _str(run['period']), agent: _strOrNull(run['agent'])) : null,
+      lastRun: {for (final e in last.entries) if (e.value is Json) e.key: ReportRun.fromJson(e.value as Json)},
+      defaults: {for (final e in defaults.entries) e.key: _str(e.value)},
+    );
+  }
+  final ReportSettings settings;
+  final Map<String, List<ReportEntry>> reports;
+  final ReportRunning? running;
+  final Map<String, ReportRun> lastRun;
+
+  /// What a run without a period would make now, per kind.
+  final Map<String, String> defaults;
+
+  List<ReportEntry> of(String kind) => reports[kind] ?? const [];
+}
+
+class ReportRunning {
+  const ReportRunning({required this.kind, required this.period, this.agent});
+  final String kind;
+  final String period;
+  final String? agent;
 }

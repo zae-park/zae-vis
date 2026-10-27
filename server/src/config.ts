@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeReportsSetting, type ReportsSetting, type ReportsState } from "./reports.ts";
 
 export const stateDir = (): string => process.env.ZAEVIS_HOME ?? join(homedir(), ".zaevis");
 
@@ -32,6 +33,7 @@ export type AppConfig = {
   hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
   digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter"; model: string; weekly: boolean; review: boolean }; // weekly digest runner
+  reports: ReportsSetting; // daily / weekly / monthly reports written by the same agent (reports.ts)
   worklogDir: string;
   reposRoot: string;
   autoragConfig: string;
@@ -57,6 +59,7 @@ export function loadConfig(): AppConfig {
       weekly: fc.digest?.weekly !== false,
       review: fc.digest?.review !== false,
     },
+    reports: normalizeReportsSetting(fc.reports),
     worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
@@ -134,7 +137,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest" | "reports">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }
@@ -147,6 +150,8 @@ export type CollectState = {
   embedding?: { model: string; builtAt: string };
   /** Last weekly digest run. */
   digest?: { lastRun: string; agent: string; ok: boolean; report: string };
+  /** Last daily / weekly / monthly report run per kind, see reports.ts. */
+  reports?: ReportsState;
   /** Last sync of each external AutoRAG datasource (config key → outcome), see datasources.ts. */
   datasources?: Record<string, { lastSync: string; ok: boolean; error?: string; chunks?: number }>;
 };
