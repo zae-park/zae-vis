@@ -24,14 +24,17 @@ WorklogApi _fakeApi() => WorklogApi(
         switch (req.url.path) {
           case '/api/logs' when req.method == 'GET':
             return _json({'months': ['2026-10']});
-          case '/api/logs/2026-10':
+          case '/api/logs/2026-10' when req.method == 'GET':
             return _json({
               'month': '2026-10',
               'entries': [
-                {'date': '10-06', 'projects': ['databricks-poc'], 'tags': ['done'], 'text': 'MCP 연결 완료', 'source': null, 'author': 'me'},
-                {'date': '10-08', 'projects': ['roas'], 'tags': ['blocked'], 'text': 'GA4 매핑 누락', 'source': '2026-10-09_회의', 'author': 'claude'},
+                {'date': '10-06', 'projects': ['databricks-poc'], 'tags': ['done'], 'text': 'MCP 연결 완료', 'source': null, 'author': 'me', 'raw': '- 10-06 [[databricks-poc]] #done MCP 연결 완료'},
+                {'date': '10-08', 'projects': ['roas'], 'tags': ['blocked'], 'text': 'GA4 매핑 누락', 'source': '2026-10-09_회의', 'author': 'claude', 'raw': '- 10-08 [[roas]] #blocked GA4 매핑 누락 (src: 2026-10-09_회의)'},
               ],
             });
+          case '/api/logs/2026-10' when req.method == 'PUT' || req.method == 'DELETE':
+            posted.add(req);
+            return _json(req.method == 'PUT' ? {'line': '- 10-08 [[roas]] #done 고친 줄 (src: 2026-10-09_회의)'} : {'ok': true});
           case '/api/search':
             return _json({
               'ok': true,
@@ -248,6 +251,44 @@ void main() {
     await cmd(LogicalKeyboardKey.keyN);
     expect(find.text('한 줄 기록'), findsWidgets);
     expect(find.text('무엇을 했고, 왜 그렇게 했는지'), findsOneWidget, reason: 'the add-log dialog is open');
+  });
+
+  testWidgets('log line menu edits a line (PUT with its raw text) and deletes one after confirming', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('로그').first);
+    await tester.pumpAndSettle();
+
+    // newest first: the 10-08 line (written by the digest) is on top
+    await tester.tap(find.byTooltip('줄 메뉴').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('편집'));
+    await tester.pumpAndSettle();
+    expect(find.text('줄 편집'), findsOneWidget);
+    expect(find.textContaining('출처(2026-10-09_회의)는 그대로'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'GA4 매핑 누락'), '고친 줄');
+    await tester.tap(find.text('저장'));
+    await tester.pumpAndSettle();
+    final put = posted.singleWhere((r) => r.method == 'PUT');
+    final body = jsonDecode(utf8.decode(put.bodyBytes)) as Map<String, dynamic>;
+    expect(body['raw'], '- 10-08 [[roas]] #blocked GA4 매핑 누락 (src: 2026-10-09_회의)');
+    expect(body['text'], '고친 줄');
+    expect(body['date'], '10-08');
+    expect(find.text('줄을 고쳤습니다'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('줄 메뉴').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('지우기'));
+    await tester.pumpAndSettle();
+    expect(find.text('이 줄을 지울까요?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '지우기'));
+    await tester.pumpAndSettle();
+    final del = posted.singleWhere((r) => r.method == 'DELETE');
+    expect((jsonDecode(utf8.decode(del.bodyBytes)) as Map<String, dynamic>)['raw'], contains('GA4 매핑 누락'));
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {

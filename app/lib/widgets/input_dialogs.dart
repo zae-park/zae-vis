@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../models.dart';
 import 'common.dart';
 
 void toast(BuildContext context, String message, {bool error = false}) {
@@ -18,19 +19,32 @@ Future<bool> showAddLogDialog(BuildContext context, WorklogApi api, {List<String
   return saved == true;
 }
 
+/// Edits an existing line of log/<month>.md (text, tag, project, date). Returns true when saved.
+Future<bool> showEditLogDialog(BuildContext context, WorklogApi api, {required String month, required LogEntry entry, List<String> projects = const []}) async {
+  final saved = await showDialog<bool>(context: context, builder: (_) => _AddLogDialog(api: api, projects: projects, month: month, entry: entry));
+  return saved == true;
+}
+
 class _AddLogDialog extends StatefulWidget {
-  const _AddLogDialog({required this.api, required this.projects});
+  const _AddLogDialog({required this.api, required this.projects, this.month, this.entry});
   final WorklogApi api;
   final List<String> projects;
+
+  /// Set together for edit mode: the month file and the line being edited.
+  final String? month;
+  final LogEntry? entry;
+
+  bool get editing => entry != null;
 
   @override
   State<_AddLogDialog> createState() => _AddLogDialogState();
 }
 
 class _AddLogDialogState extends State<_AddLogDialog> {
-  final _text = TextEditingController();
-  final _project = TextEditingController();
-  String? _tag; // optional: a plain line is fine; tags only help filtering and the monthly summary
+  late final _text = TextEditingController(text: widget.entry?.text ?? '');
+  late final _project = TextEditingController(text: widget.entry?.projects.firstOrNull ?? '');
+  late final _date = TextEditingController(text: widget.entry?.date ?? '');
+  late String? _tag = widget.entry?.tags.firstOrNull; // optional: a plain line is fine; tags only help filtering and the monthly summary
   bool _saving = false;
   String? _error;
 
@@ -38,6 +52,7 @@ class _AddLogDialogState extends State<_AddLogDialog> {
   void dispose() {
     _text.dispose();
     _project.dispose();
+    _date.dispose();
     super.dispose();
   }
 
@@ -49,7 +64,12 @@ class _AddLogDialogState extends State<_AddLogDialog> {
     });
     try {
       final p = _project.text.trim();
-      await widget.api.addLog(_text.text, tags: [if (_tag != null) _tag!], projects: [if (p.isNotEmpty) p]);
+      if (widget.editing) {
+        await widget.api.updateLog(widget.month!, widget.entry!.raw,
+            text: _text.text, tags: [if (_tag != null) _tag!], projects: [if (p.isNotEmpty) p], date: _date.text.trim());
+      } else {
+        await widget.api.addLog(_text.text, tags: [if (_tag != null) _tag!], projects: [if (p.isNotEmpty) p]);
+      }
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -63,7 +83,7 @@ class _AddLogDialogState extends State<_AddLogDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('한 줄 기록'),
+      title: Text(widget.editing ? '줄 편집' : '한 줄 기록'),
       content: SizedBox(
         width: 520,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -74,6 +94,19 @@ class _AddLogDialogState extends State<_AddLogDialog> {
             decoration: const InputDecoration(hintText: '무엇을 했고, 왜 그렇게 했는지'),
             onSubmitted: (_) => _save(),
           ),
+          if (widget.editing) ...[
+            const SizedBox(height: 4),
+            Row(children: [
+              SizedBox(
+                width: 120,
+                child: TextField(controller: _date, decoration: const InputDecoration(labelText: '날짜', hintText: 'MM-DD')),
+              ),
+              if (widget.entry!.source != null) ...[
+                const SizedBox(width: 12),
+                Expanded(child: Text('정리가 쓴 줄입니다. 출처(${widget.entry!.source})는 그대로 남습니다.', style: Theme.of(context).textTheme.bodySmall)),
+              ],
+            ]),
+          ],
           const SizedBox(height: 8),
           Wrap(spacing: 8, children: [
             for (final t in const ['done', 'decision', 'blocked', 'learned'])

@@ -90,6 +90,21 @@ class WorklogApi {
     return list.whereType<Json>().map(LogEntry.fromJson).toList();
   }
 
+  /// Edits one log line, identified by its current text ([raw]). A 409 means the file changed.
+  Future<String> updateLog(String month, String raw, {String? text, List<String>? tags, List<String>? projects, String? date}) async =>
+      ((await _send('PUT', '/logs/${Uri.encodeComponent(month)}', {
+        'raw': raw,
+        if (text != null) 'text': text,
+        if (tags != null) 'tags': tags,
+        if (projects != null) 'projects': projects,
+        if (date != null) 'date': date,
+      }))['line'] as String?) ??
+      raw;
+
+  Future<void> deleteLog(String month, String raw) async {
+    await _send('DELETE', '/logs/${Uri.encodeComponent(month)}', {'raw': raw});
+  }
+
   Future<String> summary(String month) async =>
       ((await _get('/summaries/${Uri.encodeComponent(month)}'))['markdown'] as String?) ?? '';
 

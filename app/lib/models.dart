@@ -14,6 +14,7 @@ class LogEntry {
     required this.text,
     required this.source,
     required this.byClaude,
+    this.raw = '',
   });
 
   factory LogEntry.fromJson(Json j) => LogEntry(
@@ -23,6 +24,7 @@ class LogEntry {
         text: _str(j['text']),
         source: j['source'] is String ? j['source'] as String : null,
         byClaude: j['author'] == 'claude',
+        raw: _str(j['raw']),
       );
 
   final String date;
@@ -31,6 +33,9 @@ class LogEntry {
   final String text;
   final String? source;
   final bool byClaude;
+
+  /// The line exactly as it is in log/YYYY-MM.md; identifies the line when editing or deleting.
+  final String raw;
 }
 
 class Project {

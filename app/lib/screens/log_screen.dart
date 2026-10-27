@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../widgets/common.dart';
+import '../widgets/input_dialogs.dart';
 import '../widgets/markdown_view.dart';
 
 const _tags = ['done', 'decision', 'blocked', 'learned'];
@@ -91,7 +92,7 @@ class _MonthLogState extends State<_MonthLog> {
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: shown.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, i) => _EntryTile(entry: shown[i], onOpenProject: widget.onOpenProject),
+                  itemBuilder: (context, i) => _EntryTile(entry: shown[i], month: _month, api: widget.api, onOpenProject: widget.onOpenProject, onChanged: reload),
                 ),
               );
             },
@@ -103,9 +104,47 @@ class _MonthLogState extends State<_MonthLog> {
 }
 
 class _EntryTile extends StatelessWidget {
-  const _EntryTile({required this.entry, required this.onOpenProject});
+  const _EntryTile({required this.entry, required this.month, required this.api, required this.onOpenProject, required this.onChanged});
   final LogEntry entry;
+  final String month;
+  final WorklogApi api;
   final void Function(String slug) onOpenProject;
+  final VoidCallback onChanged;
+
+  Future<void> _edit(BuildContext context) async {
+    List<String> projects = const [];
+    try {
+      projects = (await api.projects()).map((p) => p.slug).toList();
+    } catch (_) {}
+    if (!context.mounted) return;
+    if (await showEditLogDialog(context, api, month: month, entry: entry, projects: projects)) {
+      if (context.mounted) toast(context, '줄을 고쳤습니다');
+      onChanged();
+    }
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('이 줄을 지울까요?'),
+        content: Text(entry.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('지우기')),
+        ],
+      ),
+    );
+    if (yes != true || !context.mounted) return;
+    try {
+      await api.deleteLog(month, entry.raw);
+      if (context.mounted) toast(context, '줄을 지웠습니다');
+      onChanged();
+    } on ApiException catch (e) {
+      if (context.mounted) toast(context, e.message, error: true);
+      onChanged();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +180,15 @@ class _EntryTile extends StatelessWidget {
                 child: Text('Claude 정리 · ${entry.source}', style: t.bodySmall?.copyWith(color: scheme.outline)),
               ),
           ]),
+        ),
+        PopupMenuButton<String>(
+          tooltip: '줄 메뉴',
+          icon: Icon(Icons.more_horiz, size: 18, color: scheme.outline),
+          onSelected: (v) => v == 'edit' ? _edit(context) : _delete(context),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: ListTile(dense: true, leading: Icon(Icons.edit_outlined), title: Text('편집'))),
+            PopupMenuItem(value: 'delete', child: ListTile(dense: true, leading: Icon(Icons.delete_outline), title: Text('지우기'))),
+          ],
         ),
       ]),
     );

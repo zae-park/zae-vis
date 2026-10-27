@@ -246,6 +246,38 @@ export function createApp(opts: AppOptions): Server {
           return send(res, 201, added);
         }
 
+        case "PUT /logs": {
+          // PUT /api/logs/:month { raw, text?, tags?, projects?, date? } — edits one line by its current text
+          if (!arg) return notFound(res);
+          const b = await readJson(req);
+          if (typeof b.raw !== "string" || !b.raw.trim()) throw new HttpError(400, "raw(현재 줄)가 필요합니다.");
+          const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined);
+          let r;
+          try {
+            r = await worklog.updateLog(arg, b.raw, {
+              ...(typeof b.text === "string" ? { text: b.text } : {}),
+              ...(strs(b.tags) ? { tags: strs(b.tags) } : {}),
+              ...(strs(b.projects) ? { projects: strs(b.projects) } : {}),
+              ...(typeof b.date === "string" ? { date: b.date } : {}),
+            });
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
+          }
+          if (!r) return send(res, 409, { error: "line_changed", message: "그 줄을 찾지 못했습니다. 파일이 바뀌었을 수 있으니 새로고침 뒤 다시 시도하세요." });
+          if (opts.settings?.indexOnInject()) startRefresh(false);
+          return send(res, 200, r);
+        }
+
+        case "DELETE /logs": {
+          // DELETE /api/logs/:month { raw }
+          if (!arg) return notFound(res);
+          const b = await readJson(req);
+          if (typeof b.raw !== "string" || !b.raw.trim()) throw new HttpError(400, "raw(현재 줄)가 필요합니다.");
+          if (!(await worklog.deleteLog(arg, b.raw))) return send(res, 409, { error: "line_changed", message: "그 줄을 찾지 못했습니다. 새로고침 뒤 다시 시도하세요." });
+          if (opts.settings?.indexOnInject()) startRefresh(false);
+          return send(res, 200, { ok: true });
+        }
+
         case "GET /inbox":
           return send(res, 200, { ...(await worklog.inbox()), jobs: opts.audio?.jobs() ?? [] });
 

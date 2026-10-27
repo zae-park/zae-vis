@@ -95,6 +95,24 @@ test("serves web app with SPA fallback, unknown api is 404", async () => {
   assert.equal((await get("/api/nope")).status, 404);
 });
 
+test("PUT/DELETE /logs/:month edit and remove one line by its current text, 409 when it changed", async () => {
+  const month = new Date().toISOString().slice(0, 7);
+  const added = (await get("/api/logs", { method: "POST", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: JSON.stringify({ text: "편집 전", tags: ["done"], projects: ["p"] }) })).body;
+  assert.match(added.line, /#done 편집 전$/);
+  const put = await get(`/api/logs/${month}`, { method: "PUT", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: JSON.stringify({ raw: added.line, text: "편집 후", tags: ["decision"] }) });
+  assert.equal(put.status, 200);
+  assert.match(put.body.line, /\[\[p\]\] #decision 편집 후$/, "projects kept, tags and text replaced");
+  const stale = await get(`/api/logs/${month}`, { method: "PUT", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: JSON.stringify({ raw: added.line, text: "x" }) });
+  assert.equal(stale.status, 409, "the old text no longer identifies a line");
+  const entries = (await get(`/api/logs/${month}`)).body.entries;
+  assert.ok(entries.some((e: { text: string }) => e.text === "편집 후"));
+  const del = await get(`/api/logs/${month}`, { method: "DELETE", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: JSON.stringify({ raw: put.body.line }) });
+  assert.equal(del.status, 200);
+  assert.ok(!(await get(`/api/logs/${month}`)).body.entries.some((e: { text: string }) => e.text === "편집 후"));
+  assert.equal((await get(`/api/logs/${month}`, { method: "DELETE", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: JSON.stringify({ raw: "- 01-01 없는 줄" }) })).status, 409);
+  assert.equal((await get(`/api/logs/${month}`, { method: "PUT", headers: { "x-zaevis": "1", "content-type": "application/json" }, body: "{}" })).status, 400);
+});
+
 test("GET /file returns a worklog markdown file and rejects escapes", async () => {
   const ok = await get("/api/file?path=summaries/2026-09.md");
   assert.equal(ok.status, 200);

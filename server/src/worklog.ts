@@ -171,6 +171,44 @@ export class Worklog {
     return { month, line };
   }
 
+  /**
+   * Rewrites one line of log/<month>.md. The line is identified by its exact current text (`raw`),
+   * so a stale client cannot overwrite an edit it has not seen. Fields left out keep their values;
+   * the `(src: …)` marker of a line the digest wrote is preserved.
+   */
+  async updateLog(month: string, raw: string, patch: { text?: string; tags?: string[]; projects?: string[]; date?: string }): Promise<{ line: string } | null> {
+    if (!MONTH_RE.test(month)) return null;
+    const file = join(this.root, "log", `${month}.md`);
+    const md = await this.read(join("log", `${month}.md`));
+    if (md === null) return null;
+    const lines = md.split(/\r?\n/);
+    const i = lines.findIndex((l) => l.trim() === raw.trim());
+    if (i < 0) return null;
+    const cur = parseLogLine(lines[i])!;
+    const date = patch.date ?? cur.date;
+    if (!/^\d{1,2}-\d{1,2}$/.test(date)) throw new Error(`날짜 형식이 올바르지 않습니다: ${date} (예: 10-06)`);
+    const [mm, dd] = date.split("-").map(Number);
+    const text = (patch.text ?? cur.text).trim() + (cur.source ? ` (src: ${cur.source})` : "");
+    const line = formatLogLine({ text, tags: patch.tags ?? cur.tags, projects: patch.projects ?? cur.projects, date: new Date(Number(month.slice(0, 4)), mm - 1, dd, 12) });
+    lines[i] = line;
+    await writeFile(file, lines.join("\n"));
+    return { line };
+  }
+
+  /** Removes one line of log/<month>.md, identified by its exact text. */
+  async deleteLog(month: string, raw: string): Promise<boolean> {
+    if (!MONTH_RE.test(month)) return false;
+    const file = join(this.root, "log", `${month}.md`);
+    const md = await this.read(join("log", `${month}.md`));
+    if (md === null) return false;
+    const lines = md.split(/\r?\n/);
+    const i = lines.findIndex((l) => l.trim() === raw.trim());
+    if (i < 0) return false;
+    lines.splice(i, 1);
+    await writeFile(file, lines.join("\n"));
+    return true;
+  }
+
   async inbox(): Promise<Record<"transcripts" | "sessions" | "audio", InboxFile[]>> {
     return {
       transcripts: await listDir(join(this.root, "inbox", "transcripts")),
