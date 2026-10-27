@@ -46,7 +46,10 @@ export type AppOptions = {
   ask?: {
     /** Agents, which one would answer, whether one is answering now, and the last answer. */
     status(): Promise<Record<string, unknown>>;
-    run(q: string, topK?: number): Promise<AskOutcome>;
+    run(q: string, topK?: number, conversationId?: string): Promise<AskOutcome>;
+    /** One conversation with its turns, or null. */
+    conversation(id: string): unknown | null;
+    remove(id: string): boolean;
   };
   /** Optional OpenRouter re-ranking of search results. */
   rerank?: {
@@ -102,6 +105,15 @@ const MAX_AUDIO = 1024 * 1024 * 1024; // 1 GB
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
+}
+
+/** null/false instead of a throw, for lookups whose argument came from the URL. */
+function safe<T>(f: () => T): T | null {
+  try {
+    return f();
+  } catch {
+    return null;
+  }
 }
 
 const notFound = (res: ServerResponse) => send(res, 404, { error: "not_found" });
@@ -239,18 +251,27 @@ export function createApp(opts: AppOptions): Server {
           return send(res, 200, await search.search(q, topK));
         }
 
-        case "GET /ask":
-          if (!opts.ask || arg) return notFound(res);
-          return send(res, 200, await opts.ask.status());
+        case "GET /ask": {
+          // GET /api/ask → agents, running, last, conversations[]  ·  GET /api/ask/:id → one conversation with its turns
+          if (!opts.ask) return notFound(res);
+          if (!arg) return send(res, 200, await opts.ask.status());
+          const c = safe(() => opts.ask!.conversation(arg)); // a malformed id is just "not found"
+          return c ? send(res, 200, c) : notFound(res);
+        }
+
+        case "DELETE /ask":
+          if (!opts.ask || !arg) return notFound(res);
+          return safe(() => opts.ask!.remove(arg)) ? send(res, 200, { ok: true }) : notFound(res);
 
         case "POST /ask": {
-          // POST /api/ask { q, topK? } → { answer, sources[{ n, path, label, passage }], agent, ms }
+          // POST /api/ask { q, topK?, conversationId? } → { answer, sources[{ n, path, label, passage }], agent, ms, conversationId, turn }
           if (!opts.ask || arg) return notFound(res);
           const b = await readJson(req);
           const q = typeof b.q === "string" ? b.q.trim() : "";
           if (!q) return send(res, 400, { error: "missing_query", message: "질문을 입력하세요." });
           const topK = typeof b.topK === "number" && Number.isFinite(b.topK) ? b.topK : undefined;
-          const r = await opts.ask.run(q, topK);
+          const conversationId = typeof b.conversationId === "string" && b.conversationId ? b.conversationId : undefined;
+          const r = await opts.ask.run(q, topK, conversationId);
           if (!r.ok) return send(res, r.status, { error: r.error, message: r.message });
           return send(res, 200, r.result);
         }

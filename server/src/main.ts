@@ -133,10 +133,12 @@ const server = createApp({
       const chosen = pickAgent(cfg.digest, agents);
       return { ...ask.status(), agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model } };
     },
-    async run(q, topK) {
+    async run(q, topK, conversationId) {
       const agent = pickAgent(cfg.digest, await detectAgents());
-      return ask.ask(q, { search, agent, setting: cfg.digest, worklogDir: cfg.worklogDir, topK });
+      return ask.ask(q, { search, agent, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId });
     },
+    conversation: (id) => ask.store.get(id),
+    remove: (id) => ask.store.remove(id),
   },
   rerank: {
     status: () => rerank.status(cfg.rerank),
