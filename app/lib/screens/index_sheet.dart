@@ -3,20 +3,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../backend/backend.dart';
 import '../models.dart';
 import '../widgets/common.dart';
+import '../widgets/task_dialog.dart';
 
 /// Shows AutoRAG index health and lets the user rebuild it. Polls while a refresh runs and shows
 /// the phase and file counts as a progress bar.
 class IndexSheet extends StatefulWidget {
-  const IndexSheet({super.key, required this.api});
+  const IndexSheet({super.key, required this.api, this.backend});
   final WorklogApi api;
 
-  static Future<void> show(BuildContext context, WorklogApi api) => showModalBottomSheet<void>(
+  /// The bundle's runner, for the Kiwi install button; null on the web.
+  final Backend? backend;
+
+  static Future<void> show(BuildContext context, WorklogApi api, {Backend? backend}) => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
         isScrollControlled: true,
-        builder: (_) => IndexSheet(api: api),
+        builder: (_) => IndexSheet(api: api, backend: backend),
       );
 
   @override
@@ -61,6 +66,12 @@ class _IndexSheetState extends State<IndexSheet> {
     }
   }
 
+  /// `zaevis ext install kiwi` through the bundle; the row then shows that a rebuild is owed.
+  Future<void> _installKiwi() async {
+    await runBackendTask(context, widget.backend!, '한국어 형태소 분석 (Kiwi) 설치', const ['ext', 'install', 'kiwi']);
+    if (mounted) await _fetch();
+  }
+
   Future<void> _refresh({bool force = false}) async {
     setState(() {
       _justFinished = false;
@@ -94,6 +105,7 @@ class _IndexSheetState extends State<IndexSheet> {
                       _row('최신 여부', s.stale ? '새 파일이 있음 — 다시 색인 필요' : '최신'),
                     ],
                     if (s.embedding != null) _row('의미 검색', s.embedding!.label),
+                    if (s.tokenizer != null) _tokenizerRow(context, s.tokenizer!, s.refreshing),
                     if (s.lastError != null && !s.refreshing) _row('마지막 오류', s.lastError!),
                     for (final m in s.messages.take(4))
                       Padding(
@@ -137,6 +149,26 @@ class _IndexSheetState extends State<IndexSheet> {
         'running' || 'refreshing' || 'indexing' => '색인 중…',
         _ => state,
       };
+
+  /// "키워드 분석": Kiwi morphemes or whitespace, with the install button (bundle only) or the rebuild hint.
+  Widget _tokenizerRow(BuildContext context, TokenizerStatus ts, bool refreshing) {
+    final scheme = Theme.of(context).colorScheme;
+    final canInstall = !ts.kiwi.installed && ts.kiwi.installable && widget.backend?.managed == true;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SizedBox(width: 96, child: Text('키워드 분석', style: TextStyle(fontWeight: FontWeight.w600))),
+        Expanded(
+          child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            SelectableText(ts.label, style: ts.needsReindex && !refreshing ? TextStyle(color: scheme.primary) : null),
+            if (canInstall) OutlinedButton(onPressed: refreshing ? null : _installKiwi, child: const Text('Kiwi 설치')),
+            if (!ts.kiwi.installed && !canInstall && ts.kiwi.installable && widget.backend == null)
+              Text("설치: 터미널에서 'zaevis ext install kiwi'", style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        ),
+      ]),
+    );
+  }
 
   Widget _row(String k, String v) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),

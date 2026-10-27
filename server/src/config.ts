@@ -152,6 +152,8 @@ export type CollectState = {
   digest?: { lastRun: string; agent: string; ok: boolean; report: string };
   /** Last daily / weekly / monthly report run per kind, see reports.ts. */
   reports?: ReportsState;
+  /** Kiwi arrived after the index was built: a rebuild from scratch is still owed (see kiwi.ts). */
+  kiwiReindexPending?: boolean;
   /** Last sync of each external AutoRAG datasource (config key → outcome), see datasources.ts. */
   datasources?: Record<string, { lastSync: string; ok: boolean; error?: string; chunks?: number }>;
 };

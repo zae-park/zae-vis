@@ -6,6 +6,29 @@ import 'package:zaevis/shortcuts.dart';
 import 'package:zaevis/widgets/markdown_view.dart';
 
 void main() {
+  test('TokenizerStatus labels and IndexStatus hides the raw Kiwi warning', () {
+    final off = TokenizerStatus.fromJson({'active': 'whitespace', 'needsReindex': false, 'kiwi': {'installed': false, 'asset': 'kiwi_mac_arm64_v0.24.1.tgz', 'downloadMb': 129}});
+    expect(off.morphemes, isFalse);
+    expect(off.kiwi.installable, isTrue);
+    expect(off.label, contains('공백 기준'));
+    final owed = TokenizerStatus.fromJson({'active': 'whitespace', 'needsReindex': true, 'kiwi': {'installed': true, 'source': 'zaevis', 'version': '0.24.1'}});
+    expect(owed.label, contains('처음부터 다시 색인'));
+    final on = TokenizerStatus.fromJson({'active': 'multilingual', 'needsReindex': false, 'kiwi': {'installed': true, 'source': 'env', 'asset': null}});
+    expect(on.morphemes, isTrue);
+    expect(on.kiwi.installable, isFalse);
+    expect(on.label, contains('형태소 분석 (Kiwi)'));
+    final s = IndexStatus.fromJson({
+      'refreshing': false,
+      'autorag': {'state': 'success', 'diagnostics': [
+        {'code': 'lexical-tokenizer-unavailable', 'message': 'needs the Kiwi native library'},
+        {'code': 'fsearch-binary-missing', 'message': 'fsearch-cli is not installed'},
+      ]},
+      'tokenizer': {'active': 'whitespace', 'needsReindex': false, 'kiwi': {'installed': false}},
+    });
+    expect(s.messages, ['fsearch-cli is not installed']);
+    expect(s.tokenizer?.active, 'whitespace');
+  });
+
   test('LogEntry.fromJson', () {
     final e = LogEntry.fromJson({
       'date': '10-08',

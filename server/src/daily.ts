@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
+import { kiwiEnv } from "./kiwi.ts";
 import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
@@ -22,7 +23,8 @@ async function refreshIndex(autoragConfig: string, worklogDir: string, localEmbe
     const s = await d.start();
     if (s.state !== "ready") console.log(`  · 임베딩 데몬 없음 — 키워드 색인만: ${s.error ?? s.state}`);
   }
-  const rag = new AutoRAGMcp({ configPath: autoragConfig, roots: [worklogDir] });
+  // the Korean tokenizer (Kiwi) lives outside PATH: hand its paths to MinSync like the server does
+  const rag = new AutoRAGMcp({ configPath: autoragConfig, roots: [worklogDir], env: () => kiwiEnv() });
   try {
     await rag.refresh(false);
     return "완료";

@@ -13,6 +13,7 @@ import { loadConfig, stateDir } from "./config.ts";
 import { scheduleStatus } from "./schedule.ts";
 import { exec, parseSetupArgs, runSetup, which } from "./setup.ts";
 import { extBinDir, extNpmBinDir, findBin, installPlan } from "./datasources.ts";
+import { KIWI_VERSION, installKiwi, probeKiwi } from "./kiwi.ts";
 
 const WIN = process.platform === "win32";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -75,6 +76,7 @@ ${B("관리")}
   zaevis build web|app        앱 빌드만
   zaevis start | stop | status | logs   백그라운드 서버 관리
   zaevis ext install whisperx  녹음 전사 확장 설치 (<상태 폴더>/ext/whisperx)
+  zaevis ext install kiwi      한국어 형태소 분석기 설치 — 활용형(인증서를)도 키워드 검색 (<상태 폴더>/ext/kiwi, 약 130MB)
   zaevis ext install <cli>     외부 소스 CLI 설치 (slacrawl·notcrawl·mailcrawl… → <상태 폴더>/ext/npm, rclone·hister → brew)
   zaevis doctor               필요한 도구 점검`);
 }
@@ -369,6 +371,19 @@ async function extInstallWhisperx(): Promise<void> {
   say("  화자 구분이 필요하면 HF_TOKEN 환경변수를 설정하세요 (pyannote 모델 동의 필요).");
 }
 
+/** Installs the Kiwi library + model for MinSync's Korean BM25 tokenizer (see kiwi.ts). `--force` re-downloads. */
+async function extInstallKiwi(force: boolean): Promise<void> {
+  const before = probeKiwi();
+  if (before.installed && before.source !== "zaevis" && !force) {
+    say(`${G("✓")} Kiwi 이미 있음 (${before.source === "env" ? "KIWI_LIBRARY_PATH·KIWI_MODEL_PATH" : before.library})`);
+    return;
+  }
+  const s = await installKiwi({ force, log: info });
+  if (!s.installed) die(`설치했지만 찾지 못했습니다: ${s.dir}`);
+  say(`${G("✓")} Kiwi ${KIWI_VERSION} 설치 완료 → ${s.dir}`);
+  say("  검색 색인을 처음부터 다시 만들어야 활용형(인증서를 → 인증서)이 검색됩니다: 앱의 색인 창 → '처음부터 다시', 또는 zaevis index --force");
+}
+
 /** Installs an external datasource CLI (see datasources.ts TEMPLATES): npm into $STATE/ext/npm, or brew. */
 async function extInstallCli(bin: string): Promise<void> {
   const already = findBin(bin);
@@ -439,6 +454,8 @@ async function doctor(): Promise<void> {
   check("minsync", "zaevis setup이 빌드합니다");
   const wx = join(STATE, "ext", "whisperx", WIN ? "Scripts" : "bin", WIN ? "whisperx.exe" : "whisperx");
   say(existsSync(wx) || which("whisperx") ? `${G("✓")} whisperx` : `${D("○")} whisperx  ${D("선택: zaevis ext install whisperx")}`);
+  const kiwi = probeKiwi();
+  say(kiwi.installed ? `${G("✓")} kiwi  ${D(`${kiwi.library} (한국어 형태소 검색)`)}` : `${D("○")} kiwi  ${D("선택: zaevis ext install kiwi — 활용형 키워드 검색")}`);
   if (existsSync(join(STATE, "config.json"))) say(`${G("✓")} 설정  ${D(join(STATE, "config.json"))}`);
   else {
     say(`${R("✗")} 설정  ${D("zaevis setup 필요")}`);
@@ -523,8 +540,9 @@ async function main(argv: string[]): Promise<void> {
     }
     case "ext":
       if (rest[0] === "install" && rest[1] === "whisperx") return extInstallWhisperx();
+      if (rest[0] === "install" && rest[1] === "kiwi") return extInstallKiwi(rest.includes("--force"));
       if (rest[0] === "install" && rest[1]) return extInstallCli(rest[1]);
-      die("사용법: zaevis ext install whisperx | <외부 소스 CLI: slacrawl, notcrawl, rclone …>");
+      die("사용법: zaevis ext install whisperx | kiwi [--force] | <외부 소스 CLI: slacrawl, notcrawl, rclone …>");
       return;
     case "start":
       await serverStart();

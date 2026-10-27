@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
+import 'package:zaevis/backend/backend.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/search_screen.dart';
@@ -23,6 +24,45 @@ int indexPolls = 0;
 String mockHotkey = '';
 bool mockObsidianConfigured = false;
 String? mockAskAgent = 'claude';
+bool mockKiwiInstalled = false;
+
+/// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
+Map<String, Object?> _tokenizer() => {
+      'active': 'whitespace',
+      'needsReindex': mockKiwiInstalled,
+      'kiwi': mockKiwiInstalled
+          ? {'installed': true, 'library': '/s/ext/kiwi/lib/libkiwi.dylib', 'model': '/s/ext/kiwi/models/cong/base', 'source': 'zaevis', 'version': '0.24.1', 'asset': 'kiwi_mac_arm64_v0.24.1.tgz', 'downloadMb': 129}
+          : {'installed': false, 'library': null, 'model': null, 'source': null, 'version': null, 'asset': 'kiwi_mac_arm64_v0.24.1.tgz', 'downloadMb': 129},
+    };
+
+/// The packaged app's runner: records every `zaevis …` it is asked to run and answers with canned lines.
+class _FakeBackend implements Backend {
+  _FakeBackend({this.configured = true});
+  final bool configured;
+  final ran = <List<String>>[];
+  @override
+  bool get managed => true;
+  @override
+  String? get problem => null;
+  @override
+  String get home => '/Users/me';
+  @override
+  bool get isConfigured => configured;
+  @override
+  Stream<String> run(List<String> args) {
+    ran.add(args);
+    if (args.join(' ') == 'ext install kiwi') {
+      mockKiwiInstalled = true;
+      return Stream.fromIterable(['› Kiwi 0.24.1 내려받는 중 (129 MB)', '✓ Kiwi 0.24.1 설치 완료']);
+    }
+    return Stream.fromIterable(['✓ ${args.first}']);
+  }
+
+  @override
+  Future<void> ensureServer() async {}
+  @override
+  Future<void> open(String target) async {}
+}
 
 WorklogApi _fakeApi() => WorklogApi(
       baseUrl: 'http://127.0.0.1:4710',
@@ -109,6 +149,7 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({
               'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true, 'hotkey': mockHotkey,
               'schedule': {'supported': true, 'installed': true, 'loaded': true},
+              'tokenizer': _tokenizer(),
               'rerank': {'enabled': false, 'hasKey': false, 'keyHint': null, 'model': 'voyageai/rerank-3-lite', 'external': '없음 — 모든 검색은 이 맥 안에서 처리됩니다.'},
             });
           case '/api/digest' when req.method == 'GET':
@@ -181,7 +222,16 @@ WorklogApi _fakeApi() => WorklogApi(
                     'autorag': {'state': 'indexing', 'inFlight': true, 'stale': true, 'diagnostics': <Object>[],
                       'progress': {'phase': 'parsed', 'sourceFiles': {'total': 40}, 'parsedCounts': {'scanned': 20, 'written': 3, 'deleted': 0, 'skipped': 0}}},
                   }
-                : {'refreshing': false, 'lastRefresh': {'ok': true}, 'autorag': {'state': 'success', 'inFlight': false, 'stale': false, 'diagnostics': <Object>[]}});
+                : {
+                    'refreshing': false, 'lastRefresh': {'ok': true},
+                    'autorag': {'state': 'success', 'inFlight': false, 'stale': false, 'diagnostics': [
+                      {'code': 'lexical-tokenizer-unavailable', 'severity': 'warning', 'message': 'The "multilingual" BM25 tokenizer needs the Kiwi native library and model, which were not found'},
+                    ]},
+                    'tokenizer': _tokenizer(),
+                  });
+          case '/api/index' when req.method == 'POST':
+            posted.add(req);
+            return _json({'refreshing': true}, 202);
           case '/api/sources' when req.method == 'POST':
             posted.add(req);
             return _json({'ok': true}, 201);
@@ -738,6 +788,85 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('색인 완료'), findsOneWidget);
     expect(find.text('색인 갱신'), findsOneWidget);
+    // the Kiwi warning is a Korean row with the terminal hint (no bundle on the web), never AutoRAG's English message
+    expect(find.text('키워드 분석'), findsOneWidget);
+    expect(find.textContaining('공백 기준 — 조사·어미가 붙은 말(인증서를)'), findsOneWidget);
+    expect(find.textContaining("zaevis ext install kiwi"), findsOneWidget);
+    expect(find.textContaining('needs the Kiwi native library'), findsNothing);
+    expect(find.text('Kiwi 설치'), findsNothing);
+  });
+
+  testWidgets('index sheet in the packaged app offers the Kiwi install button, which runs ext install kiwi', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    indexPolls = 5; // past the "refreshing" first answer
+    mockKiwiInstalled = false;
+    final backend = _FakeBackend();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: backend));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('색인'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('공백 기준'), findsOneWidget);
+    await tester.tap(find.text('Kiwi 설치'));
+    await tester.pumpAndSettle();
+    expect(backend.ran, anyElement(equals(['ext', 'install', 'kiwi'])));
+    expect(find.textContaining('Kiwi 0.24.1 설치 완료'), findsOneWidget);
+    await tester.tap(find.text('완료 · 닫기'));
+    await tester.pumpAndSettle();
+    // installed now, but the index was built without it: the row says to rebuild
+    expect(find.textContaining('Kiwi 설치됨 — 처음부터 다시 색인하면'), findsOneWidget);
+    expect(find.text('Kiwi 설치'), findsNothing);
+  });
+
+  testWidgets('settings: the Kiwi tile installs through the bundle and then offers the rebuild from scratch', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockKiwiInstalled = false;
+    posted.clear();
+    final backend = _FakeBackend();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: backend));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    final tile = find.widgetWithText(ListTile, '한국어 형태소 분석 (Kiwi)');
+    await tester.dragUntilVisible(tile, find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('129MB 다운로드'), findsOneWidget);
+    await tester.tap(find.descendant(of: tile, matching: find.text('설치')));
+    await tester.pumpAndSettle();
+    expect(backend.ran, anyElement(equals(['ext', 'install', 'kiwi'])));
+    await tester.tap(find.text('완료 · 닫기'));
+    await tester.pumpAndSettle();
+    expect(find.text('처음부터 다시 색인할까요?'), findsOneWidget);
+    await tester.tap(find.text('다시 색인'));
+    await tester.pumpAndSettle();
+    final rebuild = posted.where((r) => r.url.path == '/api/index' && r.method == 'POST').toList();
+    expect(rebuild.length, 1);
+    expect(jsonDecode(rebuild.single.body), {'force': true});
+    expect(find.textContaining('Kiwi 설치됨 — 처음부터 다시 색인하면'), findsOneWidget, reason: 'the tile reloads with the server\'s new status');
+  });
+
+  testWidgets('onboarding installs Kiwi before the first collect when the box is ticked', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockKiwiInstalled = false;
+    posted.clear();
+    final backend = _FakeBackend(configured: false);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: backend));
+    await tester.pumpAndSettle();
+    expect(find.text('한국어 형태소 분석 (Kiwi) 설치'), findsOneWidget);
+    expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile, '한국어 형태소 분석 (Kiwi) 설치')).value, isTrue);
+    await tester.tap(find.text('시작'));
+    await tester.pumpAndSettle();
+    expect(backend.ran.first.first, 'setup');
+    expect(backend.ran[1], ['ext', 'install', 'kiwi'], reason: 'before the server and the first collect, so the first index already uses Kiwi');
+    expect(posted.where((r) => r.url.path == '/api/collect').length, 1);
   });
 
   testWidgets('collect tab: a connector preset fills the form, adds the source and collects it once', (tester) async {
