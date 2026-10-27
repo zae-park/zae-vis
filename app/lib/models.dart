@@ -136,13 +136,15 @@ class AskSource {
 
 /// An answer with [n] citations into [sources].
 class AskResult {
-  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms});
+  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0});
   factory AskResult.fromJson(Json j) => AskResult(
         question: _str(j['q']),
         answer: _str(j['answer']),
         sources: (j['sources'] is List ? j['sources'] as List : const <Object?>[]).whereType<Json>().map(AskSource.fromJson).toList(),
         agent: _str(j['agent']),
         ms: (j['ms'] as num?)?.toInt() ?? 0,
+        conversationId: _str(j['conversationId']),
+        turn: (j['turn'] as num?)?.toInt() ?? 0,
       );
   final String question;
   final String answer;
@@ -150,23 +152,57 @@ class AskResult {
   final String agent; // claude | codex | gemini | openrouter
   final int ms;
 
+  /// The conversation this turn belongs to and its index in it.
+  final String conversationId;
+  final int turn;
+
   /// The "[n]" numbers in the answer that point at an existing source.
   List<int> get cited => RegExp(r'\[(\d+)\]').allMatches(answer).map((m) => int.parse(m.group(1)!)).where((n) => n >= 1 && n <= sources.length).toSet().toList()..sort();
 }
 
-/// GET /api/ask: which agent would answer (same choice as the weekly digest) and the last answer.
+/// One row of the conversation list.
+class ConversationSummary {
+  const ConversationSummary({required this.id, required this.title, required this.updatedAt, required this.turns});
+  factory ConversationSummary.fromJson(Json j) => ConversationSummary(
+        id: _str(j['id']),
+        title: _str(j['title']),
+        updatedAt: DateTime.tryParse(_str(j['updatedAt'])),
+        turns: (j['turns'] as num?)?.toInt() ?? 0,
+      );
+  final String id;
+  final String title;
+  final DateTime? updatedAt;
+  final int turns;
+}
+
+/// GET /api/ask/:id — a conversation with every question and answer.
+class Conversation {
+  const Conversation({required this.id, required this.title, required this.turns});
+  factory Conversation.fromJson(Json j) => Conversation(
+        id: _str(j['id']),
+        title: _str(j['title']),
+        turns: (j['turns'] is List ? j['turns'] as List : const <Object?>[]).whereType<Json>().map(AskResult.fromJson).toList(),
+      );
+  final String id;
+  final String title;
+  final List<AskResult> turns;
+}
+
+/// GET /api/ask: which agent would answer (same choice as the weekly digest), the last answer and the conversations.
 class AskStatus {
-  const AskStatus({required this.agents, this.chosen, this.last, this.runningQuestion});
+  const AskStatus({required this.agents, this.chosen, this.last, this.runningQuestion, this.conversations = const []});
   factory AskStatus.fromJson(Json j) => AskStatus(
         agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
         chosen: _strOrNull(j['chosen']),
         last: j['last'] is Json ? AskResult.fromJson(j['last'] as Json) : null,
         runningQuestion: j['running'] is Json ? _strOrNull((j['running'] as Json)['q']) : null,
+        conversations: (j['conversations'] is List ? j['conversations'] as List : const <Object?>[]).whereType<Json>().map(ConversationSummary.fromJson).toList(),
       );
   final List<AgentInfo> agents;
   final String? chosen;
   final AskResult? last;
   final String? runningQuestion;
+  final List<ConversationSummary> conversations;
 
   AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
 }

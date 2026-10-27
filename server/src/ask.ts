@@ -6,10 +6,16 @@
 //
 // CLIs run with the worklog as cwd but with their tools off (Claude `--tools ""`, Codex
 // `--sandbox read-only`, Gemini without `--yolo`), so a question can never change a file.
+//
+// Questions belong to conversations: a follow-up carries the previous turns (question + answer)
+// into the prompt, and a short follow-up ("그건 왜?") is searched together with the previous
+// question so the passages fit. Conversations are kept in `$ZAEVIS_HOME/ask/<id>.json`.
 
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stateDir } from "./config.ts";
 import { spawn } from "node:child_process";
 import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
@@ -17,7 +23,9 @@ import { DEFAULT_OPENROUTER_MODEL, searchDirs, type AgentId, type AgentInfo, typ
 import { getKey as openrouterKey } from "./rerank.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
-export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string };
+export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string; conversationId: string; turn: number };
+export type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; turns: AskResult[] };
+export type ConversationSummary = Pick<Conversation, "id" | "title" | "createdAt" | "updatedAt"> & { turns: number };
 export type AskError = { status: 400 | 404 | 409 | 502; error: "missing_query" | "no_hits" | "no_agent" | "busy" | "search_failed" | "agent_failed"; message: string };
 export type AskOutcome = { ok: true; result: AskResult } | ({ ok: false } & AskError);
 
@@ -26,6 +34,13 @@ export const MAX_TOP_K = 20;
 /** Longer than the 420 chars a search card shows: the model needs the surrounding lines too. */
 export const PASSAGE_CHARS = 1000;
 const RUN_TIMEOUT_MS = 3 * 60_000;
+
+/** Previous turns included in a follow-up prompt, and how much of each answer. */
+const HISTORY_TURNS = 4;
+const HISTORY_ANSWER_CHARS = 600;
+/** A follow-up this short is searched together with the previous question ("그건 왜?"). */
+const SHORT_FOLLOWUP_CHARS = 16;
+const MAX_CONVERSATIONS = 50;
 
 export const NO_AGENT_MESSAGE = "답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정 → 검색 결과 재정렬에서 OpenRouter 키를 저장하세요.";
 
@@ -46,19 +61,93 @@ export function pickSources(hits: SearchHit[], max = DEFAULT_TOP_K): AskSource[]
 
 const clipLabel = (s: string | null | undefined): string | null => (!s ? null : s.length > 60 ? s.slice(0, 60).trimEnd() + "…" : s);
 
-export function buildAskPrompt(q: string, sources: AskSource[]): string {
+export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<AskResult, "q" | "answer">[] = []): string {
   const list = sources.map((s) => `[${s.n}] (${s.label}) ${s.path}\n${s.passage}`).join("\n\n");
+  const prior = history.slice(-HISTORY_TURNS);
+  const dialogue = prior.length
+    ? `\n이전 대화 (참고용 — 번호 [n]은 이번 발췌 기준으로 새로 단다):\n${prior.map((t) => `사용자: ${t.q}\n답: ${clipText(t.answer, HISTORY_ANSWER_CHARS)}`).join("\n\n")}\n`
+    : "";
   return `아래 발췌는 내 작업 기록(worklog)에서 질문과 관련 있어 검색된 문단이다. 이 발췌만 근거로 질문에 한국어로 답한다.
 
 규칙:
 - 각 문장 끝에 근거가 된 발췌 번호를 [n] 꼴로 단다. 여러 발췌가 근거면 [1][3]처럼 붙인다.
 - 발췌에 없는 내용은 쓰지 않는다. 발췌로 답할 수 없으면 "기록에서 근거를 찾지 못했습니다."라고 쓰고, 가장 가까운 내용이 있으면 그것만 한 문장으로 덧붙인다.
-- 파일을 열거나 명령을 실행하지 않는다. 서론·제목·인사 없이 답만 쓴다 (5문장 이내, 필요하면 짧은 목록).
-
+- 파일을 열거나 명령을 실행하지 않는다. 서론·제목·인사 없이 답만 쓴다 (5문장 이내, 필요하면 짧은 목록).${prior.length ? "\n- 이전 대화의 맥락을 이어받되(예: \"그건\"이 가리키는 것), 근거는 이번 발췌에서만 든다." : ""}
+${dialogue}
 질문: ${q}
 
 발췌:
 ${list}`;
+}
+
+const clipText = (s: string, max: number): string => (s.length > max ? s.slice(0, max).trimEnd() + "…" : s);
+
+/** What to search for: a short follow-up alone finds nothing, so the previous question rides along. */
+export function searchQueryFor(q: string, previous?: string): string {
+  return previous && q.length <= SHORT_FOLLOWUP_CHARS ? `${previous} ${q}` : q;
+}
+
+// ── conversations ──────────────────────────────────────────────────────────────
+
+/** Conversations on disk: one JSON per id, newest-updated first in listings. */
+export class ConversationStore {
+  readonly dir: string;
+  constructor(dir = join(stateDir(), "ask")) {
+    this.dir = dir;
+  }
+
+  private file(id: string): string {
+    if (!/^[0-9]{8}-[0-9]{6}(-[0-9a-z]+)?$/.test(id)) throw new Error("bad conversation id");
+    return join(this.dir, `${id}.json`);
+  }
+
+  newId(now = new Date()): string {
+    const p = (n: number) => String(n).padStart(2, "0");
+    const base = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+    return existsSync(join(this.dir, `${base}.json`)) ? `${base}-${Math.random().toString(36).slice(2, 6)}` : base;
+  }
+
+  get(id: string): Conversation | null {
+    const f = this.file(id); // throws on a malformed id
+    try {
+      return JSON.parse(readFileSync(f, "utf8")) as Conversation;
+    } catch {
+      return null;
+    }
+  }
+
+  save(c: Conversation): void {
+    mkdirSync(this.dir, { recursive: true });
+    writeFileSync(this.file(c.id), JSON.stringify(c, null, 2));
+    this.prune();
+  }
+
+  remove(id: string): boolean {
+    const f = this.file(id);
+    if (!existsSync(f)) return false;
+    rmSync(f);
+    return true;
+  }
+
+  list(): ConversationSummary[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.dir).filter((n) => n.endsWith(".json"));
+    } catch {
+      return [];
+    }
+    const out: ConversationSummary[] = [];
+    for (const n of names) {
+      const c = this.get(n.slice(0, -5));
+      if (c) out.push({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, turns: c.turns.length });
+    }
+    return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }
+
+  /** Keeps the newest MAX_CONVERSATIONS. */
+  private prune(): void {
+    for (const c of this.list().slice(MAX_CONVERSATIONS)) this.remove(c.id);
+  }
 }
 
 /** Read-only invocations: the model may answer, not act. */
@@ -121,34 +210,42 @@ export function cleanAnswer(text: string): string {
 }
 
 export class AskRunner {
-  private running: { q: string; startedAt: string; agent: AgentId } | null = null;
+  private running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null } | null = null;
   private lastResult: AskResult | null = null;
+  readonly store: ConversationStore;
   private readonly opts: { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; log?: (line: string) => void };
 
-  constructor(opts: { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}) {
+  constructor(opts: { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; log?: (line: string) => void; store?: ConversationStore } = {}) {
     this.opts = opts;
+    this.store = opts.store ?? new ConversationStore();
   }
 
-  status(): { running: { q: string; startedAt: string; agent: AgentId } | null; last: AskResult | null } {
-    return { running: this.running, last: this.lastResult };
+  status(): { running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null } | null; last: AskResult | null; conversations: ConversationSummary[] } {
+    return { running: this.running, last: this.lastResult, conversations: this.store.list() };
   }
 
-  /** One question at a time: a second one while an agent is working gets `busy`. */
-  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model">; worklogDir: string; topK?: number }): Promise<AskOutcome> {
+  /**
+   * One question at a time: a second one while an agent is working gets `busy`. With
+   * `conversationId` the question continues that conversation (404-ish `missing_query`
+   * is not raised for an unknown id: a new conversation starts instead).
+   */
+  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model">; worklogDir: string; topK?: number; conversationId?: string }): Promise<AskOutcome> {
     const question = q.trim();
     if (!question) return { ok: false, status: 400, error: "missing_query", message: "질문을 입력하세요." };
     if (!opts.agent) return { ok: false, status: 409, error: "no_agent", message: NO_AGENT_MESSAGE };
     if (this.running) return { ok: false, status: 409, error: "busy", message: `아직 답을 만드는 중입니다: "${this.running.q.slice(0, 40)}"` };
     const topK = Math.min(Math.max(opts.topK ?? DEFAULT_TOP_K, 1), MAX_TOP_K);
     const started = Date.now();
-    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: opts.agent.id };
+    const existing = opts.conversationId ? this.store.get(opts.conversationId) : null;
+    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: opts.agent.id, conversationId: existing?.id ?? null };
     try {
+      const previous = existing?.turns.at(-1);
       // fetch a few more than needed so weak hits can be dropped
-      const r = await opts.search.search(question, Math.min(topK + 5, 50), PASSAGE_CHARS);
+      const r = await opts.search.search(searchQueryFor(question, previous?.q), Math.min(topK + 5, 50), PASSAGE_CHARS);
       if (!r.ok) return { ok: false, status: 502, error: "search_failed", message: r.error?.message ?? "검색에 실패했습니다." };
       const sources = pickSources(r.hits, topK);
       if (!sources.length) return { ok: false, status: 404, error: "no_hits", message: `"${question}"과 관련된 기록을 찾지 못했습니다.` };
-      const prompt = buildAskPrompt(question, sources);
+      const prompt = buildAskPrompt(question, sources, existing?.turns ?? []);
       this.opts.log?.(`질문 (${opts.agent.title}, 발췌 ${sources.length}개): ${question}`);
       let answer: string;
       try {
@@ -157,7 +254,16 @@ export class AskRunner {
         this.opts.log?.(`질문 실패: ${(err as Error).message}`);
         return { ok: false, status: 502, error: "agent_failed", message: (err as Error).message };
       }
-      const result: AskResult = { q: question, answer, sources, agent: opts.agent.id, ms: Date.now() - started, at: new Date().toISOString() };
+      const now = new Date();
+      const conv: Conversation = existing ?? { id: this.store.newId(now), title: clipText(question, 60), createdAt: now.toISOString(), updatedAt: now.toISOString(), turns: [] };
+      const result: AskResult = { q: question, answer, sources, agent: opts.agent.id, ms: Date.now() - started, at: now.toISOString(), conversationId: conv.id, turn: conv.turns.length };
+      conv.turns.push(result);
+      conv.updatedAt = now.toISOString();
+      try {
+        this.store.save(conv);
+      } catch (err) {
+        this.opts.log?.(`대화 저장 실패: ${(err as Error).message}`);
+      }
       this.lastResult = result;
       this.opts.log?.(`답 (${result.ms}ms): ${answer.slice(0, 120).replace(/\n/g, " ")}`);
       return { ok: true, result };

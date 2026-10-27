@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ask-state-"));
-const { AskRunner, askCliArgs, buildAskPrompt, cleanAnswer, pickSources } = await import("../src/ask.ts");
+const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, pickSources, searchQueryFor } = await import("../src/ask.ts");
 const { createApp } = await import("../src/app.ts");
 const { normalizeSearch } = await import("../src/autorag.ts");
 const { Worklog } = await import("../src/worklog.ts");
@@ -148,7 +148,9 @@ before(async () => {
     search: fakeSearch,
     ask: {
       status: async () => ({ ...runner.status(), agents: [claude], chosen: agent?.id ?? null, setting: { agent: "auto", model: "" } }),
-      run: (q, topK) => runner.ask(q, { search: fakeSearch, agent, setting: { model: "" }, worklogDir: root, topK }),
+      run: (q, topK, conversationId) => runner.ask(q, { search: fakeSearch, agent, setting: { model: "" }, worklogDir: root, topK, conversationId }),
+      conversation: (id) => runner.store.get(id),
+      remove: (id) => runner.store.remove(id),
     },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -180,4 +182,61 @@ test("ask: POST /api/ask answers with sources; GET reports agents and the last a
   assert.equal(none.body.error, "no_agent");
   assert.match(none.body.message, /Claude Code·Codex·Gemini/);
   assert.equal((await fetch(base + "/api/ask/other")).status, 404);
+});
+
+test("ask: a follow-up continues the conversation — history in the prompt, short question searched with the previous one", async () => {
+  const prompts: string[] = [];
+  const exec: Exec = async (_bin, args) => {
+    prompts.push(args[1]);
+    return { ok: true, stdout: `답 ${prompts.length} [1]`, stderr: "" };
+  };
+  const store = new ConversationStore(await mkdtemp(join(tmpdir(), "zv-ask-conv-")));
+  const runner = new AskRunner({ exec, store });
+  const common = { search: fakeSearch, setting: { model: "" }, worklogDir: "/w", agent: claude };
+  const first = await runner.ask("검색 맥락은 언제 넣었지?", common);
+  assert.ok(first.ok);
+  if (!first.ok) return;
+  assert.equal(first.result.turn, 0);
+  assert.match(first.result.conversationId, /^\d{8}-\d{6}/);
+  assert.doesNotMatch(prompts[0], /이전 대화/);
+
+  searchCalls.length = 0;
+  const second = await runner.ask("그건 왜?", { ...common, conversationId: first.result.conversationId });
+  assert.ok(second.ok);
+  if (!second.ok) return;
+  assert.equal(second.result.conversationId, first.result.conversationId);
+  assert.equal(second.result.turn, 1);
+  assert.equal(searchCalls[0][0], "검색 맥락은 언제 넣었지? 그건 왜?", "a short follow-up is searched with the previous question");
+  assert.match(prompts[1], /이전 대화[\s\S]*사용자: 검색 맥락은 언제 넣었지\?\n답: 답 1 \[1\]/);
+  assert.match(prompts[1], /질문: 그건 왜\?/);
+
+  const conv = store.get(first.result.conversationId)!;
+  assert.equal(conv.title, "검색 맥락은 언제 넣었지?");
+  assert.equal(conv.turns.length, 2);
+  assert.deepEqual(store.list().map((c) => [c.id, c.turns]), [[conv.id, 2]]);
+  assert.equal(runner.status().conversations.length, 1);
+
+  // an unknown id starts a fresh conversation instead of failing
+  const third = await runner.ask("긴 질문은 혼자 검색된다 그렇지?", { ...common, conversationId: "20200101-000000" });
+  assert.ok(third.ok && third.result.conversationId !== conv.id && third.result.turn === 0);
+  assert.equal(searchCalls.at(-1)![0], "긴 질문은 혼자 검색된다 그렇지?");
+  assert.equal(searchQueryFor("짧다", "앞 질문"), "앞 질문 짧다");
+  assert.equal(store.remove(conv.id), true);
+  assert.equal(store.get(conv.id), null);
+  assert.throws(() => store.get("../x"));
+});
+
+test("ask: GET /api/ask/:id returns a conversation and DELETE removes it", async () => {
+  agent = claude;
+  const r = await post({ q: "대화 테스트" });
+  assert.equal(r.status, 200);
+  const id = r.body.conversationId as string;
+  const got = await (await fetch(`${base}/api/ask/${id}`)).json();
+  assert.equal(got.turns.length, 1);
+  assert.equal(got.title, "대화 테스트");
+  const st = await (await fetch(base + "/api/ask")).json();
+  assert.ok(st.conversations.some((c: { id: string }) => c.id === id));
+  const del = await fetch(`${base}/api/ask/${id}`, { method: "DELETE", headers: { "x-zaevis": "1" } });
+  assert.equal(del.status, 200);
+  assert.equal((await fetch(`${base}/api/ask/${id}`)).status, 404);
 });

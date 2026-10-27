@@ -127,7 +127,15 @@ class WorklogApi {
 
   /// Searches, then has the chosen agent answer from the passages. Takes tens of seconds; the server
   /// answers 409 (no agent / busy), 404 (no hits) or 502 (agent failed) as an [ApiException].
-  Future<AskResult> ask(String question, {int topK = 10}) async => AskResult.fromJson(await _send('POST', '/ask', {'q': question, 'topK': topK}));
+  /// Asks; with [conversationId] the question continues that conversation (the server keeps the turns).
+  Future<AskResult> ask(String question, {int topK = 10, String? conversationId}) async =>
+      AskResult.fromJson(await _send('POST', '/ask', {'q': question, 'topK': topK, if (conversationId != null) 'conversationId': conversationId}));
+
+  Future<Conversation> conversation(String id) async => Conversation.fromJson(await _get('/ask/${Uri.encodeComponent(id)}'));
+
+  Future<void> deleteConversation(String id) async {
+    await _send('DELETE', '/ask/${Uri.encodeComponent(id)}');
+  }
 
   /// A markdown file inside the worklog (the original behind a search hit).
   Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));

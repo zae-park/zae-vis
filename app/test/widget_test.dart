@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,9 +53,21 @@ WorklogApi _fakeApi() => WorklogApi(
                   'context': {'kind': 'log', 'sourceLabel': '한 줄 기록', 'date': '2026-10', 'matched': <Object>[]}},
               ],
             });
+          case '/api/ask/20261027-120000' when req.method == 'GET':
+            return _json({
+              'id': '20261027-120000', 'title': '예전 대화', 'createdAt': '2026-10-27T03:00:00Z', 'updatedAt': '2026-10-27T03:00:00Z',
+              'turns': [
+                {'q': '예전 질문', 'answer': '예전 답 [1]', 'agent': 'claude', 'ms': 1000, 'conversationId': '20261027-120000', 'turn': 0,
+                  'sources': [{'n': 1, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '옛 발췌'}]},
+              ],
+            });
+          case '/api/ask/20261027-120000' when req.method == 'DELETE':
+            posted.add(req);
+            return _json({'ok': true});
           case '/api/ask' when req.method == 'GET':
             return _json({
               'running': null, 'last': null, 'chosen': mockAskAgent,
+              'conversations': [{'id': '20261027-120000', 'title': '예전 대화', 'updatedAt': '2026-10-27T03:00:00Z', 'turns': 1}],
               'setting': {'agent': 'auto', 'model': ''},
               'agents': [
                 {'id': 'claude', 'title': 'Claude Code', 'available': mockAskAgent != null, 'detail': '2.1.304'},
@@ -64,8 +77,10 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/ask' when req.method == 'POST':
             posted.add(req);
             if (mockAskAgent == null) return _json({'error': 'no_agent', 'message': '답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하세요.'}, 409);
+            final askBody = jsonDecode(req.body) as Map<String, dynamic>;
             return _json({
-              'q': (jsonDecode(req.body) as Map<String, dynamic>)['q'], 'agent': 'claude', 'ms': 12345,
+              'q': askBody['q'], 'agent': 'claude', 'ms': 12345,
+              'conversationId': askBody['conversationId'] ?? '20261027-120000', 'turn': askBody['conversationId'] == null ? 0 : 1,
               'answer': 'GA4 매핑은 캠페인 매핑이 빠져 막혔다 [1]. 수동으로 채우기로 정했다 [2].',
               'sources': [
                 {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · roas · 박재', 'passage': 'GA4 캠페인 매핑이 빠져서'},
@@ -218,7 +233,7 @@ void main() {
     expect(find.textContaining('GA4 캠페인 매핑이 빠져서 — 박재'), findsWidgets);
   });
 
-  testWidgets('질문 mode asks the server, shows the answer with [n] marks that jump to the source, and opens the file', (tester) async {
+  testWidgets('질문 mode is a conversation: bubbles, a follow-up carries the conversation id, [n] opens the source panel and the file', (tester) async {
     tester.view.physicalSize = const Size(1200, 700);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -229,27 +244,88 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('검색한 문단만 근거로 답을 씁니다'), findsOneWidget);
     expect(find.textContaining('답은 Claude Code가 씁니다'), findsOneWidget);
+    expect(find.text('새 대화'), findsWidgets); // header title + button
 
     await tester.enterText(find.byType(TextField), 'GA4 매핑은 왜 막혔지?');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
 
-    final ask = posted.singleWhere((r) => r.url.path == '/api/ask');
-    expect(jsonDecode(ask.body), {'q': 'GA4 매핑은 왜 막혔지?', 'topK': 10});
+    var asks = posted.where((r) => r.url.path == '/api/ask').toList();
+    expect(jsonDecode(asks.single.body), {'q': 'GA4 매핑은 왜 막혔지?', 'topK': 10});
+    expect(find.text('GA4 매핑은 왜 막혔지?'), findsWidgets); // question bubble (and the header title)
     expect(find.textContaining('캠페인 매핑이 빠져 막혔다'), findsOneWidget);
-    expect(find.text('근거 2개'), findsOneWidget);
-    expect(find.text('2026-10-09 · git 커밋 · roas · 박재'), findsOneWidget);
+    expect(find.text('2026-10-09 · git 커밋 · roas · 박재'), findsOneWidget); // source chip
     expect(find.textContaining('Claude Code · 12.3초'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget, reason: 'the composer stays at the bottom');
 
-    // the [2] mark scrolls to and outlines source 2
+    // hover a [2] mark: the tooltip previews the passage
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.widgetWithText(InkWell, '2').first));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(find.textContaining('[2] 2026-10 · 한 줄 기록'), findsOneWidget);
+    await gesture.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
+
+    // tapping it opens the side panel (wide layout) with the full passage and a way to the file
     await tester.tap(find.widgetWithText(InkWell, '2').first);
     await tester.pumpAndSettle();
-    final card2 = tester.widget<Card>(find.ancestor(of: find.text('2026-10 · 한 줄 기록'), matching: find.byType(Card)).first);
-    expect(card2.shape, isA<RoundedRectangleBorder>(), reason: 'focused source is outlined');
-
-    await tester.tap(find.text('2026-10 · 한 줄 기록'));
+    expect(find.text('근거 2 / 2'), findsOneWidget);
+    expect(find.text('매핑 테이블을 수동으로 채우기로'), findsOneWidget);
+    await tester.tap(find.byTooltip('이전 근거'));
     await tester.pumpAndSettle();
-    expect(find.text('2026-10.md'), findsOneWidget); // file screen title
+    expect(find.text('근거 1 / 2'), findsOneWidget);
+    await tester.tap(find.text('원문 열기'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // a follow-up stays in the same conversation
+    await tester.enterText(find.byType(TextField), '그건 왜?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    asks = posted.where((r) => r.url.path == '/api/ask').toList();
+    expect(jsonDecode(asks.last.body), {'q': '그건 왜?', 'topK': 10, 'conversationId': '20261027-120000'});
+    expect(find.text('그건 왜?'), findsOneWidget);
+    expect(find.textContaining('캠페인 매핑이 빠져 막혔다'), findsNWidgets(2));
+
+    // 새 대화 clears the thread; 이전 대화 brings one back
+    await tester.tap(find.byIcon(Icons.add_comment_outlined)); // the 새 대화 button (TextButton.icon is not a TextButton)
+    await tester.pumpAndSettle();
+    expect(find.text('그건 왜?'), findsNothing);
+    await tester.tap(find.byTooltip('이전 대화'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('예전 대화'));
+    await tester.pumpAndSettle();
+    expect(find.text('예전 질문'), findsWidgets);
+    expect(find.textContaining('예전 답'), findsOneWidget);
+    await tester.tap(find.byTooltip('이 대화 지우기'));
+    await tester.pumpAndSettle();
+    expect(posted.last.method, 'DELETE');
+    expect(find.text('예전 질문'), findsNothing);
+  });
+
+  testWidgets('질문 mode on a narrow window opens the source as a bottom sheet', (tester) async {
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('질문'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'GA4?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, '1').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('근거 1 / 2'), findsOneWidget);
+    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsOneWidget);
+    await tester.tap(find.byTooltip('닫기'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsNothing);
   });
 
   testWidgets('질문 mode without an agent explains and offers the settings', (tester) async {
@@ -266,7 +342,7 @@ void main() {
     expect(find.text('설정 열기'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'x');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(find.textContaining('Claude Code·Codex·Gemini CLI 중 하나를 설치하세요'), findsOneWidget);
     await tester.tap(find.text('설정 열기'));
