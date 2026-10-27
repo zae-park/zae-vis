@@ -95,6 +95,10 @@ test("origins lists collected day files newest first; resolveSource maps (src: �
   assert.deepEqual(await w.resolveSource("git zaevis abc1234"), ["sources/git/2026-10-20.md"]);
   assert.deepEqual(await w.resolveSource("agent-sessions 2026-10-21"), ["sources/agent-sessions/2026-10-21.md"]);
   assert.deepEqual(await w.resolveSource("claude-code 2026-10-21"), ["sources/agent-sessions/2026-10-21.md"], "old marker falls through to the agent-sessions file");
+  assert.deepEqual(await w.resolveSource("agent-sessions 2026-10-20"), [], "no twin file either");
+  await mkdir(join(root, "sources/claude-code"), { recursive: true });
+  await writeFile(join(root, "sources/claude-code/2026-10-20.md"), "# old");
+  assert.deepEqual(await w.resolveSource("agent-sessions 2026-10-20"), ["sources/claude-code/2026-10-20.md"], "new marker falls back to the old day file");
   assert.deepEqual(await w.resolveSource("2026-10-19_회의"), ["processed/transcripts/2026-10-19_회의.txt"]);
   assert.deepEqual(await w.resolveSource("2026-10-21_zaevis, git zaevis def5678"), ["inbox/claude-sessions/2026-10-21_zaevis.md", "sources/git/2026-10-21.md"]);
   assert.deepEqual(await w.resolveSource("없는것 2026-01-01"), []);

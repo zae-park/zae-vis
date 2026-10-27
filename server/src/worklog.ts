@@ -297,7 +297,9 @@ export class Worklog {
       }
       if ((m = /^([\w-]+)\s+(\d{4}-\d{2}-\d{2})$/.exec(part))) {
         const name = { shell: "shell-history", "claude-code": "claude-code" }[m[1]] ?? m[1];
-        const candidates = [`sources/${name}/${m[2]}.md`, ...(name === "claude-code" ? [`sources/agent-sessions/${m[2]}.md`] : [])];
+        // agent-sessions replaced claude-code (2026-10-27): a marker of either name may point at a day file of the other
+        const twin = name === "claude-code" ? "agent-sessions" : name === "agent-sessions" ? "claude-code" : null;
+        const candidates = [`sources/${name}/${m[2]}.md`, ...(twin ? [`sources/${twin}/${m[2]}.md`] : [])];
         for (const c of candidates) if (await exists(c)) {
           found.push(c);
           break;

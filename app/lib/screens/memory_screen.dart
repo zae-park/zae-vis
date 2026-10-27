@@ -157,7 +157,9 @@ class _OriginsViewState extends State<_OriginsView> {
     for (final e in entries) {
       final s = e.source;
       if (s == null) continue;
-      if (s.contains('${f.source} ${f.date}') || (f.source == 'agent-sessions' && s.contains('claude-code ${f.date}')) || (f.source == 'shell-history' && s.contains('shell ${f.date}'))) {
+      // agent-sessions replaced claude-code: a line may cite either name for the same day
+      final twin = f.source == 'agent-sessions' ? 'claude-code' : f.source == 'claude-code' ? 'agent-sessions' : null;
+      if (s.contains('${f.source} ${f.date}') || (twin != null && s.contains('$twin ${f.date}')) || (f.source == 'shell-history' && s.contains('shell ${f.date}'))) {
         n++;
       } else if ((f.source == 'transcripts' || f.source == 'session-notes') && s.contains(base)) {
         n++;
