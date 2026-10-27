@@ -6,6 +6,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { AskRunner } from "./ask.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
@@ -33,6 +34,7 @@ rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== n
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
 const queue = new TranscribeQueue();
 const digest = new DigestRunner({ notify });
+const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 queue.onDone = (job) => notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 
@@ -122,6 +124,17 @@ const server = createApp({
       if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
       void digest.run(cfg, cfg.digest, chosen);
       return { started: true };
+    },
+  },
+  ask: {
+    async status() {
+      const agents = await detectAgents();
+      const chosen = pickAgent(cfg.digest, agents);
+      return { ...ask.status(), agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model } };
+    },
+    async run(q, topK) {
+      const agent = pickAgent(cfg.digest, await detectAgents());
+      return ask.ask(q, { search, agent, setting: cfg.digest, worklogDir: cfg.worklogDir, topK });
     },
   },
   rerank: {

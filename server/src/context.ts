@@ -165,9 +165,9 @@ export function gitAuthor(passage: string): string | null {
   return null;
 }
 
-export function describeHit(path: string, content: string, query: string): HitContext {
+export function describeHit(path: string, content: string, query: string, passageChars = 420): HitContext {
   const { kind, sourceLabel, date } = classifyPath(path);
-  const { passage, matched, lineIndex } = bestPassage(content, query);
+  const { passage, matched, lineIndex } = bestPassage(content, query, passageChars);
   const section = sectionAbove(content, lineIndex);
   const author = kind === "git" ? gitAuthor(passage) : null;
   return { kind, sourceLabel, date, section, author, passage, matched };

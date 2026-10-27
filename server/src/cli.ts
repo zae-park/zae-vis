@@ -1,7 +1,7 @@
 // Terminal client for the zaevis server. Used by `zaevis run cli`, `zaevis search`, `zaevis log`, …
 //
 //   node src/cli.ts repl
-//   node src/cli.ts search <query…> | log [YYYY-MM] | projects | project <slug>
+//   node src/cli.ts search <query…> | ask <question…> | log [YYYY-MM] | projects | project <slug>
 //                   summary [YYYY-MM] | index | refresh [--force] | health
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -101,6 +101,14 @@ export function formatHits(r: J): string {
       return snippet ? `${head}\n${wrapIndent(snippet.length > 280 ? snippet.slice(0, 280) + "…" : snippet, "    ")}` : head;
     })
     .join("\n\n");
+}
+
+/** The answer with its [n] citations, then the numbered sources it was written from. */
+export function formatAnswer(r: J): string {
+  const sources = ((r.sources ?? []) as J[]).map((s) => `${c.bold(c.cyan(`[${s.n}]`))} ${c.bold(String(s.label ?? ""))}  ${c.dim(String(s.path ?? ""))}`);
+  const answer = String(r.answer ?? "").replace(/\[(\d+)\]/g, (_m, n: string) => c.cyan(`[${n}]`));
+  const foot = c.dim(`— ${String(r.agent ?? "")}, ${((Number(r.ms) || 0) / 1000).toFixed(1)}초`);
+  return [answer, "", c.bold("근거"), ...sources, foot].join("\n");
 }
 
 export function formatLog(month: string, entries: J[]): string {
@@ -241,6 +249,18 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
       if (!q) throw new CliError("검색어를 입력하세요: zaevis search <검색어>");
       return formatHits(await api.get(`/search?q=${encodeURIComponent(q)}&topK=10`));
     }
+    case "ask":
+    case "a": {
+      const q = args.join(" ").trim();
+      if (!q) throw new CliError('질문을 입력하세요: zaevis ask "GA4 매핑은 왜 미뤘지?"');
+      const st = await api.get("/ask");
+      if (!st.chosen) throw new CliError("답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.");
+      const title = ((st.agents as J[]) ?? []).find((a) => a.id === st.chosen)?.title ?? st.chosen;
+      console.log(c.dim(`${title}가 기록을 읽고 답을 쓰는 중… (수십 초)`));
+      const r = await api.post("/ask", { q });
+      if (r.error) throw new CliError(String(r.message ?? r.error));
+      return formatAnswer(r);
+    }
     case "log":
     case "l": {
       const month = args[0] ?? (await latest(api, "logs"));
@@ -300,6 +320,7 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
 }
 
 const REPL_HELP = `${c.bold("zaevis")} — 그냥 입력하면 검색합니다.
+  :ask <질문>         기록을 근거로 답 (설치된 에이전트 CLI나 OpenRouter)
   :log [YYYY-MM]      월별 로그          :projects        프로젝트 목록
   :project <slug>     프로젝트 상세      :summary [YYYY-MM] 월간 정리
   :index              색인 상태          :refresh         색인 갱신

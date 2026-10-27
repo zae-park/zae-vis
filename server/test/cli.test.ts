@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Api, CliError, formatHits, formatIndex, formatLog, formatProjects, run } from "../src/cli.ts";
+import { Api, CliError, formatAnswer, formatHits, formatIndex, formatLog, formatProjects, run } from "../src/cli.ts";
 import { createApp } from "../src/app.ts";
 import { Worklog } from "../src/worklog.ts";
 
@@ -16,6 +16,11 @@ test("formatHits: results, empty, index-not-ready", () => {
   assert.equal(out, "[1] 회의  processed/a.txt\n    GA4 매핑");
   assert.match(formatHits({ ok: true, query: "x", hits: [] }), /결과가 없습니다/);
   assert.match(formatHits({ ok: false, error: { code: "index-not-ready" } }), /zaevis index --refresh/);
+});
+
+test("formatAnswer: answer, numbered sources, agent and time", () => {
+  const out = formatAnswer({ answer: "10월 26일에 했다 [1].", sources: [{ n: 1, path: "sources/git/2026-10-26.md", label: "2026-10-26 · git 커밋", passage: "…" }], agent: "claude", ms: 12_345 });
+  assert.equal(out, "10월 26일에 했다 [1].\n\n근거\n[1] 2026-10-26 · git 커밋  sources/git/2026-10-26.md\n— claude, 12.3초");
 });
 
 test("formatLog shows tags in Korean and the source of Claude lines", () => {

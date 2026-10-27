@@ -31,7 +31,8 @@ export type SearchResponse = {
 export interface SearchBackend {
   status(): Promise<unknown>;
   refresh(force?: boolean): Promise<unknown>;
-  search(query: string, topK: number): Promise<SearchResponse>;
+  /** `passageChars` widens the passage of each hit (the "ask" flow feeds longer excerpts to a model). */
+  search(query: string, topK: number, passageChars?: number): Promise<SearchResponse>;
   close(): Promise<void>;
 }
 
@@ -67,7 +68,7 @@ export function displayPath(raw: string, roots: string[]): string {
  * Normalises an `autorag.search` payload. The Lite result shape is not a published contract,
  * so this accepts the common field names and keeps going when some are missing.
  */
-export function normalizeSearch(query: string, data: unknown, roots: string[] = []): SearchResponse {
+export function normalizeSearch(query: string, data: unknown, roots: string[] = [], passageChars = 420): SearchResponse {
   const d = (data ?? {}) as Record<string, unknown>;
   if (d.ok === false) {
     return {
@@ -83,7 +84,7 @@ export function normalizeSearch(query: string, data: unknown, roots: string[] = 
     const rawPath = str(r.path) || str(r.virtualPath) || str(r.sourcePath) || str(src.path) || str(src.virtualPath) || str(r.source) || str(r.file);
     const path = displayPath(rawPath, roots);
     const content = (str(r.snippet) || str(r.summary) || str(r.text) || str(r.content) || str(r.chunk)).trim();
-    const context = describeHit(path, content, query);
+    const context = describeHit(path, content, query, passageChars);
     const score = num(r.score) ?? num(r.relevance);
     return {
       number: num(r.number) ?? num(r.rank) ?? i + 1,
@@ -183,11 +184,11 @@ export class AutoRAGMcp implements SearchBackend {
     return this.call("autorag.refresh", force ? { force: true } : {}, 30 * 60_000);
   }
 
-  async search(query: string, topK: number): Promise<SearchResponse> {
+  async search(query: string, topK: number, passageChars?: number): Promise<SearchResponse> {
     const missing = this.notConfigured();
     if (missing) return { ok: false, query, hits: [], error: { code: "not-configured", message: missing } };
     try {
-      return normalizeSearch(query, await this.call("autorag.search", { query, topK }), this.roots);
+      return normalizeSearch(query, await this.call("autorag.search", { query, topK }), this.roots, passageChars);
     } catch (err) {
       return { ok: false, query, hits: [], error: { code: "search-failed", message: friendly(err) } };
     }

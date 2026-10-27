@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join, normalize, sep } from "node:path";
+import type { AskOutcome } from "./ask.ts";
 import type { SearchBackend } from "./autorag.ts";
 import { AUDIO_EXT } from "./transcribe.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
@@ -40,6 +41,12 @@ export type AppOptions = {
     proposal(id: string): Promise<unknown | null>;
     /** `apply` with a selection, or `dismiss`. Null when the proposal does not exist or is not pending. */
     act(id: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  };
+  /** "질문": an answer written from the top search passages by an agent the user has (see ask.ts). */
+  ask?: {
+    /** Agents, which one would answer, whether one is answering now, and the last answer. */
+    status(): Promise<Record<string, unknown>>;
+    run(q: string, topK?: number): Promise<AskOutcome>;
   };
   /** Optional OpenRouter re-ranking of search results. */
   rerank?: {
@@ -214,6 +221,22 @@ export function createApp(opts: AppOptions): Server {
           if (!q) return send(res, 400, { error: "missing_query" });
           const topK = Math.min(Math.max(Number(url.searchParams.get("topK")) || 10, 1), 50);
           return send(res, 200, await search.search(q, topK));
+        }
+
+        case "GET /ask":
+          if (!opts.ask || arg) return notFound(res);
+          return send(res, 200, await opts.ask.status());
+
+        case "POST /ask": {
+          // POST /api/ask { q, topK? } → { answer, sources[{ n, path, label, passage }], agent, ms }
+          if (!opts.ask || arg) return notFound(res);
+          const b = await readJson(req);
+          const q = typeof b.q === "string" ? b.q.trim() : "";
+          if (!q) return send(res, 400, { error: "missing_query", message: "질문을 입력하세요." });
+          const topK = typeof b.topK === "number" && Number.isFinite(b.topK) ? b.topK : undefined;
+          const r = await opts.ask.run(q, topK);
+          if (!r.ok) return send(res, r.status, { error: r.error, message: r.message });
+          return send(res, 200, r.result);
         }
 
         case "GET /file": {

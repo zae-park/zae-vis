@@ -52,6 +52,7 @@ ${B("실행")}
 
 ${B("바로 쓰기")}
   zaevis search <검색어>      검색           zaevis log [YYYY-MM]     월별 로그
+  zaevis ask "<질문>"         기록을 근거로 답 — 설치된 에이전트 CLI(Claude Code·Codex·Gemini)나 OpenRouter 키로, 출처 [n] 포함
   zaevis projects             프로젝트 목록  zaevis summary [YYYY-MM] 월간 정리
   zaevis index [--refresh]    색인 상태 / 갱신 (--force: 처음부터)
   zaevis digest [--run]       주간 정리(지식화) 상태 / 지금 실행 — 설치된 에이전트(Claude Code·Codex·Gemini) 또는 OpenRouter 키로
@@ -448,7 +449,7 @@ async function main(argv: string[]): Promise<void> {
       if (rest[0] === "app") return buildApp();
       die("사용법: zaevis build web|app");
       return;
-    case "search": case "s": case "log": case "l": case "projects": case "p": case "project": case "summary": case "index": case "add": case "inbox": case "digest":
+    case "search": case "s": case "ask": case "a": case "log": case "l": case "projects": case "p": case "project": case "summary": case "index": case "add": case "inbox": case "digest":
       await serverStart();
       needNode();
       process.exitCode = await child("cli.ts", [cmd, ...rest]);
