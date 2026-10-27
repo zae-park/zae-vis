@@ -12,7 +12,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { expandHome } from "./config.ts";
+import { expandHome, stateDir } from "./config.ts";
+import { allEnvSecrets, getEnvSecret, setEnvSecret } from "./rerank.ts";
 
 export type FieldKind = "text" | "path" | "list" | "env";
 
@@ -27,13 +28,31 @@ export type DatasourceField = {
   defaultValue?: string;
 };
 
+/**
+ * The external CLI a template needs. `install` is the command for a terminal; `npm`/`brew` is the
+ * structured form `zaevis ext install <bin>` uses (npm packages go into $ZAEVIS_HOME/ext/npm so no
+ * sudo or global prefix is touched). `auth` says what the user still has to do inside that tool
+ * (login, token) — zaevis never asks for those credentials itself.
+ */
+export type DatasourceCli = {
+  bin: string;
+  install: string;
+  npm?: string;
+  /** Homebrew formula, possibly tap-qualified ("openclaw/tap/slacrawl"). */
+  brew?: string;
+  /** GitHub repo whose latest release ships a tarball per platform (lazykatok). */
+  release?: { repo: string; asset: (platform: string, arch: string) => string | null };
+  homepage?: string;
+  auth?: string;
+};
+
 export type DatasourceTemplate = {
   /** AutoRAG template name = config key. */
   name: string;
   title: string;
   description: string;
   /** External CLI the template needs; absent for connectors AutoRAG runs itself (obsidian, rss, github …). */
-  cli?: { bin: string; install: string; homepage?: string };
+  cli?: DatasourceCli;
   /** Default local archive the CLI keeps; exists → the user has already crawled something. */
   archive?: string;
   /** Only on this platform (spotlight = macOS). */
@@ -67,7 +86,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "slack",
     title: "Slack",
     description: "slacrawl이 모아 둔 워크스페이스·채널·스레드 아카이브를 검색합니다. 먼저 slacrawl로 로그인·수집해 두세요.",
-    cli: { bin: "slacrawl", install: "npm install -g slacrawl", homepage: "https://github.com/openclaw/slacrawl" },
+    cli: { bin: "slacrawl", install: "brew install openclaw/tap/slacrawl", brew: "openclaw/tap/slacrawl", homepage: "https://github.com/openclaw/slacrawl", auth: "slacrawl에서 Slack에 로그인해 한 번 수집(sync)해 두어야 합니다. zaevis에 토큰을 넣지 않습니다." },
     archive: h(".slacrawl", "slacrawl.db"),
     fields: [
       { key: "workspace", label: "워크스페이스(팀) ID", kind: "text", required: true, placeholder: "T0435JHH63Z", help: "slacrawl이 여러 워크스페이스를 담고 있을 때 어느 것을 볼지. 없으면 빈 결과만 나옵니다." },
@@ -78,7 +97,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "notion",
     title: "Notion",
     description: "notcrawl이 받아 둔 페이지·데이터베이스·블록 아카이브를 검색합니다 (키워드 검색).",
-    cli: { bin: "notcrawl", install: "npm install -g notcrawl", homepage: "https://github.com/openclaw/notcrawl" },
+    cli: { bin: "notcrawl", install: "brew install openclaw/tap/notcrawl", brew: "openclaw/tap/notcrawl", homepage: "https://github.com/openclaw/notcrawl", auth: "Notion 통합(integration) 토큰은 notcrawl 설정에 넣고, 페이지를 그 통합에 공유한 뒤 notcrawl로 한 번 받아 두세요." },
     archive: h(".notcrawl", "notcrawl.db"),
     fields: [chatDb(".notcrawl", "notcrawl.db")],
   },
@@ -86,7 +105,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "discord",
     title: "Discord",
     description: "discrawl의 로컬 아카이브(데스크톱 앱 와이어탭, 봇 토큰 불필요)를 검색합니다.",
-    cli: { bin: "discrawl", install: "npm install -g discrawl", homepage: "https://github.com/openclaw/discrawl" },
+    cli: { bin: "discrawl", install: "brew install openclaw/tap/discrawl", brew: "openclaw/tap/discrawl", homepage: "https://github.com/openclaw/discrawl", auth: "Discord 데스크톱 앱에서 discrawl이 로컬로 받아쓰는 방식이라 봇 토큰이 필요 없습니다." },
     archive: h(".discrawl", "discrawl.db"),
     fields: [chatDb(".discrawl", "discrawl.db")],
   },
@@ -94,7 +113,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "kakao",
     title: "카카오톡",
     description: "lazykatok이 맥 카카오톡에서 모은 대화 아카이브를 검색합니다.",
-    cli: { bin: "lazykatok", install: "npm install -g lazykatok", homepage: "https://github.com/changeroa/lazykatok" },
+    cli: { bin: "lazykatok", install: "GitHub 릴리스 tar.gz (changeroa/lazykatok)", release: { repo: "changeroa/lazykatok", asset: (platform, arch) => (platform === "darwin" ? `lazykatok-{version}-${arch === "arm64" ? "aarch64" : "x86_64"}-apple-darwin.tar.gz` : null) }, homepage: "https://github.com/changeroa/lazykatok", auth: "카카오톡 PC 앱의 로컬 데이터만 읽습니다. 로그인·토큰 없음." },
     archive: h("Library", "Application Support", "katok", "archive.sqlite3"),
     platform: "darwin",
     fields: [{ key: "workspacePath", label: "데이터 폴더", kind: "path", placeholder: h("Library", "Application Support", "katok"), help: "비우면 lazykatok 기본 위치." }],
@@ -103,7 +122,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "whatsapp",
     title: "WhatsApp",
     description: "wacrawl의 로컬 아카이브를 검색합니다.",
-    cli: { bin: "wacrawl", install: "npm install -g wacrawl", homepage: "https://github.com/openclaw/wacrawl" },
+    cli: { bin: "wacrawl", install: "brew install openclaw/tap/wacrawl", brew: "openclaw/tap/wacrawl", homepage: "https://github.com/openclaw/wacrawl", auth: "WhatsApp 데스크톱 아카이브를 wacrawl로 한 번 받아 두세요 (QR 로그인은 wacrawl에서)." },
     archive: h(".wacrawl", "wacrawl.db"),
     fields: [chatDb(".wacrawl", "wacrawl.db")],
   },
@@ -111,7 +130,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "telegram",
     title: "Telegram",
     description: "telecrawl의 로컬 데스크톱 아카이브를 검색합니다.",
-    cli: { bin: "telecrawl", install: "npm install -g telecrawl", homepage: "https://github.com/openclaw/telecrawl" },
+    cli: { bin: "telecrawl", install: "brew install openclaw/tap/telecrawl", brew: "openclaw/tap/telecrawl", homepage: "https://github.com/openclaw/telecrawl", auth: "Telegram 데스크톱 아카이브를 telecrawl로 한 번 받아 두세요 (로그인은 telecrawl에서)." },
     archive: h(".telecrawl", "telecrawl.db"),
     fields: [chatDb(".telecrawl", "telecrawl.db")],
   },
@@ -119,7 +138,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "mailcrawl",
     title: "메일 (mailcrawl)",
     description: "mailcrawl이 Gmail·IMAP·Maildir에서 받아 둔 메일 아카이브를 검색합니다. 계정 로그인은 mailcrawl에서 합니다.",
-    cli: { bin: "mailcrawl", install: "npm install -g mailcrawl", homepage: "https://github.com/NomaDamas/mailcrawl" },
+    cli: { bin: "mailcrawl", install: "https://github.com/NomaDamas/mailcrawl 의 설치 안내대로 (Node·Go 필요)", homepage: "https://github.com/NomaDamas/mailcrawl", auth: "mailcrawl에서 계정을 추가하세요 (Gmail은 OAuth, IMAP은 앱 비밀번호). 비밀번호는 mailcrawl이 보관합니다." },
     fields: [
       { key: "account", label: "계정 이름", kind: "text", placeholder: "work", help: "mailcrawl에 등록한 계정 id. 비우면 기본 계정." },
       { key: "mailbox", label: "메일함", kind: "text", placeholder: "INBOX" },
@@ -154,7 +173,7 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "cloud-drive",
     title: "클라우드 드라이브 (rclone)",
     description: "rclone 리모트(Google Drive, OneDrive, Dropbox …)의 문서를 받아 색인합니다. rclone config로 리모트를 먼저 만드세요.",
-    cli: { bin: "rclone", install: "brew install rclone", homepage: "https://rclone.org" },
+    cli: { bin: "rclone", install: "brew install rclone", brew: "rclone", homepage: "https://rclone.org", auth: "`rclone config`로 리모트를 만들 때 클라우드에 로그인합니다 (OAuth). zaevis는 리모트 이름만 압니다." },
     fields: [
       { key: "remote", label: "rclone 리모트", kind: "text", required: true, placeholder: "gdrive:Documents", help: "`rclone listremotes`에 나오는 이름과 경로." },
       { key: "provider", label: "종류", kind: "text", placeholder: "drive", help: "drive · onedrive · dropbox … (선택)" },
@@ -183,14 +202,14 @@ export const TEMPLATES: DatasourceTemplate[] = [
     name: "clawgallery",
     title: "사진·스크린샷 (clawgallery)",
     description: "clawgallery가 OCR·시각 색인한 스크린샷·사진을 검색합니다.",
-    cli: { bin: "clawgallery", install: "npm install -g clawgallery" },
+    cli: { bin: "clawgallery", install: "cargo install --git https://github.com/NomaDamas/clawgallery (Rust·Python ML 의존성, 설치 안내 참고)", homepage: "https://github.com/NomaDamas/clawgallery", auth: "로그인·토큰 없음. 사진 폴더만 지정합니다." },
     fields: [{ key: "path", label: "사진 폴더", kind: "path", placeholder: h("Pictures", "Screenshots") }],
   },
   {
     name: "hister",
     title: "브라우저 방문 기록 (Hister)",
     description: "별도로 설치해 켜 둔 Hister 서버(확장 프로그램이 방문한 페이지를 모음)를 검색합니다.",
-    cli: { bin: "hister", install: "brew install hister && brew services start hister", homepage: "https://github.com/asciimoo/hister" },
+    cli: { bin: "hister", install: "brew install hister && brew services start hister", brew: "hister", homepage: "https://github.com/asciimoo/hister", auth: "brew services start hister 로 서버를 켜고 브라우저 확장을 설치하세요. 토큰은 Hister 설정에서 켠 경우에만." },
     fields: [
       { key: "baseUrl", label: "Hister 주소", kind: "text", placeholder: "http://127.0.0.1:9876" },
       { key: "tokenEnv", label: "토큰 환경 변수 이름", kind: "env" },
@@ -209,11 +228,22 @@ export function datasourceLabel(id: string, type?: string): string {
 
 // ── probe ──────────────────────────────────────────────────────────────────────
 
+/** Where `zaevis ext install` puts npm CLIs: its own prefix, so no sudo and no global npm folder. */
+export const extNpmPrefix = (): string => join(stateDir(), "ext", "npm");
+export const extNpmBinDir = (): string => join(extNpmPrefix(), process.platform === "win32" ? "" : "bin");
+
 const EXTRA_BIN_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", h(".local", "bin"), h(".cargo", "bin"), h("go", "bin"), h(".bun", "bin"), h(".npm-global", "bin")];
+
+/** PATH for child processes that spawn these CLIs (AutoRAG's crawler skills): the app's own env is short. */
+export function cliPath(env: NodeJS.ProcessEnv = process.env): string {
+  const sep = process.platform === "win32" ? ";" : ":";
+  const dirs = [extBinDir(), extNpmBinDir(), ...(env.PATH ?? "").split(sep), ...EXTRA_BIN_DIRS].filter(Boolean);
+  return [...new Set(dirs)].join(sep);
+}
 
 /** Where a CLI is, searching PATH plus the usual install folders (the app's launchd env has a short PATH). */
 export function findBin(bin: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const dirs = [...(env.PATH ?? "").split(process.platform === "win32" ? ";" : ":"), ...EXTRA_BIN_DIRS].filter(Boolean);
+  const dirs = [extBinDir(), extNpmBinDir(), ...(env.PATH ?? "").split(process.platform === "win32" ? ";" : ":"), ...EXTRA_BIN_DIRS].filter(Boolean);
   const names = process.platform === "win32" ? [`${bin}.exe`, `${bin}.cmd`, bin] : [bin];
   for (const d of dirs) for (const n of names) if (existsSync(join(d, n))) return join(d, n);
   return null;
@@ -225,8 +255,8 @@ export type Probe = {
   binPath: string | null;
   /** The CLI's default archive exists (null: not applicable / unknown). */
   archive: boolean | null;
-  /** Env var names the connection relies on and whether each is set in the server's environment. */
-  env: Array<{ name: string; set: boolean }>;
+  /** Env var names the connection relies on, whether each is available (process env or stored secret), and whether zaevis stores it. */
+  env: Array<{ name: string; set: boolean; stored: boolean }>;
   /** Why the template cannot be used here (wrong platform), else null. */
   unavailable: string | null;
 };
@@ -238,7 +268,7 @@ export function probe(t: DatasourceTemplate, connector: Record<string, unknown> 
     .filter((f) => f.kind === "env")
     .map((f) => String(connector[f.key] ?? f.defaultValue ?? "").trim())
     .filter(Boolean)
-    .map((name) => ({ name, set: typeof env[name] === "string" && env[name]!.length > 0 }));
+    .map((name) => ({ name, set: (typeof env[name] === "string" && env[name]!.length > 0) || getEnvSecret(name) !== null, stored: getEnvSecret(name) !== null }));
   return {
     installed: t.cli ? binPath !== null : null,
     binPath,
@@ -246,6 +276,43 @@ export function probe(t: DatasourceTemplate, connector: Record<string, unknown> 
     env: envs,
     unavailable,
   };
+}
+
+// ── one-click install ─────────────────────────────────────────────────────────
+
+export type InstallPlan =
+  | { kind: "npm"; pkg: string; prefix: string; npm: string }
+  | { kind: "brew"; pkg: string; brew: string }
+  | { kind: "release"; repo: string; asset: (version: string) => string | null; dir: string }
+  | { kind: "none"; reason: string };
+
+/** Where release tarballs are unpacked. */
+export const extBinDir = (): string => join(stateDir(), "ext", "bin");
+
+/**
+ * How `zaevis ext install <bin>` would install a template's CLI on this machine. npm packages go
+ * into zaevis's own prefix with whatever npm is on the machine; brew packages need Homebrew.
+ */
+export function installPlan(bin: string, env: NodeJS.ProcessEnv = process.env): InstallPlan {
+  const t = TEMPLATES.find((x) => x.cli?.bin === bin);
+  if (!t?.cli) return { kind: "none", reason: `모르는 도구입니다: ${bin}` };
+  if (t.cli.npm) {
+    const npm = findBin(process.platform === "win32" ? "npm.cmd" : "npm", env) ?? findBin("npm", env);
+    if (!npm) return { kind: "none", reason: `npm이 없습니다. Node.js를 설치한 뒤(brew install node 또는 nodejs.org) 다시 누르거나, 터미널에서: ${t.cli.install}` };
+    return { kind: "npm", pkg: t.cli.npm, prefix: extNpmPrefix(), npm };
+  }
+  if (t.cli.brew) {
+    const brew = findBin("brew", env);
+    if (!brew) return { kind: "none", reason: `Homebrew가 없습니다 (https://brew.sh 에서 설치). 터미널에서: ${t.cli.install}` };
+    return { kind: "brew", pkg: t.cli.brew, brew };
+  }
+  if (t.cli.release) {
+    const name = t.cli.release.asset(process.platform, process.arch);
+    if (!name) return { kind: "none", reason: `이 플랫폼용 릴리스가 없습니다. 설치 안내: ${t.cli.homepage ?? t.cli.install}` };
+    const repo = t.cli.release.repo;
+    return { kind: "release", repo, asset: (version) => name.replace("{version}", version), dir: extBinDir() };
+  }
+  return { kind: "none", reason: `터미널에서 설치하세요: ${t.cli.install}` };
 }
 
 // ── config.json `datasources` section ─────────────────────────────────────────
@@ -351,7 +418,19 @@ export function displayConnector(connector: Record<string, unknown> | undefined)
   return c;
 }
 
-export type SavePatch = { enabled?: boolean; description?: string; type?: string; connector?: Record<string, unknown>; channels?: { ids?: string[]; names?: string[] } };
+export type SavePatch = {
+  enabled?: boolean;
+  description?: string;
+  type?: string;
+  connector?: Record<string, unknown>;
+  channels?: { ids?: string[]; names?: string[] };
+  /**
+   * Token values for the connection's `env` fields, keyed by env-var name. Stored in secrets.json
+   * (0600) and handed to the search child as environment — the app has no shell env to inherit.
+   * "" removes a stored value.
+   */
+  secrets?: Record<string, string>;
+};
 
 /**
  * Creates or updates one connection. `name` is the template, or an alias (then `type` names the
@@ -382,9 +461,29 @@ export function saveDatasource(autoragConfig: string, name: string, patch: SaveP
     if (ids.length || names.length) next.channels = { ...(ids.length ? { ids } : {}), ...(names.length ? { names } : {}) };
     else delete next.channels;
   }
+  if (patch.secrets) {
+    for (const [k, v] of Object.entries(patch.secrets)) {
+      if (!ENV_NAME.test(k)) throw new Error(`환경 변수 이름이 아닙니다: ${k}`);
+      setEnvSecret(k, typeof v === "string" ? v : "");
+    }
+  }
   cfg.datasources = { ...((cfg.datasources as Record<string, unknown>) ?? {}), [name]: next };
   writeConfig(autoragConfig, cfg);
   return next;
+}
+
+/** Env for the search child: every stored env secret, so connectors find their tokens without a shell. */
+export function secretsEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const t of TEMPLATES) {
+    for (const f of t.fields) {
+      if (f.kind !== "env" || !f.defaultValue) continue;
+      const v = getEnvSecret(f.defaultValue);
+      if (v) out[f.defaultValue] = v;
+    }
+  }
+  for (const [name, v] of Object.entries(allEnvSecrets())) out[name] = v;
+  return out;
 }
 
 export function removeDatasource(autoragConfig: string, name: string): boolean {
@@ -459,7 +558,7 @@ export type DatasourceStatus = {
   title: string;
   description: string;
   fields: DatasourceField[];
-  cli: { bin: string; install: string; homepage?: string } | null;
+  cli: DatasourceCli | null;
   external: string | null;
   probe: Probe;
   configured: boolean;

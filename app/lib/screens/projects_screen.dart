@@ -90,6 +90,7 @@ class ProjectDetailScreen extends StatelessWidget {
         builder: (context, p, _) => SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Readable(
+            maxWidth: 1100,
             child: MarkdownView(
               p.markdown ?? '',
               onLink: (s) => Navigator.of(context).pushReplacement(MaterialPageRoute<void>(

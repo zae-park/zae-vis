@@ -810,6 +810,8 @@ class ExternalDatasource {
     this.cliBin,
     this.install,
     this.homepage,
+    this.auth,
+    this.installKind,
     this.external,
     this.installed,
     this.archive,
@@ -845,8 +847,10 @@ class ExternalDatasource {
       archive: _boolOrNull(probe['archive']),
       env: (probe['env'] is List ? probe['env'] as List : const <Object?>[])
           .whereType<Json>()
-          .map((e) => (name: _str(e['name']), set: e['set'] == true))
+          .map((e) => (name: _str(e['name']), set: e['set'] == true, stored: e['stored'] == true))
           .toList(),
+      auth: cli == null ? null : _strOrNull(cli['auth']),
+      installKind: cli == null ? null : (cli['npm'] is String ? 'npm' : cli['brew'] is String ? 'brew' : null),
       unavailable: _strOrNull(probe['unavailable']),
       note: _strOrNull(j['note']),
       autoragStatus: autorag == null ? null : _strOrNull(autorag['status']),
@@ -869,13 +873,19 @@ class ExternalDatasource {
   final String? install;
   final String? homepage;
 
+  /// What the user still has to do inside the tool (login, token) — zaevis never collects those.
+  final String? auth;
+
+  /// "npm" | "brew" when `zaevis ext install <cliBin>` can do the install; null = terminal only.
+  final String? installKind;
+
   /// What leaves the machine, if anything.
   final String? external;
 
   /// null when the template needs no CLI.
   final bool? installed;
   final bool? archive;
-  final List<({String name, bool set})> env;
+  final List<({String name, bool set, bool stored})> env;
   final String? unavailable;
   final String? note;
   final String? autoragStatus;

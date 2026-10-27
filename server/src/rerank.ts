@@ -50,6 +50,25 @@ function writeSecrets(s: Record<string, string>): void {
   chmodSync(f, 0o600); // writeFileSync's mode only applies when the file is created
 }
 
+/** Secrets stored under "env:<NAME>" — token values external connectors need (see datasources.ts). */
+export function getEnvSecret(name: string): string | null {
+  const v = readSecrets()[`env:${name}`];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+export function setEnvSecret(name: string, value: string): void {
+  const s = readSecrets();
+  if (value.trim()) s[`env:${name}`] = value.trim();
+  else delete s[`env:${name}`];
+  writeSecrets(s);
+}
+
+export function allEnvSecrets(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(readSecrets())) if (k.startsWith("env:") && typeof v === "string" && v.trim()) out[k.slice(4)] = v.trim();
+  return out;
+}
+
 export function getKey(): string | null {
   const k = readSecrets().openrouter;
   return typeof k === "string" && k.trim() ? k.trim() : null;

@@ -120,8 +120,8 @@ const _dests = [
   _Dest('검색', Icons.search, Icons.search, '기록 전체를 뜻과 단어로 찾습니다'),
   _Dest('로그', Icons.list_alt_outlined, Icons.list_alt, '날짜순 한 줄 기록 — 내가 쓴 줄과 정리가 쓴 줄'),
   _Dest('프로젝트', Icons.folder_outlined, Icons.folder, '프로젝트별 현재 상태 · 결정 · 열린 문제'),
-  _Dest('월간 정리', Icons.calendar_month_outlined, Icons.calendar_month, '달마다 정리된 요약'),
-  _Dest('수집', Icons.input_outlined, Icons.input, '데이터소스와 inbox, 바로 넣기'),
+  _Dest('리포트', Icons.summarize_outlined, Icons.summarize, '일간 · 주간 · 월간 리포트'),
+  _Dest('연결', Icons.hub_outlined, Icons.hub, '데이터소스와 외부 서비스 연결, inbox, 바로 넣기'),
 ];
 
 class HomeShell extends StatefulWidget {
@@ -206,7 +206,7 @@ class _HomeShellState extends State<HomeShell> {
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
         3 => SummariesScreen(api: api, onOpenProject: _openProject),
-        _ => CollectScreen(api: api, recorder: widget.recorder),
+        _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
       };
 
   Future<void> _record() async {

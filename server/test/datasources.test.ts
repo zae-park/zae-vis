@@ -10,7 +10,7 @@ import { normalizeSearch, type SearchBackend } from "../src/autorag.ts";
 import { Worklog } from "../src/worklog.ts";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ds-"));
-const { TEMPLATES, findBin, knownDatasourceIds, listStatus, probe, readDatasources, readExternalFile, removeDatasource, saveDatasource, shapeConnector, syncRecords, templateByName } = await import("../src/datasources.ts");
+const { TEMPLATES, findBin, installPlan, knownDatasourceIds, listStatus, probe, readDatasources, readExternalFile, removeDatasource, saveDatasource, shapeConnector, syncRecords, templateByName } = await import("../src/datasources.ts");
 
 const cfgFile = join(process.env.ZAEVIS_HOME, "autorag", "config.json");
 await mkdir(join(process.env.ZAEVIS_HOME, "autorag"), { recursive: true });
@@ -38,10 +38,20 @@ test("probe: missing CLI → not installed; no CLI → null; platform gate; env 
   assert.equal(obsidian.installed, null);
   assert.equal(obsidian.unavailable, null);
   const gh = probe(templateByName("github")!, {}, { PATH: "" });
-  assert.deepEqual(gh.env, [{ name: "GITHUB_TOKEN", set: false }], "default token env is reported by name");
+  assert.deepEqual(gh.env, [{ name: "GITHUB_TOKEN", set: false, stored: false }], "default token env is reported by name");
   const gh2 = probe(templateByName("github")!, { tokenEnv: "MY_GH" }, { PATH: "", MY_GH: "x" });
-  assert.deepEqual(gh2.env, [{ name: "MY_GH", set: true }]);
+  assert.deepEqual(gh2.env, [{ name: "MY_GH", set: true, stored: false }]);
   assert.ok(!JSON.stringify(gh2).includes('"x"'), "the value never appears");
+
+  assert.equal(installPlan("nope").kind, "none");
+  // findBin also looks in the usual install folders, so on a Mac with Homebrew npm these resolve
+  const slackPlan = installPlan("slacrawl", { PATH: "/nonexistent" });
+  assert.ok(slackPlan.kind === "brew" ? slackPlan.pkg === "openclaw/tap/slacrawl" : /Homebrew/.test(slackPlan.reason));
+  const katok = installPlan("lazykatok", { PATH: "/nonexistent" });
+  assert.ok(katok.kind === "release" ? katok.repo === "changeroa/lazykatok" && katok.asset("0.3.3")!.includes("0.3.3") && katok.dir.endsWith("ext/bin") : katok.kind === "none");
+  assert.equal(installPlan("mailcrawl").kind, "none", "no automated path for mailcrawl yet");
+  const rclone = installPlan("rclone", { PATH: "/nonexistent" });
+  assert.ok(rclone.kind === "brew" ? rclone.pkg === "rclone" : /Homebrew/.test(rclone.reason));
   const spot = probe(templateByName("spotlight")!);
   assert.equal(spot.unavailable === null, process.platform === "darwin");
   assert.equal(findBin("node") !== null, true, "node is on PATH");
@@ -214,7 +224,7 @@ test("GET /api/datasources lists templates with probe, config and AutoRAG state"
   const slack = rows.find((x) => x.name === "slack");
   assert.equal(slack.configured, true);
   assert.equal(slack.probe.installed, false);
-  assert.equal(slack.cli.install, "npm install -g slacrawl");
+  assert.equal(slack.cli.install, "brew install openclaw/tap/slacrawl");
   assert.equal(rows.find((x) => x.name === "obsidian").autorag.status, "active");
 });
 

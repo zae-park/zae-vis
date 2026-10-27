@@ -183,21 +183,25 @@ String tagLabel(String tag) => switch (tag) {
       _ => '#$tag',
     };
 
-/// Reads at most [maxWidth] wide so long lines stay readable on desktop. Left-aligned under the page
-/// header on wide windows (12px extra gutter), centred when the window is narrow.
+/// Fills the window width (with a gutter) so a maximised window is used; a screen that is mostly
+/// prose passes [maxWidth] to keep its lines readable. Left-aligned under the page header on wide
+/// windows (12px extra gutter), centred when the window is narrow.
 class Readable extends StatelessWidget {
-  const Readable({super.key, required this.child, this.maxWidth = 860});
+  const Readable({super.key, required this.child, this.maxWidth});
   final Widget child;
-  final double maxWidth;
+
+  /// Cap for text-heavy screens; null = use the whole width minus a right gutter.
+  final double? maxWidth;
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 760;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 760;
     return Align(
       alignment: wide ? Alignment.topLeft : Alignment.topCenter,
       child: Padding(
-        padding: EdgeInsets.only(left: wide ? 12 : 0),
-        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: child),
+        padding: EdgeInsets.only(left: wide ? 12 : 0, right: wide ? 16 : 0),
+        child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth ?? double.infinity), child: child),
       ),
     );
   }

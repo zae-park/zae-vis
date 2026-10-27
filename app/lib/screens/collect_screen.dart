@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../api.dart';
+import '../backend/backend.dart';
 import '../models.dart';
+import '../widgets/task_dialog.dart';
 import '../widgets/common.dart';
 import '../recording/recorder.dart';
 import '../widgets/input_dialogs.dart';
@@ -23,9 +25,12 @@ String _size(int b) => b >= 1 << 20 ? '${(b / (1 << 20)).toStringAsFixed(1)}MB' 
 
 /// Data sources (batch) + inbox and real-time input.
 class CollectScreen extends StatefulWidget {
-  const CollectScreen({super.key, required this.api, this.recorder});
+  const CollectScreen({super.key, required this.api, this.recorder, this.backend});
   final WorklogApi api;
   final Recorder? recorder;
+
+  /// The bundled server manager; lets a card install a connector's CLI with one click. Null on the web.
+  final Backend? backend;
 
   @override
   State<CollectScreen> createState() => _CollectScreenState();
@@ -203,8 +208,15 @@ class _CollectScreenState extends State<CollectScreen> {
                   key: ValueKey('ext-${d.name}'),
                   source: d,
                   syncing: _external!.syncing,
+                  onInstall: widget.backend?.managed == true && d.installKind != null && d.cliBin != null
+                      ? () async {
+                          final ok = await runBackendTask(context, widget.backend!, '${d.title} 도구 설치 (${d.cliBin})', ['ext', 'install', d.cliBin!]);
+                          if (ok && context.mounted) toast(context, '${d.cliBin} 설치됨. 이제 그 도구에서 로그인·수집을 한 번 한 뒤 연결하세요.');
+                          await _load();
+                        }
+                      : null,
                   onToggle: (on) => _act(() => widget.api.saveDatasource(d.name, enabled: on), done: on ? '${d.title}을(를) 켰습니다. 동기화를 시작합니다.' : '${d.title}을(를) 껐습니다'),
-                  onSave: (connector, note) => _act(() => widget.api.saveDatasource(d.name, enabled: true, connector: connector, description: note),
+                  onSave: (connector, note, secrets) => _act(() => widget.api.saveDatasource(d.name, enabled: true, connector: connector, description: note, secrets: secrets),
                       done: d.configured ? '저장했습니다. 동기화를 시작합니다.' : '${d.title}을(를) 연결했습니다. 첫 동기화를 시작합니다.'),
                   onSync: () => _act(() => widget.api.syncDatasources(d.name), done: '외부 소스 동기화를 시작했습니다'),
                   onRemove: () => _act(() => widget.api.removeDatasource(d.name), done: '${d.title} 연결을 지웠습니다'),
@@ -315,7 +327,11 @@ class _SourceCardState extends State<_SourceCard> {
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         initiallyExpanded: widget.initiallyExpanded,
-        leading: Switch(value: s.enabled, onChanged: widget.onToggle),
+        leading: Row(mainAxisSize: MainAxisSize.min, children: [
+          SourceIcon(s.name, dim: !s.enabled),
+          const SizedBox(width: 8),
+          Switch(value: s.enabled, onChanged: widget.onToggle),
+        ]),
         title: Text(s.title, style: t.titleSmall),
         subtitle: Text(status, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: s.lastOk == false ? scheme.error : null)),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -360,11 +376,14 @@ class _SourceCardState extends State<_SourceCard> {
 /// One AutoRAG datasource template: install hint when its CLI is missing, a connect form otherwise,
 /// and on/off · sync · delete once connected.
 class _ExternalCard extends StatefulWidget {
-  const _ExternalCard({super.key, required this.source, required this.syncing, required this.onToggle, required this.onSave, required this.onSync, required this.onRemove});
+  const _ExternalCard({super.key, required this.source, required this.syncing, required this.onToggle, required this.onSave, required this.onSync, required this.onRemove, this.onInstall});
   final ExternalDatasource source;
   final bool syncing;
   final void Function(bool) onToggle;
-  final void Function(Map<String, Object?> connector, String note) onSave;
+  final void Function(Map<String, Object?> connector, String note, Map<String, String> secrets) onSave;
+
+  /// One-click install of the connector's CLI (null on the web or when only a terminal can do it).
+  final Future<void> Function()? onInstall;
   final VoidCallback onSync;
   final VoidCallback onRemove;
 
@@ -374,23 +393,43 @@ class _ExternalCard extends StatefulWidget {
 
 class _ExternalCardState extends State<_ExternalCard> {
   final Map<String, TextEditingController> _fields = {};
+  /// Token values typed for `env` fields, by field key; sent once and never shown again.
+  final Map<String, TextEditingController> _tokens = {};
   late final TextEditingController _note = TextEditingController(text: widget.source.note ?? '');
 
   TextEditingController _field(DatasourceField f) => _fields.putIfAbsent(f.key, () => TextEditingController(text: widget.source.fieldText(f)));
 
   @override
   void dispose() {
-    for (final c in _fields.values) {
+    for (final c in [..._fields.values, ..._tokens.values]) {
       c.dispose();
     }
     _note.dispose();
     super.dispose();
   }
 
+  TextEditingController _token(DatasourceField f) => _tokens.putIfAbsent(f.key, TextEditingController.new);
+
+  /// env-var name → token value, for every env field where the user typed one.
+  Map<String, String> _secrets() => {
+        for (final f in widget.source.fields)
+          if (f.kind == 'env' && _token(f).text.trim().isNotEmpty && (_field(f).text.trim().isNotEmpty || f.defaultValue != null))
+            (_field(f).text.trim().isEmpty ? f.defaultValue! : _field(f).text.trim()): _token(f).text.trim(),
+      };
+
   Map<String, Object?> _connector() => {
         for (final f in widget.source.fields)
           f.key: f.kind == 'list' ? _field(f).text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList() : _field(f).text.trim(),
       };
+
+  String _envName(DatasourceField f) => _field(f).text.trim().isEmpty ? (f.defaultValue ?? '') : _field(f).text.trim();
+
+  String _envStatus(ExternalDatasource d, DatasourceField f) {
+    final e = d.env.where((x) => x.name == _envName(f)).firstOrNull;
+    if (e == null) return '아직 없음';
+    if (e.stored) return '저장됨 — 바꾸려면 새 값 입력';
+    return e.set ? '서버 환경에 있음' : '아직 없음';
+  }
 
   String _status(ExternalDatasource d) {
     if (d.unavailable != null) return d.unavailable!;
@@ -412,9 +451,14 @@ class _ExternalCardState extends State<_ExternalCard> {
     final scheme = Theme.of(context).colorScheme;
     final failed = d.lastOk == false && d.enabled;
     final mono = TextStyle(fontFamily: 'monospace', fontSize: 13, color: scheme.onSurface);
-    final Widget leading = d.configured
-        ? Switch(value: d.enabled, onChanged: d.unavailable != null ? null : widget.onToggle)
-        : Icon(d.unavailable != null ? Icons.block : d.needsInstall ? Icons.download_outlined : Icons.add_link, color: scheme.outline);
+    final Widget leading = Row(mainAxisSize: MainAxisSize.min, children: [
+      SourceIcon(d.template, dim: !d.configured || !d.enabled),
+      const SizedBox(width: 8),
+      if (d.configured)
+        Switch(value: d.enabled, onChanged: d.unavailable != null ? null : widget.onToggle)
+      else
+        Icon(d.unavailable != null ? Icons.block : d.needsInstall ? Icons.download_outlined : Icons.add_link, color: scheme.outline),
+    ]);
     return Card.outlined(
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
@@ -426,18 +470,26 @@ class _ExternalCardState extends State<_ExternalCard> {
         children: [
           Text(d.description, style: t.bodySmall),
           if (d.external != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('밖으로 나가는 것: ${d.external}', style: t.bodySmall?.copyWith(color: scheme.outline))),
+          if (d.auth != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('로그인·토큰: ${d.auth}', style: t.bodySmall?.copyWith(color: scheme.outline))),
           if (d.needsInstall) ...[
             const SizedBox(height: 10),
-            Text('먼저 터미널에서 설치하고 로그인·수집을 한 번 해 두세요:', style: t.bodySmall),
-            const SizedBox(height: 6),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(8)),
-              child: SelectableText(d.install ?? '', style: mono, minLines: 1, maxLines: 3),
-            ),
-            const SizedBox(height: 8),
-            Wrap(spacing: 8, children: [
+            if (widget.onInstall != null) ...[
+              Text('${d.cliBin} 도구가 필요합니다. 설치하면 이 앱 안의 폴더(~/.zaevis/ext)에 들어가고, 관리자 권한은 필요 없습니다.', style: t.bodySmall),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                FilledButton.icon(onPressed: widget.onInstall, icon: const Icon(Icons.download, size: 18), label: Text('${d.cliBin} 설치')),
+                Text(d.install ?? '', style: mono.copyWith(fontSize: 11.5, color: scheme.outline)),
+              ]),
+            ] else ...[
+              Text('먼저 터미널에서 설치하고 로그인·수집을 한 번 해 두세요:', style: t.bodySmall),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(8)),
+                child: SelectableText(d.install ?? '', style: mono, minLines: 1, maxLines: 3),
+              ),
+              const SizedBox(height: 8),
               FilledButton.tonalIcon(
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: d.install ?? ''));
@@ -446,21 +498,15 @@ class _ExternalCardState extends State<_ExternalCard> {
                 icon: const Icon(Icons.copy, size: 18),
                 label: const Text('설치 명령 복사'),
               ),
-              if (d.homepage != null) OutlinedButton(onPressed: () => Clipboard.setData(ClipboardData(text: d.homepage!)), child: Text(d.homepage!, style: t.bodySmall)),
-            ]),
+            ],
+            if (d.homepage != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(d.homepage!, style: t.bodySmall?.copyWith(color: scheme.outline))),
           ] else if (d.unavailable == null) ...[
             if (d.archive == false)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text('${d.cliBin}의 아카이브가 아직 없습니다. 먼저 ${d.cliBin}으로 로그인·수집을 한 번 하세요.', style: t.bodySmall?.copyWith(color: scheme.error)),
               ),
-            for (final e in d.env)
-              if (!e.set)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text('환경 변수 ${e.name}이(가) 서버에 없습니다. 값은 여기 적지 말고 서버를 띄운 셸에 설정하세요.', style: t.bodySmall?.copyWith(color: scheme.error)),
-                ),
-            for (final f in d.fields)
+            for (final f in d.fields) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: TextField(
@@ -471,19 +517,38 @@ class _ExternalCardState extends State<_ExternalCard> {
                   decoration: InputDecoration(
                     labelText: f.required ? '${f.label} *' : f.label,
                     hintText: f.placeholder,
-                    helperText: f.help ?? (f.kind == 'list' ? '한 줄에 하나씩' : f.kind == 'env' ? '값이 아니라 환경 변수 이름' : null),
+                    helperText: f.help ?? (f.kind == 'list' ? '한 줄에 하나씩' : f.kind == 'env' ? '환경 변수 이름. 값은 아래 칸에' : null),
                     helperMaxLines: 2,
                     isDense: true,
                   ),
                 ),
               ),
+              // a token for an env field: the app has no shell env to inherit, so the value is kept in
+              // secrets.json (0600) under that name and handed to the search process
+              if (f.kind == 'env')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TextField(
+                    controller: _token(f),
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: '토큰 값 (${_envName(f)})',
+                      hintText: _envStatus(d, f),
+                      helperText: '~/.zaevis/secrets.json(소유자만 읽기)에 저장되고 검색 프로세스에만 전달됩니다. 다시 표시되지 않습니다.',
+                      helperMaxLines: 2,
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.key_outlined),
+                    ),
+                  ),
+                ),
+            ],
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: TextField(controller: _note, decoration: const InputDecoration(labelText: '메모 (선택)', helperText: '이 연결이 무엇인지. 질문 모드의 에이전트에게도 보입니다.', isDense: true)),
             ),
             const SizedBox(height: 12),
             Wrap(spacing: 8, children: [
-              FilledButton(onPressed: () => widget.onSave(_connector(), _note.text.trim()), child: Text(d.configured ? '저장' : '연결')),
+              FilledButton(onPressed: () => widget.onSave(_connector(), _note.text.trim(), _secrets()), child: Text(d.configured ? '저장' : '연결')),
               if (d.configured) OutlinedButton(onPressed: widget.syncing || !d.enabled ? null : widget.onSync, child: const Text('지금 동기화')),
               if (d.configured) TextButton(onPressed: widget.onRemove, child: Text('연결 삭제', style: TextStyle(color: scheme.error))),
             ]),
@@ -640,4 +705,54 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
     },
   );
   return result;
+}
+
+/// A round, brand-coloured icon for a source or connector (no bundled logos: Material icons on the
+/// service's colour). Unknown names get a neutral plug icon.
+class SourceIcon extends StatelessWidget {
+  const SourceIcon(this.id, {super.key, this.dim = false, this.size = 32});
+  final String id;
+  final bool dim;
+  final double size;
+
+  static const _spec = <String, (IconData, int)>{
+    // built-in sources
+    'git': (Icons.commit, 0xFFF05032),
+    'agent-sessions': (Icons.smart_toy_outlined, 0xFFD97757),
+    'shell-history': (Icons.terminal, 0xFF2F3E46),
+    'transcripts': (Icons.record_voice_over_outlined, 0xFF5B7DB1),
+    // AutoRAG templates
+    'obsidian': (Icons.auto_stories_outlined, 0xFF7C3AED),
+    'slack': (Icons.tag, 0xFF4A154B),
+    'notion': (Icons.article_outlined, 0xFF1F1F1F),
+    'discord': (Icons.forum_outlined, 0xFF5865F2),
+    'kakao': (Icons.chat_bubble_outline, 0xFFC9A400),
+    'whatsapp': (Icons.chat_outlined, 0xFF25D366),
+    'telegram': (Icons.send_outlined, 0xFF229ED9),
+    'mailcrawl': (Icons.mail_outline, 0xFFC5221F),
+    'mail-export': (Icons.drafts_outlined, 0xFF8E6E53),
+    'github': (Icons.merge_type, 0xFF24292F),
+    'github-gist': (Icons.code, 0xFF24292F),
+    'cloud-drive': (Icons.cloud_outlined, 0xFF1A73E8),
+    'rss': (Icons.rss_feed, 0xFFF26522),
+    'spotlight': (Icons.manage_search, 0xFF6E6E73),
+    'clawgallery': (Icons.photo_library_outlined, 0xFF00897B),
+    'hister': (Icons.history, 0xFF0E7490),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, rgb) = _spec[id] ?? (Icons.power_outlined, 0xFF607D8B);
+    final color = Color(rgb);
+    return Opacity(
+      opacity: dim ? 0.45 : 1,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(size * 0.3)),
+        alignment: Alignment.center,
+        child: Icon(icon, size: size * 0.58, color: Colors.white),
+      ),
+    );
+  }
 }

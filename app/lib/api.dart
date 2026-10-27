@@ -228,12 +228,14 @@ class WorklogApi {
 
   /// Creates or updates a connection; the server then syncs the external sources. Only env-var
   /// names go in [connector] — the server refuses token values (400 → [ApiException]).
-  Future<void> saveDatasource(String name, {bool? enabled, String? description, Map<String, Object?>? connector, String? type}) async {
+  Future<void> saveDatasource(String name, {bool? enabled, String? description, Map<String, Object?>? connector, String? type, Map<String, String>? secrets}) async {
     await _send('PUT', '/datasources/${Uri.encodeComponent(name)}', {
       if (enabled != null) 'enabled': enabled,
       if (description != null) 'description': description,
       if (connector != null) 'connector': connector,
       if (type != null) 'type': type,
+      // token values by env-var name; the server keeps them in secrets.json (0600) and never returns them
+      if (secrets != null && secrets.isNotEmpty) 'secrets': secrets,
     });
   }
 

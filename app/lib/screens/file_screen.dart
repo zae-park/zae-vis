@@ -26,6 +26,7 @@ class FileScreen extends StatelessWidget {
       body: AsyncView<WorklogFile>(
         load: () => api.file(path),
         builder: (context, f, _) => Readable(
+          maxWidth: 1100,
           child: SingleChildScrollView(padding: const EdgeInsets.all(20), child: MarkdownView(f.markdown)),
         ),
       ),

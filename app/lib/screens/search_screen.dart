@@ -95,8 +95,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final ask = _mode == SearchMode.ask;
     return Readable(
-      // the conversation's source panel needs the width: no reading-column limit in 질문 mode
-      maxWidth: ask ? double.infinity : 860,
+      // results use the whole width; the conversation's source panel needs it too
       child: Column(
         children: [
           Padding(

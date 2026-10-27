@@ -10,6 +10,7 @@ import '../shortcuts.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
+import '../widgets/task_dialog.dart';
 import 'review_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -40,43 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Runs `zaevis <args>` from the app bundle and shows its output live.
   Future<void> _runTask(String title, List<String> args, {List<String>? then}) async {
-    final lines = ValueNotifier<List<String>>(const []);
-    final done = ValueNotifier<String?>(null);
-    void add(String l) => lines.value = [...lines.value, l];
-    () async {
-      try {
-        await widget.backend!.run(args).forEach(add);
-        if (then != null) await widget.backend!.run(then).forEach(add);
-        done.value = '완료';
-      } catch (e) {
-        done.value = '실패: $e';
-      }
-    }();
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: 600,
-          height: 320,
-          child: ValueListenableBuilder<List<String>>(
-            valueListenable: lines,
-            builder: (_, l, __) => ListView(reverse: true, children: [
-              for (final line in l.reversed) Text(line, style: ZaevisTheme.mono.copyWith(fontSize: 12)),
-            ]),
-          ),
-        ),
-        actions: [
-          ValueListenableBuilder<String?>(
-            valueListenable: done,
-            builder: (context, d, _) => d == null
-                ? const Padding(padding: EdgeInsets.all(8), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
-                : TextButton(onPressed: () => Navigator.pop(context), child: Text('$d · 닫기')),
-          ),
-        ],
-      ),
-    );
+    await runBackendTask(context, widget.backend!, title, args, then: then);
     if (mounted) _reload();
   }
 
@@ -98,7 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
       body: Readable(
-        maxWidth: 720,
+        maxWidth: 900,
         child: ListView(padding: const EdgeInsets.all(16), children: [
           Text('서버', style: t.titleMedium),
           const SizedBox(height: 8),

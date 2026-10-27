@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig, stateDir } from "./config.ts";
 import { scheduleStatus } from "./schedule.ts";
 import { exec, parseSetupArgs, runSetup, which } from "./setup.ts";
+import { extBinDir, extNpmBinDir, findBin, installPlan } from "./datasources.ts";
 
 const WIN = process.platform === "win32";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -74,6 +75,7 @@ ${B("관리")}
   zaevis build web|app        앱 빌드만
   zaevis start | stop | status | logs   백그라운드 서버 관리
   zaevis ext install whisperx  녹음 전사 확장 설치 (<상태 폴더>/ext/whisperx)
+  zaevis ext install <cli>     외부 소스 CLI 설치 (slacrawl·notcrawl·mailcrawl… → <상태 폴더>/ext/npm, rclone·hister → brew)
   zaevis doctor               필요한 도구 점검`);
 }
 
@@ -367,6 +369,56 @@ async function extInstallWhisperx(): Promise<void> {
   say("  화자 구분이 필요하면 HF_TOKEN 환경변수를 설정하세요 (pyannote 모델 동의 필요).");
 }
 
+/** Installs an external datasource CLI (see datasources.ts TEMPLATES): npm into $STATE/ext/npm, or brew. */
+async function extInstallCli(bin: string): Promise<void> {
+  const already = findBin(bin);
+  if (already) {
+    say(`${G("✓")} ${bin} 이미 설치됨: ${already}`);
+    return;
+  }
+  const plan = installPlan(bin);
+  if (plan.kind === "none") die(plan.reason);
+  if (plan.kind === "npm") {
+    mkdirSync(plan.prefix, { recursive: true });
+    info(`${bin} 설치 중 (npm → ${plan.prefix})`);
+    await exec(plan.npm, ["install", "-g", "--prefix", plan.prefix, "--no-fund", "--no-audit", plan.pkg], { env: { ...process.env, PATH: `${dirname(plan.npm)}${delimiter}${process.env.PATH ?? ""}` } });
+  } else if (plan.kind === "brew") {
+    info(`${bin} 설치 중 (brew install ${plan.pkg})`);
+    await exec(plan.brew, ["install", plan.pkg], { env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "1" } });
+    if (bin === "hister") await exec(plan.brew, ["services", "start", "hister"]).catch(() => say(D("brew services start hister 는 직접 실행하세요")));
+  } else {
+    // a GitHub release tarball: look up the latest version, download the platform asset, unpack into ext/bin
+    info(`${bin} 최신 릴리스 확인 중 (${plan.repo})`);
+    const rel = (await (await fetch(`https://api.github.com/repos/${plan.repo}/releases/latest`, { headers: { "user-agent": "zaevis" } })).json()) as { tag_name?: string; assets?: Array<{ name: string; browser_download_url: string }> };
+    const version = (rel.tag_name ?? "").replace(/^v/, "");
+    const wanted = plan.asset(version);
+    const asset = rel.assets?.find((a) => a.name === wanted) ?? rel.assets?.find((a) => wanted !== null && a.name.endsWith(wanted.replace(/^[^-]+-[^-]+-/, "")));
+    if (!asset) die(`릴리스에서 ${wanted} 를 찾지 못했습니다: ${rel.assets?.map((a) => a.name).join(", ") ?? "자산 없음"}`);
+    mkdirSync(plan.dir, { recursive: true });
+    const tgz = join(plan.dir, asset.name);
+    info(`${asset.name} 내려받는 중`);
+    writeFileSync(tgz, Buffer.from(await (await fetch(asset.browser_download_url)).arrayBuffer()));
+    await exec("tar", ["-xzf", tgz, "-C", plan.dir]);
+    unlinkSync(tgz);
+    // the binary may sit in a versioned folder inside the tarball
+    for (const entry of readdirSync(plan.dir)) {
+      const nested = join(plan.dir, entry, bin);
+      if (entry !== bin && existsSync(nested)) {
+        try {
+          unlinkSync(join(plan.dir, bin));
+        } catch {}
+        symlinkSync(nested, join(plan.dir, bin));
+      }
+    }
+    const b = join(plan.dir, bin);
+    if (existsSync(b)) await exec("chmod", ["+x", b]);
+  }
+  const found = findBin(bin);
+  if (!found) die(`${bin} 설치가 끝났지만 실행 파일을 찾지 못했습니다 (${extBinDir()}, ${extNpmBinDir()} 확인)`);
+  say(`${G("✓")} ${bin} 설치 완료: ${found}`);
+  say("  이제 그 도구에서 로그인·수집을 한 번 한 뒤 앱의 연결 탭에서 연결하세요.");
+}
+
 async function doctor(): Promise<void> {
   let ok = true;
   const check = (name: string, hint: string, versionArgs = ["--version"]) => {
@@ -471,7 +523,8 @@ async function main(argv: string[]): Promise<void> {
     }
     case "ext":
       if (rest[0] === "install" && rest[1] === "whisperx") return extInstallWhisperx();
-      die("사용법: zaevis ext install whisperx");
+      if (rest[0] === "install" && rest[1]) return extInstallCli(rest[1]);
+      die("사용법: zaevis ext install whisperx | <외부 소스 CLI: slacrawl, notcrawl, rclone …>");
       return;
     case "start":
       await serverStart();

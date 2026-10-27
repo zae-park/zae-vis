@@ -208,7 +208,7 @@ WorklogApi _fakeApi() => WorklogApi(
                 },
               ],
             });
-          case '/api/datasources/obsidian' when req.method == 'PUT' || req.method == 'DELETE':
+          case '/api/datasources/obsidian' || '/api/datasources/github' when req.method == 'PUT' || req.method == 'DELETE':
             posted.add(req);
             if (req.method == 'PUT') mockObsidianConfigured = true;
             return _json({'ok': true, 'syncing': true});
@@ -564,7 +564,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('수집').first);
+    await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
 
     expect(find.text('git 커밋'), findsOneWidget);
@@ -735,7 +735,7 @@ void main() {
     posted.clear();
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('수집').first);
+    await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(find.text('커넥터 추가').hitTestable(), find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
     await tester.tap(find.text('커넥터 추가'));
@@ -764,7 +764,7 @@ void main() {
     mockObsidianConfigured = false;
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('수집').first);
+    await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
     final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
     await tester.dragUntilVisible(find.text('외부 소스 (AutoRAG)').hitTestable(), list, const Offset(0, -250));
@@ -777,7 +777,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('npm install -g slacrawl'), findsOneWidget);
     expect(find.text('설치 명령 복사'), findsOneWidget);
-    expect(find.text('연결'), findsNothing, reason: 'no connect form without the CLI');
+    expect(find.widgetWithText(FilledButton, '연결'), findsNothing, reason: 'no connect form without the CLI');
 
     // connect Obsidian
     await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));
@@ -785,8 +785,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('연결 안 됨'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextField, '볼트 폴더 *'), '/tmp/vault');
-    await tester.dragUntilVisible(find.text('연결').hitTestable(), list, const Offset(0, -250));
-    await tester.tap(find.text('연결'));
+    await tester.dragUntilVisible(find.widgetWithText(FilledButton, '연결').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.widgetWithText(FilledButton, '연결'));
     await tester.pumpAndSettle();
 
     final put = posted.singleWhere((r) => r.url.path == '/api/datasources/obsidian');
@@ -805,7 +805,7 @@ void main() {
     mockObsidianConfigured = true;
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('수집').first);
+    await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
     final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
     await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));
@@ -819,12 +819,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(posted.last.url.path, '/api/datasources/obsidian/sync');
 
-    // the GitHub card warns about the missing token env var and never asks for the value
+    // the GitHub card asks for the token value separately; it goes out as `secrets` under the env name
     await tester.dragUntilVisible(find.text('GitHub 이슈·PR').hitTestable(), list, const Offset(0, -250));
     await tester.tap(find.text('GitHub 이슈·PR'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('환경 변수 GITHUB_TOKEN이(가) 서버에 없습니다'), findsOneWidget);
     expect(tester.widget<TextField>(find.widgetWithText(TextField, '토큰 환경 변수 이름')).controller!.text, 'GITHUB_TOKEN');
+    final tokenField = find.widgetWithText(TextField, '토큰 값 (GITHUB_TOKEN)');
+    expect(tokenField, findsOneWidget);
+    expect(tester.widget<TextField>(tokenField).obscureText, isTrue);
+    await tester.enterText(find.widgetWithText(TextField, '저장소 *'), 'zae-park/zaevis');
+    await tester.enterText(tokenField, 'ghp_secret');
+    await tester.dragUntilVisible(find.widgetWithText(FilledButton, '연결').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.widgetWithText(FilledButton, '연결'));
+    await tester.pumpAndSettle();
+    final gh = posted.lastWhere((r) => r.url.path == '/api/datasources/github');
+    final ghBody = jsonDecode(gh.body) as Map<String, dynamic>;
+    expect(ghBody['secrets'], {'GITHUB_TOKEN': 'ghp_secret'});
+    expect(ghBody['connector']['tokenEnv'], 'GITHUB_TOKEN');
+    expect(jsonEncode(ghBody['connector']), isNot(contains('ghp_secret')));
 
     await tester.dragUntilVisible(find.text('연결 삭제').hitTestable(), list, const Offset(0, -250));
     await tester.tap(find.text('연결 삭제'));
