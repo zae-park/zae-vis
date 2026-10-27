@@ -25,6 +25,7 @@
 | GET | `/api/projects` · `/api/projects/:slug` | 프로젝트 요약 목록 · 프로젝트 본문 |
 | GET | `/api/summaries` · `/api/summaries/:YYYY-MM` | 월 목록 · `{ month, markdown }` |
 | GET | `/api/search?q=&topK=` | `{ ok, query, hits[] }` (AutoRAG Lite). hit마다 `context`(출처·날짜·섹션·작성자·매치 단어)와 가장 잘 맞는 문단 `snippet`, 상위 대비 점수가 낮으면 `weak` |
+| GET / POST | `/api/ask` | 질문(RAG): GET은 쓸 수 있는 에이전트(`agents[]`, 정리와 같은 감지), 답할 에이전트 `chosen`, 진행 중 `running{q,startedAt,agent}`, 마지막 답 `last`. POST `{ q, topK? (기본 10, 최대 20) }` → `{ q, answer, sources[{ n, path, label, passage }], agent, ms, at }`. 검색 상위 문단(약한 일치 제외, 발췌 1000자)을 `[n]`으로 번호 매겨 "발췌만 근거로 한국어로, 문장마다 [n]" 프롬프트로 에이전트에 넘긴다(`server/src/ask.ts`). CLI는 worklog를 cwd로 읽기 전용(claude `--tools ""`, codex `--sandbox read-only`, gemini `--yolo` 없이)으로 실행. 에이전트 없음·실행 중 409, 질문 없음 400, 검색 결과 없음 404, 검색·에이전트 실패 502 |
 | GET | `/api/file?path=` | worklog 안의 markdown 원문 `{ path, markdown }` (검색 결과 원문 보기) |
 | GET / POST | `/api/index` | 색인 상태(+ `embedding`: 로컬 임베딩 데몬 상태 off/starting/ready/failed) · 색인 갱신 시작 (`{ force?: true }`) |
 | POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
@@ -64,7 +65,7 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 ## CLI 명령 추가
 
 `bin/zaevis`(bash)가 명령을 나누고, 서버 API를 쓰는 명령은 `server/src/cli.ts`의 `run()`으로 넘깁니다.
-새 조회 명령은 `run()`에 case를 추가하고, `bin/zaevis`의 `search|s|log|…` 목록에 이름을 더하면 됩니다.
+새 조회 명령은 `run()`에 case를 추가하고, `server/src/zaevis.ts`의 `search|s|ask|log|…` 목록에 이름을 더하면 됩니다.
 
 ## 데이터소스 커넥터 추가
 

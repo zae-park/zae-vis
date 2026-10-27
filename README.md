@@ -33,7 +33,7 @@
 
 | 경로 | 내용 |
 |---|---|
-| `bin/zaevis` | CLI. `zaevis run cli` · `run web` · `run app`, `zaevis search`, `zaevis setup` 등 |
+| `bin/zaevis` | CLI. `zaevis run cli` · `run web` · `run app`, `zaevis search`, `zaevis ask`, `zaevis setup` 등 |
 | `kit/setup.sh` | worklog 폴더 생성, Claude 지침·예약 작업 프롬프트 생성, AutoRAG 색인 초기화 |
 | `kit/templates/worklog/` | worklog 규칙(README)과 프로젝트 템플릿 |
 | `kit/claude/` | 세션 노트 지침(`CLAUDE.md`), 주간·월간 정리 예약 작업 프롬프트 |
@@ -105,6 +105,7 @@ API 서버(`127.0.0.1:4710`)는 필요할 때 백그라운드로 자동 실행�
 
 ```bash
 zaevis search GA4 캠페인 매핑
+zaevis ask "GA4 매핑은 왜 미뤘지?"   # 검색 상위 문단을 근거로 답 + 출처 [n] (아래 "질문" 참고)
 zaevis log                # 이번 달 로그 (zaevis log 2026-09)
 zaevis projects
 zaevis summary            # 최근 월간 정리
@@ -130,6 +131,13 @@ zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지
 
 모든 원본은 기록 전에 토큰·비밀번호·API 키를 가립니다. 설정은 앱의 **수집** 화면이나 `~/.zaevis/sources.json`에서 바꿉니다.
 Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 않습니다. 필요하면 내보낸 대화를 전사본처럼 넣거나 사용자 커넥터를 만드세요.
+
+### 질문 (기록을 근거로 답하기)
+
+검색 탭 위의 **검색 / 질문** 전환을 질문으로 두고 물어보면, 같은 검색으로 고른 상위 문단(기본 10개)만 근거로 한국어 답을 써 줍니다.
+답의 각 문장 끝에 [번호]가 붙고, 번호를 누르면 아래의 해당 발췌로 이동하며, 발췌를 누르면 원문이 열립니다. 근거가 없으면 "기록에서 근거를 찾지 못했습니다"라고 답합니다.
+답을 쓰는 것은 주간 정리와 같은 에이전트입니다: 이 컴퓨터에 설치된 **Claude Code · Codex · Gemini CLI**(내 구독으로, 파일을 읽기만 하는 모드) 또는 저장된 **OpenRouter 키**.
+설정 → 정리 (지식화)의 에이전트·모델 선택을 그대로 따르고, 쓸 수 있는 것이 없으면 설정으로 안내합니다. 터미널에서는 `zaevis ask "질문"`.
 
 ### 정리 결과 검토
 

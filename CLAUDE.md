@@ -39,6 +39,7 @@
 - 알림: `server/src/notify.ts` — macOS `osascript display notification`, Windows PowerShell WinRT 토스트, Linux notify-send. `config.notifications`로 끔. 호출처: 정리 끝(제안 준비/완료/실패), `daily.ts` 수집 실패, 제안 적용, 전사 완료/실패
 - 에이전트 세션 소스(`server/src/sources/agents.ts`, 이름 `agent-sessions`)가 claude-code 소스를 대체: Claude Code·Codex CLI(`~/.codex/sessions` rollout JSONL)·Gemini CLI(`~/.gemini/tmp/**/chats`)·ChatGPT 내보내기(`conversations.json`)를 하루 파일에 `## <도구> · HH:MM–HH:MM 제목`으로 합친다. 세션 요약은 요청→응답 쌍(`replies[i]`는 `prompts[i]`에 대한 마지막 텍스트 답, `replyGist`로 400자), 수정 파일, 명령. 옵션 `kind: "bool"` + `help`
 - 전역 단축키 변경: 서버 `settings.hotkey`에 `"meta+shift+space"` 꼴로 저장(정규식 `^[a-z0-9+]{0,60}$`). 앱 `shortcuts.dart`의 `HotkeySpec`(parse/label/fromEvent, 수정키 없는 키 거부)·`GlobalHotkey.register(cb, spec)`/`update(spec)`. 홈 셸이 시작 때 설정을 읽어 등록. 설정의 녹화 대화상자는 hotkey_manager의 HotKeyRecorder 대신 `Focus.onKeyEvent`로 직접 받는다(수정키 단독 입력을 걸러야 해서)
+- 질문(RAG, 2026-10-27): `server/src/ask.ts`. `AskRunner.ask()`가 검색(`search(q, topK+5, passageChars=1000)`)→약한 일치 제외 상위 문단을 `[n]` 번호로 묶어 프롬프트(발췌만 근거, 문장마다 [n], 없으면 모른다고)→정리와 같은 `detectAgents/pickAgent`(설정 `digest.agent/model` 공용)로 답을 받는다. CLI는 읽기 전용 인자(`askCliArgs`: claude `--tools "" --max-turns 1`, codex `--sandbox read-only -o 파일`, gemini `-p`만)로 worklog cwd에서 stdout만 답으로(`execCli`는 stdout/stderr 분리). API `GET/POST /api/ask`, CLI `zaevis ask`, 앱 검색 화면 상단 SegmentedButton 검색/질문 → `_AnswerCard`([n]은 `citationSpan`으로 눌러 `_SourceCard`로 스크롤·원문 열기), 에이전트 없으면 설정 열기. 테스트는 `AskRunner({ exec, fetchImpl })` 주입
 - 검색 필터: 앱이 `topK=40`으로 받아 `context.kind`(출처)와 `context.date`(기간: 7일·30일·이번 달, 월 파일은 말일 기준, 날짜 없는 히트는 '전체'에서만)로 거른다. `SearchPeriod`·`SearchScreen.clock`(테스트용 시계)
 - 색인 진행: AutoRAG `status.progress`(`phase: parsed|minsync|datasources|jikji|everything|fsearch|finalizing`, `sourceFiles.total`, `parsedCounts.scanned`, `minsync.synced`)를 `IndexProgress.fraction`(읽기 60%·임베딩 30%·나머지 10%)으로 합쳐 막대 하나로. 색인 중엔 2초 폴링
 - 커넥터 추가 대화상자: `ConnectorPreset.all`(폴더의 노트 `find -newermt {fromDate}`, macOS 캘린더 icalBuddy, 직접 입력). 추가하면 그 소스만 바로 수집하고 카드를 펼쳐 결과를 보여 준다. 명령 치환에 `{fromDate}`/`{toDate}` 추가
@@ -47,7 +48,7 @@
 남은 일
 - Claude Code 세션엔 손쉬운 사용·화면 녹화 권한이 없어 GUI 클릭·스크린샷은 자동화하지 못했다. 마법사 버튼 클릭은 사람이 한 번 눌러 확인할 것
 - shell-history는 `setopt EXTENDED_HISTORY`가 없는 zsh 이력에서 시각이 없어 실패한다 (안내 메시지는 나온다)
-- 검색은 BM25+로컬 임베딩의 하이브리드 **랭킹**까지다. 질문에 답을 쓰는 RAG(검색한 문단을 로컬 에이전트 CLI/OpenRouter에 넣어 답+출처)는 아직 없다 — 다음 작업 후보
+- 질문 모드는 격리 환경(ZAEVIS_HOME=/tmp/zv-test, Claude Code)에서만 실제 확인했다. Codex·Gemini는 이 Mac에 없어 인자만 테스트로 고정했으니 설치된 곳에서 한 번 돌려볼 것
 
 ## 규칙
 - `~/jaepark` 상위 폴더는 회사 저장소 원격에 연결돼 있다. zaevis·worklog는 `.git/info/exclude`로 제외되어 있으니 그 저장소에 커밋하지 말 것.
