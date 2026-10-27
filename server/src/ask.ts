@@ -19,7 +19,7 @@ import { stateDir } from "./config.ts";
 import { spawn } from "node:child_process";
 import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
-import { DEFAULT_OPENROUTER_MODEL, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
+import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
@@ -229,10 +229,10 @@ export class AskRunner {
    * `conversationId` the question continues that conversation (404-ish `missing_query`
    * is not raised for an unknown id: a new conversation starts instead).
    */
-  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model">; worklogDir: string; topK?: number; conversationId?: string }): Promise<AskOutcome> {
+  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model">; worklogDir: string; topK?: number; conversationId?: string; /** all detected agents, so the no-agent message can name one that only needs a login */ agents?: AgentInfo[] }): Promise<AskOutcome> {
     const question = q.trim();
     if (!question) return { ok: false, status: 400, error: "missing_query", message: "질문을 입력하세요." };
-    if (!opts.agent) return { ok: false, status: 409, error: "no_agent", message: NO_AGENT_MESSAGE };
+    if (!opts.agent) return { ok: false, status: 409, error: "no_agent", message: opts.agents ? `답을 쓸 ${noAgentReason(opts.agents)}` : NO_AGENT_MESSAGE };
     if (this.running) return { ok: false, status: 409, error: "busy", message: `아직 답을 만드는 중입니다: "${this.running.q.slice(0, 40)}"` };
     const topK = Math.min(Math.max(opts.topK ?? DEFAULT_TOP_K, 1), MAX_TOP_K);
     const started = Date.now();

@@ -87,6 +87,34 @@ class _CollectScreenState extends State<CollectScreen> {
     await _load();
   }
 
+  /// zsh only keeps a time per command with EXTENDED_HISTORY. This edits the user's own ~/.zshrc,
+  /// so it asks first; returns the note the card shows afterwards, or null when cancelled.
+  Future<String?> _enableTimestamps() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('셸 설정에 한 줄 추가'),
+        content: const Text('~/.zshrc(또는 \$ZDOTDIR/.zshrc) 끝에 다음 한 줄을 붙입니다. 이미 켜져 있으면 그대로 둡니다.\n\n'
+            'setopt EXTENDED_HISTORY  # zaevis\n\n'
+            '새로 여는 터미널부터 명령마다 시각이 남고, 그때부터 수집됩니다. 이미 열려 있는 터미널의 명령은 그대로 시각 없이 남습니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('추가')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return null;
+    try {
+      final r = await widget.api.enableShellTimestamps();
+      final note = r.changed ? '${r.file}에 추가했습니다. 새 터미널부터 모입니다.' : '${r.file}에 이미 켜져 있습니다. 새 터미널부터 모입니다.';
+      if (mounted) toast(context, note);
+      return note;
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) return ErrorPane(error: _error!, onRetry: _load);
@@ -166,6 +194,7 @@ class _CollectScreenState extends State<CollectScreen> {
                 onCollect: () => _act(() => widget.api.collect(only: [src.name]), done: '${src.title} 수집을 시작했습니다'),
                 onSave: (settings) => _act(() => widget.api.saveSourceSettings(src.name, settings), done: '저장했습니다'),
                 onRemove: src.builtin ? null : () => _act(() => widget.api.removeSource(src.name), done: '삭제했습니다'),
+                onEnableTimestamps: src.name == 'shell-history' ? _enableTimestamps : null,
               ),
             ),
           const SizedBox(height: 4),
@@ -274,7 +303,7 @@ class _InboxCard extends StatelessWidget {
 }
 
 class _SourceCard extends StatefulWidget {
-  const _SourceCard({super.key, required this.source, required this.busy, required this.onToggle, required this.onCollect, required this.onSave, this.onRemove, this.initiallyExpanded = false});
+  const _SourceCard({super.key, required this.source, required this.busy, required this.onToggle, required this.onCollect, required this.onSave, this.onRemove, this.onEnableTimestamps, this.initiallyExpanded = false});
   final SourceInfo source;
   final bool busy;
   final bool initiallyExpanded;
@@ -283,12 +312,16 @@ class _SourceCard extends StatefulWidget {
   final void Function(Map<String, Object?>) onSave;
   final VoidCallback? onRemove;
 
+  /// shell-history only: turns zsh timestamps on (after confirming) and resolves to the note to show.
+  final Future<String?> Function()? onEnableTimestamps;
+
   @override
   State<_SourceCard> createState() => _SourceCardState();
 }
 
 class _SourceCardState extends State<_SourceCard> {
   final Map<String, TextEditingController> _fields = {};
+  String? _timestampsNote;
 
   TextEditingController _field(SourceOption o) =>
       _fields.putIfAbsent(o.key, () => TextEditingController(text: widget.source.optionText(o)));
@@ -339,6 +372,21 @@ class _SourceCardState extends State<_SourceCard> {
         children: [
           Text(s.description, style: t.bodySmall),
           const SizedBox(height: 8),
+          if (widget.onEnableTimestamps != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 6, children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final note = await widget.onEnableTimestamps!();
+                    if (note != null && mounted) setState(() => _timestampsNote = note);
+                  },
+                  icon: const Icon(Icons.schedule, size: 18),
+                  label: const Text('시각 기록 켜기'),
+                ),
+                Text(_timestampsNote ?? 'zsh에 setopt EXTENDED_HISTORY를 켭니다 (~/.zshrc에 한 줄). 새 터미널부터 모입니다.', style: t.bodySmall?.copyWith(color: _timestampsNote == null ? null : scheme.primary)),
+              ]),
+            ),
           for (final o in s.options)
             if (o.kind == 'bool')
               SwitchListTile(

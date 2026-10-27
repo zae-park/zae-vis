@@ -15,6 +15,7 @@ final posted = <http.Request>[];
 bool running = false;
 int statusPolls = 0;
 bool empty = false;
+bool signedOut = false;
 Map<String, dynamic> setting = {
   'daily': {'enabled': false, 'days': ['mon', 'tue', 'wed', 'thu', 'fri']},
   'weekly': {'enabled': false, 'day': 'mon'},
@@ -45,6 +46,11 @@ WorklogApi _fakeApi() => WorklogApi(
                     ],
                   },
             'defaults': {'daily': '2026-10-27', 'weekly': '2026-W43', 'monthly': '2026-09'},
+            'chosen': signedOut ? null : 'claude',
+            'agents': [
+              {'id': 'claude', 'title': 'Claude Code', 'available': true, 'detail': '2.1.304', 'loggedIn': !signedOut, 'loginHint': '터미널에서 claude login'},
+              {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
+            ],
           });
         }
         if (path.startsWith('/api/reports/') && req.method == 'GET') {
@@ -87,6 +93,21 @@ void main() {
     running = false;
     statusPolls = 0;
     empty = false;
+    signedOut = false;
+  });
+
+  testWidgets('reports: the header names the agent that writes them, or the login a CLI needs', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(_fakeApi()));
+    await tester.pumpAndSettle();
+    expect(find.text('리포트는 Claude Code가 씁니다 · 2.1.304'), findsOneWidget);
+
+    signedOut = true;
+    await tester.pumpWidget(_app(_fakeApi()));
+    await tester.pumpAndSettle();
+    expect(find.text('Claude Code: 로그인 필요: 터미널에서 claude login'), findsOneWidget);
   });
 
   test('periods: ISO weeks and the "지금 만들기" choices', () {

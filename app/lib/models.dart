@@ -646,13 +646,29 @@ class KeyCheck {
 
 /// An agent the weekly digest can run with: a CLI on this Mac (user's own subscription) or the OpenRouter key.
 class AgentInfo {
-  const AgentInfo({required this.id, required this.title, required this.available, required this.detail});
-  factory AgentInfo.fromJson(Json j) =>
-      AgentInfo(id: _str(j['id']), title: _str(j['title']), available: j['available'] == true, detail: _str(j['detail']));
+  const AgentInfo({required this.id, required this.title, required this.available, required this.detail, this.loggedIn, this.loginHint});
+  factory AgentInfo.fromJson(Json j) => AgentInfo(
+        id: _str(j['id']),
+        title: _str(j['title']),
+        available: j['available'] == true,
+        detail: _str(j['detail']),
+        loggedIn: _boolOrNull(j['loggedIn']),
+        loginHint: _strOrNull(j['loginHint']),
+      );
   final String id; // claude | codex | gemini | openrouter
   final String title;
   final bool available;
   final String detail;
+
+  /// A CLI's sign-in state: false = installed but it would answer "Not logged in"; null = unknown / not a CLI.
+  final bool? loggedIn;
+  final String? loginHint;
+
+  /// Installed, but the server found it signed out — the digest, 질문 and reports skip it until the user logs in.
+  bool get needsLogin => available && loggedIn == false;
+
+  /// "로그인 필요: 터미널에서 claude login"
+  String get loginNote => '로그인 필요: ${loginHint ?? '터미널에서 로그인'}';
 }
 
 class DigestRun {
@@ -1176,7 +1192,7 @@ class ReportSettings {
 
 /// GET /api/reports.
 class ReportsStatus {
-  const ReportsStatus({required this.settings, required this.reports, this.running, this.lastRun = const {}, this.defaults = const {}});
+  const ReportsStatus({required this.settings, required this.reports, this.running, this.lastRun = const {}, this.defaults = const {}, this.agents = const [], this.chosen});
   factory ReportsStatus.fromJson(Json j) {
     final r = j['reports'] is Json ? j['reports'] as Json : const <String, dynamic>{};
     final last = j['lastRun'] is Json ? j['lastRun'] as Json : const <String, dynamic>{};
@@ -1190,12 +1206,19 @@ class ReportsStatus {
       running: run is Json ? ReportRunning(kind: _str(run['kind']), period: _str(run['period']), agent: _strOrNull(run['agent'])) : null,
       lastRun: {for (final e in last.entries) if (e.value is Json) e.key: ReportRun.fromJson(e.value as Json)},
       defaults: {for (final e in defaults.entries) e.key: _str(e.value)},
+      agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
+      chosen: _strOrNull(j['chosen']),
     );
   }
   final ReportSettings settings;
   final Map<String, List<ReportEntry>> reports;
   final ReportRunning? running;
   final Map<String, ReportRun> lastRun;
+
+  /// The agents the server found (same list as the digest) and which one would write a report now.
+  final List<AgentInfo> agents;
+  final String? chosen;
+  AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
 
   /// What a run without a period would make now, per kind.
   final Map<String, String> defaults;

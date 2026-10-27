@@ -1,6 +1,8 @@
 // zsh history. Needs EXTENDED_HISTORY (": <epoch>:<duration>;<command>") for timestamps.
 
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { expandHome } from "../config.ts";
 import { redact } from "../redact.ts";
 import { addTo, clip, dayKey, hhmm, type Source } from "./types.ts";
@@ -19,6 +21,45 @@ export function unmetafy(buf: Buffer): string {
 }
 
 export type HistoryEntry = { at: Date; command: string };
+
+// ── turning timestamps on ──────────────────────────────────────────────────────
+
+/** The line the app appends; the comment marks it as ours. */
+export const EXTENDED_HISTORY_LINE = "setopt EXTENDED_HISTORY  # zaevis";
+
+/** zsh reads ~/.zshrc, or $ZDOTDIR/.zshrc when that is set. */
+export function zshrcPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.ZDOTDIR || env.HOME || homedir(), ".zshrc");
+}
+
+/** True when an uncommented `setopt` (or `set -o`) already turns EXTENDED_HISTORY on. zsh ignores case and underscores in option names. */
+export function hasExtendedHistory(text: string): boolean {
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim();
+    const m = /^(?:setopt|set\s+-o)\s+(.+)$/i.exec(line);
+    if (!m) continue;
+    if (m[1].split(/\s+/).some((opt) => opt.replace(/_/g, "").toLowerCase() === "extendedhistory")) return true;
+  }
+  return false;
+}
+
+/**
+ * Appends `setopt EXTENDED_HISTORY  # zaevis` to the user's zshrc (created when missing) so new
+ * terminals record a time with every command. Leaves the file alone when the option is already on.
+ */
+export async function enableExtendedHistory(env: NodeJS.ProcessEnv = process.env): Promise<{ file: string; changed: boolean }> {
+  const file = zshrcPath(env);
+  let text = "";
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    text = "";
+  }
+  if (hasExtendedHistory(text)) return { file, changed: false };
+  const sep = text.length === 0 || text.endsWith("\n") ? "" : "\n";
+  await appendFile(file, `${sep}${EXTENDED_HISTORY_LINE}\n`);
+  return { file, changed: true };
+}
 
 export function parseZshHistory(text: string): { entries: HistoryEntry[]; extended: boolean } {
   const entries: HistoryEntry[] = [];
@@ -52,7 +93,7 @@ export const shellHistorySource: Source = {
     }
     const { entries, extended } = parseZshHistory(unmetafy(buf));
     if (!extended) {
-      throw new Error("히스토리에 시각이 없습니다. ~/.zshrc 에 'setopt EXTENDED_HISTORY' 를 추가하면 그 뒤부터 수집됩니다.");
+      throw new Error("히스토리에 시각이 없습니다. 카드의 '시각 기록 켜기'를 누르거나 ~/.zshrc 에 'setopt EXTENDED_HISTORY' 를 추가하면 새 터미널부터 수집됩니다.");
     }
     const byDay: Record<string, string[]> = {};
     let n = 0;

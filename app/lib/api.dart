@@ -222,6 +222,13 @@ class WorklogApi {
     await _send('DELETE', '/sources/${Uri.encodeComponent(name)}');
   }
 
+  /// Adds `setopt EXTENDED_HISTORY` to the user's zshrc so new terminals record a time per command.
+  /// `changed` is false when the option was already on.
+  Future<({String file, bool changed})> enableShellTimestamps() async {
+    final j = await _send('POST', '/sources/shell-history/enable-timestamps');
+    return (file: (j['file'] as String?) ?? '~/.zshrc', changed: j['changed'] == true);
+  }
+
   Future<void> collect({List<String>? only}) async {
     await _send('POST', '/collect', {if (only != null) 'sources': only});
   }

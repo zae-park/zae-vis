@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { redact } from "../src/redact.ts";
 import { parseGitLog } from "../src/sources/git.ts";
 import { renderSession, summarize, userText } from "../src/sources/claudeCode.ts";
-import { parseZshHistory, unmetafy } from "../src/sources/shellHistory.ts";
+import { enableExtendedHistory, hasExtendedHistory, parseZshHistory, unmetafy, zshrcPath } from "../src/sources/shellHistory.ts";
 import { splitByDate } from "../src/sources/command.ts";
 import { isStale, labelFor, parseTime, renderPlist } from "../src/schedule.ts";
 
@@ -179,4 +179,30 @@ test("collect(): writes day files, appends for event sources, records state; whi
   delete process.env.ZAEVIS_HOME;
   delete process.env.ZAEVIS_WHISPERX;
   void utimes;
+});
+
+test("shell-history: enableExtendedHistory appends one line to the zshrc in HOME (or ZDOTDIR), once", async () => {
+  const home = await mkdtemp(join(tmpdir(), "zv-home-"));
+  const env = { HOME: home };
+  assert.equal(zshrcPath(env), join(home, ".zshrc"));
+  // no zshrc yet: created with just our line
+  let r = await enableExtendedHistory(env);
+  assert.deepEqual(r, { file: join(home, ".zshrc"), changed: true });
+  assert.equal(await readFile(r.file, "utf8"), "setopt EXTENDED_HISTORY  # zaevis\n");
+  // already on: untouched
+  r = await enableExtendedHistory(env);
+  assert.equal(r.changed, false);
+  assert.equal(await readFile(r.file, "utf8"), "setopt EXTENDED_HISTORY  # zaevis\n");
+  // an existing file without a trailing newline gets the line on its own line
+  await writeFile(join(home, ".zshrc"), "export PATH=$HOME/bin:$PATH\n# setopt EXTENDED_HISTORY (commented out)\nalias ll='ls -l'");
+  r = await enableExtendedHistory(env);
+  assert.equal(r.changed, true);
+  assert.equal(await readFile(r.file, "utf8"), "export PATH=$HOME/bin:$PATH\n# setopt EXTENDED_HISTORY (commented out)\nalias ll='ls -l'\nsetopt EXTENDED_HISTORY  # zaevis\n");
+  // ZDOTDIR wins over HOME
+  const zdot = await mkdtemp(join(tmpdir(), "zv-zdot-"));
+  r = await enableExtendedHistory({ HOME: home, ZDOTDIR: zdot });
+  assert.deepEqual(r, { file: join(zdot, ".zshrc"), changed: true });
+  // the option in its other spellings counts as on
+  for (const t of ["setopt extendedhistory", "setopt SHARE_HISTORY EXTENDED_HISTORY", "  set -o ExtendedHistory  # mine"]) assert.equal(hasExtendedHistory(t), true, t);
+  for (const t of ["", "#setopt EXTENDED_HISTORY", "setopt HIST_IGNORE_DUPS", "unsetopt EXTENDED_HISTORY"]) assert.equal(hasExtendedHistory(t), false, JSON.stringify(t));
 });

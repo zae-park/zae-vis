@@ -45,6 +45,7 @@ before(async () => {
     worklog: new Worklog(root),
     search: fake,
     webDir: web,
+    sources: { list: () => [], collect: async () => [], update() {}, add() {}, remove: () => false, enableTimestamps: async () => ({ file: "/h/.zshrc", changed: true }) },
     tokenizer: { sync: async (canRestart) => ({ active: "whitespace", needsReindex: false, canRestart }), refreshed: (force, ok) => tokenizerEvents.push(`${force}:${ok}`) },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -185,4 +186,13 @@ test("AutoRAGMcp without a config explains how to set it up instead of crashing"
   assert.equal(r.error?.code, "not-configured");
   assert.equal(((await m.status()) as { state: string }).state, "not-configured");
   await assert.rejects(m.refresh(), /zaevis setup/);
+});
+
+test("POST /api/sources/shell-history/enable-timestamps edits the zshrc; other sub-paths are 404", async () => {
+  const post = { method: "POST", headers: { "x-zaevis": "1" } };
+  const r = await get("/api/sources/shell-history/enable-timestamps", post);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { ok: true, file: "/h/.zshrc", changed: true });
+  assert.equal((await get("/api/sources/git/enable-timestamps", post)).status, 404);
+  assert.equal((await get("/api/sources/shell-history", post)).status, 404);
 });

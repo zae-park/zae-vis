@@ -324,6 +324,8 @@ class _Intro extends StatelessWidget {
               '질문으로 기록을 검색하고, 상위 문단을 이 맥에 있는 에이전트(Claude Code·Codex·Gemini CLI)나 OpenRouter에 넣어 출처 [번호]가 달린 답을 받습니다. '
               '이어서 물으면 앞의 대화를 기억합니다. 에이전트는 파일을 읽기만 합니다.', icon: Icons.question_answer_outlined),
           if (agent != null) Text('답은 ${agent.title}가 씁니다 · ${agent.detail}', style: t.bodySmall?.copyWith(color: scheme.outline)),
+          for (final a in st?.agents.where((a) => a.needsLogin) ?? const <AgentInfo>[])
+            Text('${a.title}: ${a.loginNote}', style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
           if (noAgent) ...[
             Text('답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.', style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
             if (onOpenSettings != null) Padding(padding: const EdgeInsets.only(top: 10), child: FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined), label: const Text('설정 열기'))),

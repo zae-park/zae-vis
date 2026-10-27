@@ -30,7 +30,21 @@ export type AgentInfo = {
   /** "2.1.304" for a CLI, "키 저장됨" for OpenRouter, or why it is unavailable. */
   detail: string;
   bin?: string;
+  /** Signed in? `false` means installed but it would answer "Not logged in"; `null` = unknown / not applicable (OpenRouter, not installed). */
+  loggedIn: boolean | null;
+  /** What to do when `loggedIn` is false, e.g. "터미널에서 claude login". */
+  loginHint?: string;
 };
+
+export type ExecResult = { code: number | null; out: string };
+export type DetectOptions = {
+  /** Runs a CLI (tests inject this); the default spawns it with a timeout. */
+  exec?: (bin: string, args: string[], timeoutMs: number) => Promise<ExecResult>;
+  /** Per-binary cache for version and login lookups (default: module-level, LOGIN_CACHE_MS). */
+  cache?: Map<string, AgentCacheEntry>;
+  now?: () => number;
+};
+export type AgentCacheEntry = { at: number; version?: string; loggedIn?: boolean | null };
 
 export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string };
 export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; last: DigestRun | null; nextWeekly: string | null };
@@ -40,11 +54,16 @@ const RUN_TIMEOUT_MS = 30 * 60_000;
 
 // ── detection ──────────────────────────────────────────────────────────────────
 
-const CLI: Record<Exclude<AgentId, "openrouter">, { title: string; versionArgs: string[] }> = {
-  claude: { title: "Claude Code", versionArgs: ["--version"] },
-  codex: { title: "Codex CLI", versionArgs: ["--version"] },
-  gemini: { title: "Gemini CLI", versionArgs: ["--version"] },
+const CLI: Record<Exclude<AgentId, "openrouter">, { title: string; versionArgs: string[]; loginHint: string }> = {
+  claude: { title: "Claude Code", versionArgs: ["--version"], loginHint: "터미널에서 claude login" },
+  codex: { title: "Codex CLI", versionArgs: ["--version"], loginHint: "터미널에서 codex login" },
+  gemini: { title: "Gemini CLI", versionArgs: ["--version"], loginHint: "터미널에서 gemini를 실행해 로그인하거나 GEMINI_API_KEY 설정" },
 };
+
+/** Version and login answers are kept this long: a login check may run the CLI, and status is polled often. */
+export const LOGIN_CACHE_MS = 10 * 60_000;
+const LOGIN_TIMEOUT_MS = 10_000;
+const agentCache = new Map<string, AgentCacheEntry>();
 
 /** PATH plus the places installers put CLIs that a Finder-launched app would not see. */
 export function searchDirs(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -61,43 +80,99 @@ export function findBin(name: string, env: NodeJS.ProcessEnv = process.env, dirs
   return null;
 }
 
-function version(bin: string, args: string[]): Promise<string> {
+function probeCli(bin: string, args: string[], timeoutMs: number): Promise<ExecResult> {
   return new Promise((res) => {
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout?.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr?.on("data", (c: Buffer) => (out += c.toString()));
-    const t = setTimeout(() => child.kill("SIGKILL"), 8000);
-    child.on("close", () => {
+    const t = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.on("close", (code) => {
       clearTimeout(t);
-      res(out.trim().split("\n")[0]?.slice(0, 60) ?? "");
+      res({ code, out });
     });
     child.on("error", () => {
       clearTimeout(t);
-      res("");
+      res({ code: null, out });
     });
   });
 }
 
-export async function detectAgents(env: NodeJS.ProcessEnv = process.env, hasOpenrouterKey = openrouterKey() !== null, dirs: string[] = searchDirs(env)): Promise<AgentInfo[]> {
+const firstLine = (out: string): string => out.trim().split("\n")[0]?.slice(0, 60) ?? "";
+
+/**
+ * Whether a CLI is signed in, without running a real prompt where possible:
+ *   claude  `claude auth status` (JSON with `loggedIn`); older CLIs without that command get
+ *           `claude -p ok --max-turns 1` and are judged by the "Not logged in" text
+ *   codex   ~/.codex/auth.json (or $CODEX_HOME), or OPENAI_API_KEY
+ *   gemini  ~/.gemini/oauth_creds.json, or GEMINI_API_KEY / GOOGLE_API_KEY
+ * `null` when it could not be told (timeout, unexpected output).
+ */
+export async function checkLogin(id: Exclude<AgentId, "openrouter">, bin: string, env: NodeJS.ProcessEnv = process.env, exec = probeCli): Promise<boolean | null> {
+  const h = env.HOME ?? homedir();
+  if (id === "codex") return existsSync(join(env.CODEX_HOME || join(h, ".codex"), "auth.json")) || !!env.OPENAI_API_KEY;
+  if (id === "gemini") return existsSync(join(h, ".gemini", "oauth_creds.json")) || !!env.GEMINI_API_KEY || !!env.GOOGLE_API_KEY;
+  const st = await exec(bin, ["auth", "status"], LOGIN_TIMEOUT_MS);
+  const parsed = parseLoggedIn(st.out);
+  if (parsed !== null) return parsed;
+  if (/not logged in/i.test(st.out)) return false;
+  if (!/unknown command|unknown option|too many arguments|error: unknown/i.test(st.out) && st.code === 0) return null;
+  // no `auth status` in this version: the "Not logged in" text of a real (tiny) prompt is the only signal
+  const p = await exec(bin, ["-p", "ok", "--max-turns", "1"], LOGIN_TIMEOUT_MS);
+  if (/not logged in|please log in|run \/login/i.test(p.out)) return false;
+  return p.code === 0 ? true : null;
+}
+
+/** `loggedIn` from the JSON of `claude auth status`, tolerating text before or after it. */
+export function parseLoggedIn(out: string): boolean | null {
+  const i = out.indexOf("{");
+  const j = out.lastIndexOf("}");
+  if (i < 0 || j <= i) return null;
+  try {
+    const v = JSON.parse(out.slice(i, j + 1)) as { loggedIn?: unknown };
+    return typeof v.loggedIn === "boolean" ? v.loggedIn : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function detectAgents(env: NodeJS.ProcessEnv = process.env, hasOpenrouterKey = openrouterKey() !== null, dirs: string[] = searchDirs(env), opts: DetectOptions = {}): Promise<AgentInfo[]> {
+  const exec = opts.exec ?? probeCli;
+  const cache = opts.cache ?? agentCache;
+  const now = opts.now ?? Date.now;
   const out: AgentInfo[] = [];
   for (const id of ["claude", "codex", "gemini"] as const) {
     const bin = findBin(id, env, dirs);
     if (!bin) {
-      out.push({ id, title: CLI[id].title, available: false, detail: "설치되지 않음" });
+      out.push({ id, title: CLI[id].title, available: false, detail: "설치되지 않음", loggedIn: null });
       continue;
     }
-    const v = await version(bin, CLI[id].versionArgs);
-    out.push({ id, title: CLI[id].title, available: true, detail: v || "설치됨", bin });
+    let entry = cache.get(bin);
+    if (!entry || now() - entry.at > LOGIN_CACHE_MS) {
+      const v = firstLine((await exec(bin, CLI[id].versionArgs, 8000)).out);
+      entry = { at: now(), version: v, loggedIn: await checkLogin(id, bin, env, exec) };
+      cache.set(bin, entry);
+    }
+    out.push({ id, title: CLI[id].title, available: true, detail: entry.version || "설치됨", bin, loggedIn: entry.loggedIn ?? null, loginHint: CLI[id].loginHint });
   }
-  out.push({ id: "openrouter", title: "OpenRouter API", available: hasOpenrouterKey, detail: hasOpenrouterKey ? "키 저장됨 (설정 → 검색 결과 재정렬)" : "키 없음 — 설정 → 검색 결과 재정렬에서 저장" });
+  out.push({ id: "openrouter", title: "OpenRouter API", available: hasOpenrouterKey, detail: hasOpenrouterKey ? "키 저장됨 (설정 → 검색 결과 재정렬)" : "키 없음 — 설정 → 검색 결과 재정렬에서 저장", loggedIn: null });
   return out;
 }
 
-/** "auto" = the first available in the order above (a subscription CLI before a pay-per-use API). */
+/** Installed and not known to be signed out. */
+export const usable = (a: AgentInfo): boolean => a.available && a.loggedIn !== false;
+
+/** Why nothing can run right now — names a CLI that only needs a login, when there is one. */
+export function noAgentReason(agents: AgentInfo[] = []): string {
+  const base = "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.";
+  const out = agents.filter((a) => a.available && a.loggedIn === false).map((a) => `${a.title}는 설치돼 있지만 로그인되지 않았습니다 (${a.loginHint ?? "로그인 필요"}).`);
+  return out.length ? `${out.join(" ")} ${base}` : base;
+}
+
+/** "auto" = the first usable in the order above (a subscription CLI before a pay-per-use API); a signed-out CLI is skipped. */
 export function pickAgent(setting: DigestSetting, agents: AgentInfo[]): AgentInfo | null {
-  if (setting.agent !== "auto") return agents.find((a) => a.id === setting.agent && a.available) ?? null;
-  return agents.find((a) => a.available) ?? null;
+  if (setting.agent !== "auto") return agents.find((a) => a.id === setting.agent && usable(a)) ?? null;
+  return agents.find(usable) ?? null;
 }
 
 // ── the task ───────────────────────────────────────────────────────────────────
