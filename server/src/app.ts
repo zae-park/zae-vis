@@ -22,6 +22,8 @@ export type AppOptions = {
     update(name: string, patch: Record<string, unknown>): void;
     add(src: { name: string; command: string; description?: string }): void;
     remove(name: string): boolean;
+    /** POST /api/sources/shell-history/enable-timestamps: adds `setopt EXTENDED_HISTORY` to the user's zshrc. */
+    enableTimestamps?(): Promise<{ file: string; changed: boolean }>;
     /** A full collect (+ index) from the API counts as the daily run — so `daily --if-stale` does not repeat it. */
     recordDaily?(result: { ok: boolean; index: string }): void;
   };
@@ -414,6 +416,11 @@ export function createApp(opts: AppOptions): Server {
 
         case "POST /sources": {
           if (!opts.sources) return notFound(res);
+          if (arg !== undefined) {
+            // POST /api/sources/shell-history/enable-timestamps → { ok, file, changed } (changed=false: the line was already there)
+            if (arg === "shell-history" && parts[3] === "enable-timestamps" && opts.sources.enableTimestamps) return send(res, 200, { ok: true, ...(await opts.sources.enableTimestamps()) });
+            return notFound(res);
+          }
           const b = await readJson(req);
           const name = String(b.name ?? "").trim();
           const command = String(b.command ?? "").trim();

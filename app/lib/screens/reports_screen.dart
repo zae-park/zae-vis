@@ -118,7 +118,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (!mounted) return;
       final running = ReportRunning(kind: kind, period: made);
       setState(() {
-        _status = ReportsStatus(settings: _status?.settings ?? const ReportSettings(), reports: _status?.reports ?? const {}, running: running, lastRun: _status?.lastRun ?? const {}, defaults: _status?.defaults ?? const {});
+        _status = ReportsStatus(
+          settings: _status?.settings ?? const ReportSettings(),
+          reports: _status?.reports ?? const {},
+          running: running,
+          lastRun: _status?.lastRun ?? const {},
+          defaults: _status?.defaults ?? const {},
+          agents: _status?.agents ?? const [],
+          chosen: _status?.chosen,
+        );
       });
       _startPolling(running);
     } on ApiException catch (e) {
@@ -165,6 +173,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ]),
       ),
+      if (status.agents.isNotEmpty) _AgentLine(status: status),
       if (running != null) _RunningBar(running: running),
       if (_notice != null)
         MaterialBanner(
@@ -235,6 +244,36 @@ class _MakeNowButton extends StatelessWidget {
         icon: const Icon(Icons.auto_awesome, size: 18),
         label: const Text('지금 만들기'),
       ),
+    );
+  }
+}
+
+/// Which agent writes the reports — or why none can right now (a CLI that only needs a login).
+class _AgentLine extends StatelessWidget {
+  const _AgentLine({required this.status});
+  final ReportsStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final chosen = status.chosenAgent;
+    final signedOut = status.agents.where((a) => a.needsLogin).toList();
+    final String text;
+    final bool warn;
+    if (chosen != null) {
+      text = '리포트는 ${chosen.title}가 씁니다 · ${chosen.detail}';
+      warn = false;
+    } else if (signedOut.isNotEmpty) {
+      text = signedOut.map((a) => '${a.title}: ${a.loginNote}').join(' · ');
+      warn = true;
+    } else {
+      text = '쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.';
+      warn = true;
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Text(text, style: t.bodySmall?.copyWith(color: warn ? scheme.error : scheme.outline)),
     );
   }
 }

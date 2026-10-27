@@ -8,9 +8,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
+import 'package:zaevis/backend/backend.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
+import 'package:zaevis/screens/onboarding_screen.dart';
 import 'package:zaevis/screens/search_screen.dart';
+
+/// The packaged app's backend, for the onboarding screen: records the `zaevis` commands it is asked to run.
+class _FakeBackend implements Backend {
+  final List<List<String>> runs = [];
+  @override
+  bool get managed => true;
+  @override
+  String? get problem => null;
+  @override
+  String get home => '/h';
+  @override
+  bool get isConfigured => false;
+  @override
+  Stream<String> run(List<String> args) {
+    runs.add(args);
+    return Stream.fromIterable(['  + /h/worklog']);
+  }
+
+  @override
+  Future<void> ensureServer() async {}
+  @override
+  Future<void> open(String target) async {}
+}
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -71,7 +96,8 @@ WorklogApi _fakeApi() => WorklogApi(
               'conversations': [{'id': '20261027-120000', 'title': '예전 대화', 'updatedAt': '2026-10-27T03:00:00Z', 'turns': 1}],
               'setting': {'agent': 'auto', 'model': ''},
               'agents': [
-                {'id': 'claude', 'title': 'Claude Code', 'available': mockAskAgent != null, 'detail': '2.1.304'},
+                {'id': 'claude', 'title': 'Claude Code', 'available': mockAskAgent != null, 'detail': '2.1.304', 'loggedIn': mockAskAgent != null ? true : null},
+                {'id': 'codex', 'title': 'Codex CLI', 'available': true, 'detail': 'codex-cli 0.9.0', 'loggedIn': false, 'loginHint': '터미널에서 codex login'},
                 {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
               ],
             });
@@ -116,8 +142,8 @@ WorklogApi _fakeApi() => WorklogApi(
               'running': false, 'nextWeekly': '2026-11-02', 'chosen': 'claude',
               'setting': {'agent': 'auto', 'model': '', 'weekly': true},
               'agents': [
-                {'id': 'claude', 'title': 'Claude Code', 'available': true, 'detail': '2.1.304 (Claude Code)'},
-                {'id': 'codex', 'title': 'Codex CLI', 'available': false, 'detail': '설치되지 않음'},
+                {'id': 'claude', 'title': 'Claude Code', 'available': true, 'detail': '2.1.304 (Claude Code)', 'loggedIn': true, 'loginHint': '터미널에서 claude login'},
+                {'id': 'codex', 'title': 'Codex CLI', 'available': true, 'detail': 'codex-cli 0.9.0', 'loggedIn': false, 'loginHint': '터미널에서 codex login'},
                 {'id': 'gemini', 'title': 'Gemini CLI', 'available': false, 'detail': '설치되지 않음'},
                 {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
               ],
@@ -185,6 +211,9 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/sources' when req.method == 'POST':
             posted.add(req);
             return _json({'ok': true}, 201);
+          case '/api/sources/shell-history/enable-timestamps':
+            posted.add(req);
+            return _json({'ok': true, 'file': '/h/.zshrc', 'changed': true});
           case '/api/collect':
             posted.add(req);
             return _json({'started': true}, 202);
@@ -387,6 +416,7 @@ void main() {
     await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
     expect(find.textContaining('답을 쓸 에이전트가 없습니다'), findsOneWidget);
+    expect(find.text('Codex CLI: 로그인 필요: 터미널에서 codex login'), findsOneWidget);
     expect(find.text('설정 열기'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'x');
@@ -417,6 +447,8 @@ void main() {
     expect(find.text('Claude Code'), findsOneWidget);
     expect(find.text('Codex CLI'), findsOneWidget);
     expect(find.text('사용'), findsOneWidget);
+    // an installed but signed-out CLI says what to do
+    expect(find.textContaining('로그인 필요: 터미널에서 codex login'), findsOneWidget);
     expect(find.textContaining('로그 3줄 추가'), findsOneWidget);
     await tester.ensureVisible(find.text('지금 정리하기'));
     await tester.pumpAndSettle();
@@ -584,6 +616,71 @@ void main() {
     expect(find.text('EXTENDED_HISTORY 필요'), findsOneWidget);
     expect(find.text('지금 수집'), findsOneWidget);
     expect(find.text('전사본 (1)'), findsOneWidget);
+  });
+
+  testWidgets('collect tab: the shell-history card turns zsh timestamps on after confirming', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('연결').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('셸 명령 이력'));
+    await tester.pumpAndSettle();
+    expect(find.text('시각 기록 켜기'), findsOneWidget);
+    expect(find.text('git 커밋'), findsOneWidget);
+
+    // cancel: nothing is sent
+    await tester.tap(find.text('시각 기록 켜기'));
+    await tester.pumpAndSettle();
+    expect(find.text('셸 설정에 한 줄 추가'), findsOneWidget);
+    expect(find.textContaining('setopt EXTENDED_HISTORY  # zaevis'), findsOneWidget);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(posted, isEmpty);
+
+    // confirm: one POST, and the card says when it takes effect
+    await tester.tap(find.text('시각 기록 켜기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+    expect(posted.map((r) => '${r.method} ${r.url.path}').toList(), ['POST /api/sources/shell-history/enable-timestamps']);
+    expect(find.text('/h/.zshrc에 추가했습니다. 새 터미널부터 모입니다.'), findsWidgets);
+  });
+
+  testWidgets('onboarding: sources match today\'s connectors; after setup it lists what to do next and opens the app', (tester) async {
+    tester.view.physicalSize = const Size(900, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final backend = _FakeBackend();
+    var done = false;
+
+    await tester.pumpWidget(MaterialApp(home: OnboardingScreen(backend: backend, api: _fakeApi(), onDone: () => done = true)));
+    await tester.pumpAndSettle();
+    expect(find.text('에이전트 세션'), findsOneWidget);
+    expect(find.text('Claude Code 세션'), findsNothing);
+    expect(find.textContaining('근거를 달아 묻고(질문)'), findsOneWidget);
+
+    await tester.tap(find.text('터미널 명령 이력'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('시작'));
+    await tester.pumpAndSettle();
+
+    expect(backend.runs.single, containsAllInOrder(['setup', '--yes', '--disable', 'shell-history']));
+    expect(backend.runs.single, isNot(contains('claude-code')));
+    expect(posted.map((r) => r.url.path).toList(), ['/api/collect']);
+    expect(find.text('준비됐습니다'), findsOneWidget);
+    expect(find.text('다음에 할 것'), findsOneWidget);
+    expect(find.text('연결 탭에서 소스 확인'), findsOneWidget);
+    expect(find.text('메모리 탭에서 기록'), findsOneWidget);
+    expect(find.text('리포트 켜기'), findsOneWidget);
+    expect(find.text('시작'), findsNothing);
+    expect(done, isFalse);
+    await tester.tap(find.text('앱 열기'));
+    expect(done, isTrue);
   });
 
   testWidgets('log tab FAB adds a line with tag and project', (tester) async {

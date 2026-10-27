@@ -39,6 +39,7 @@
 | GET | `/api/inbox` | inbox 파일과 전사 작업 |
 | POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
 | GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
+| POST | `/api/sources/shell-history/enable-timestamps` | zsh 시각 기록 켜기: `~/.zshrc`(`$ZDOTDIR`가 있으면 그곳) 끝에 `setopt EXTENDED_HISTORY  # zaevis` 한 줄을 붙임 → `{ ok, file, changed }` (`changed: false` = 이미 켜져 있어 손대지 않음; 주석·`extendedhistory` 같은 다른 표기도 인식). 앱은 확인 대화상자 뒤에 부른다 (`server/src/sources/shellHistory.ts enableExtendedHistory`) |
 | GET / POST | `/api/collect` | 수집 상태 · 수집 시작 (`{ sources?: [], index?: false }`) |
 | GET | `/api/datasources` | 외부 AutoRAG 데이터소스: 템플릿마다 `{ name, template, title, description, fields[], cli{bin,install}, external, probe{installed, binPath, archive, env[{name,set}], unavailable}, configured, enabled, note, connector, channels, autorag(autorag.datasources.list의 항목), sync{lastSync, ok, error?, chunks?} }` + `syncing`, `lastRefresh`. 템플릿 목록·probe는 `server/src/datasources.ts` |
 | PUT | `/api/datasources/:name` | 연결 만들기·고치기 `{ enabled?, description?, connector?, channels?, type?(별칭일 때 템플릿), sync?: false, secrets?: { ENV_NAME: 값 } }`. `secrets`는 secrets.json에 `env:ENV_NAME`으로 저장(""는 삭제)되고 `secretsEnv()`가 검색 자식 환경에 넣는다(probe의 `env[].stored`가 저장 여부). AutoRAG `config.json`의 `datasources.<name>`만 바꾸고(다른 키 보존) 검색 자식을 재시작한 뒤 켜져 있으면 `datasources` 단계만 refresh. 토큰·비밀번호처럼 보이는 키나 환경 변수 이름이 아닌 `tokenEnv`는 400 |
@@ -48,7 +49,7 @@
 | GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인), `notifications`(시스템 알림, 기본 켬), `hotkey`(전역 단축키 스펙 `"meta+shift+space"` 꼴, `""`=플랫폼 기본). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`) 포함 |
 | PUT | `/api/settings/rerank` | OpenRouter 재정렬 `{ enabled?, model?, apiKey? }` — `apiKey: ""`는 키 삭제. 키는 `secrets.json`(0600)에 저장되고 응답엔 끝 4자리만. AutoRAG 설정의 `rerank`를 다시 쓰고 검색 자식 프로세스를 재시작 |
 | POST | `/api/settings/rerank/test` | `{ apiKey? }` 키를 OpenRouter에 확인 (`{ ok, message }`), 저장하지 않음 |
-| GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키), 설정(`agent: auto|…`, `model`, `weekly`, `review`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last`(검토 모드면 `proposalId`) |
+| GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키 — 항목마다 `available`, `detail`(버전), `loggedIn: true|false|null`, `loginHint`. claude는 `claude auth status`의 JSON(없는 옛 버전은 `claude -p ok --max-turns 1`의 "Not logged in"), codex는 `~/.codex/auth.json`·`OPENAI_API_KEY`, gemini는 `~/.gemini/oauth_creds.json`·`GEMINI_API_KEY`; 바이너리별 10분 캐시. `pickAgent`는 `loggedIn: false`인 CLI를 건너뛰고, 에이전트 없음 메시지(`noAgentReason`)가 로그인만 필요한 CLI를 이름으로 알려 준다. `/api/ask`·`/api/reports`의 `agents`·`chosen`도 같은 감지), 설정(`agent: auto|…`, `model`, `weekly`, `review`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last`(검토 모드면 `proposalId`) |
 | POST | `/api/digest/run` | 지금 정리 시작 (202). 쓸 수 있는 에이전트가 없거나 이미 실행 중이면 409 `{ started: false, reason }` |
 | GET | `/api/digest/proposals[/:id]` | 검토 대기 제안 목록(`id, createdAt, agent, status, lines, projects, summaries, processed`) · 하나의 내용(`logLines[{month,line,entry}]`, `removedLines`, `projects[{slug,before,after}]`, `summaries[{path,before,after}]`, `processed[{from,to}]`, `report`). 서버는 정리 전 스냅샷과 후를 비교해 제안을 만들고 worklog는 원상 복구한다(`server/src/review.ts`) |
 | POST | `/api/digest/proposals/:id` | `{ action: "apply", lines?: [idx], projects?: [slug], summaries?: bool, processed?: bool }` 고른 부분만 worklog에 씀 (생략=전부) · `{ action: "dismiss" }`. pending이 아니면 409 |
@@ -82,7 +83,7 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 
 ## 데이터소스 커넥터 추가
 
-**명령어로 (코드 수정 없이)**: 앱의 수집 화면 → 커넥터 추가, 또는 `~/.zaevis/sources.json`의 `custom`에 추가합니다.
+**명령어로 (코드 수정 없이)**: 앱의 연결 탭 → 커넥터 추가, 또는 `~/.zaevis/sources.json`의 `custom`에 추가합니다.
 
 ```json
 { "custom": [ { "name": "calendar", "command": "python3 ~/bin/cal_export.py --since {from} --until {to}" } ] }

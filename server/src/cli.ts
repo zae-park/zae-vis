@@ -353,7 +353,12 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
       }
       const s = await api.get("/digest");
       const setting = (s.setting ?? {}) as J;
-      const agents = ((s.agents ?? []) as J[]).map((a) => `  ${a.available ? c.green("✓") : c.dim("○")} ${a.title}  ${c.dim(String(a.detail ?? ""))}${s.chosen === a.id ? c.cyan("  ← 사용") : ""}`);
+      const agents = ((s.agents ?? []) as J[]).map((a) => {
+        const signedOut = a.available && a.loggedIn === false;
+        const mark = signedOut ? c.yellow("!") : a.available ? c.green("✓") : c.dim("○");
+        const note = signedOut ? c.yellow(`  로그인 필요: ${String(a.loginHint ?? "")}`) : "";
+        return `  ${mark} ${a.title}  ${c.dim(String(a.detail ?? ""))}${note}${s.chosen === a.id ? c.cyan("  ← 사용") : ""}`;
+      });
       const last = s.last as J | null;
       const out = [`정리 에이전트: ${String(setting.agent ?? "auto")}${setting.weekly ? " · 매주 월요일 자동" : ""}`, ...agents];
       if (s.running) out.push(c.yellow(`실행 중… (${String(s.agent)}, ${String(s.startedAt)})`));

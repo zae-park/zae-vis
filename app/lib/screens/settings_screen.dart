@@ -427,9 +427,12 @@ class _DigestSectionState extends State<_DigestSection> {
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(a.available ? Icons.check_circle_outline : Icons.radio_button_unchecked, color: a.available ? scheme.primary : scheme.outline),
+              leading: Icon(
+                a.needsLogin ? Icons.warning_amber_outlined : a.available ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+                color: a.needsLogin ? scheme.error : a.available ? scheme.primary : scheme.outline,
+              ),
               title: Text(a.title),
-              subtitle: Text(a.detail, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(a.needsLogin ? '${a.detail} · ${a.loginNote}' : a.detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: a.needsLogin ? TextStyle(color: scheme.error) : null),
               trailing: s.chosen == a.id ? const Chip(label: Text('사용'), visualDensity: VisualDensity.compact) : null,
             ),
           Row(children: [
