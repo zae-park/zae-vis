@@ -133,6 +133,10 @@ zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지
 Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 않습니다. 필요하면 내보낸 대화를 전사본처럼 넣거나 사용자 커넥터를 만드세요.
 
 ### 외부 소스 (AutoRAG 데이터소스)
+각 카드에 서비스 아이콘과 상태(미설치 · 연결 안 됨 · 연결됨)가 보입니다. 도구가 필요한 소스는 카드의 **설치** 버튼 하나로 들어갑니다(앱 설치본에서만; 웹에서는 명령 복사).
+설치 경로: Slack·Notion·Discord·WhatsApp·Telegram은 `brew install openclaw/tap/<도구>`, rclone·Hister는 brew, 카카오톡(lazykatok)은 GitHub 릴리스 tar.gz를 `~/.zaevis/ext/bin`에 풉니다. mailcrawl·clawgallery는 아직 손으로 설치합니다(카드의 안내 링크).
+토큰이 필요한 소스(GitHub·Gist·Hister)는 카드의 **토큰 값** 칸에 넣으면 `~/.zaevis/secrets.json`(소유자만 읽기)에 환경 변수 이름으로 저장되고 검색 프로세스에만 전달됩니다. 앱은 셸 환경 변수를 물려받지 않으므로 이 칸이 유일한 경로입니다.
+그 밖의 로그인(Slack·Notion·메일·클라우드 드라이브)은 각 도구 안에서 합니다 — 카드의 "로그인·토큰" 줄에 무엇을 해야 하는지 적혀 있습니다.
 
 위 데이터소스는 worklog 폴더에 Markdown으로 쌓이는 것들입니다. 그와 별도로 AutoRAG가 **직접 색인하는 외부 소스**를 붙일 수 있습니다. worklog에는 들어가지 않고, 검색할 때 AutoRAG가 worklog 히트와 함께 섞어 돌려줍니다(결과 카드의 출처가 "Obsidian 볼트"·"Slack"처럼 표시되고, 출처 칩으로 거를 수 있음). 앱 **수집** 화면 맨 아래 "외부 소스 (AutoRAG)"에서 연결합니다.
 
@@ -148,7 +152,9 @@ Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 �
 | 클라우드 드라이브 | `rclone`과 `rclone config`로 만든 리모트 | 리모트 이름 |
 | 사진·스크린샷 / 브라우저 기록 | `clawgallery` / `hister` | 폴더 / 주소 |
 
-절차: 카드를 펼치면 **미설치**(설치 명령 복사 버튼) → **연결 안 됨**(필요한 칸만 있는 폼, "연결") → **연결됨**(켜기/끄기 스위치, 저장, 지금 동기화, 연결 삭제) 순으로 바뀝니다. 연결하거나 저장하면 서버가 AutoRAG의 `datasources` 설정을 고쳐 쓰고 검색 자식을 재시작한 뒤 외부 소스만 동기화합니다(`autorag.refresh`의 `datasources` 단계). 매일 수집 뒤 색인에서도 같이 동기화됩니다. 동기화는 연결 전체를 한 번에 돕니다(AutoRAG에 연결별 갱신이 없음). 토큰·비밀번호 값은 어디에도 저장되지 않으며, `token` 같은 이름의 값을 넣으면 서버가 거절합니다. 카드의 "밖으로 나가는 것"이 각 소스가 어디에 접속하는지 알려 줍니다(Obsidian·메일 내보내기·Spotlight는 없음).
+카드마다 서비스 아이콘과 상태가 보이고, 도구가 필요한 소스는 **설치** 버튼 하나로 들어갑니다(앱 설치본에서; 웹은 명령 복사). Slack·Notion·Discord·WhatsApp·Telegram은 `brew install openclaw/tap/<도구>`, rclone·Hister는 brew, 카카오톡(lazykatok)은 GitHub 릴리스 tar.gz를 `~/.zaevis/ext/bin`에 풉니다. mailcrawl·clawgallery는 아직 손으로 설치합니다(카드의 안내 링크). 그 밖의 로그인(Slack·Notion·메일·클라우드 드라이브)은 각 도구 안에서 하며, 카드의 "로그인·토큰" 줄에 무엇을 해야 하는지 적혀 있습니다.
+
+절차: 카드를 펼치면 **미설치**(설치 버튼 — 아래 참고) → **연결 안 됨**(필요한 칸만 있는 폼, "연결") → **연결됨**(켜기/끄기 스위치, 저장, 지금 동기화, 연결 삭제) 순으로 바뀝니다. 연결하거나 저장하면 서버가 AutoRAG의 `datasources` 설정을 고쳐 쓰고 검색 자식을 재시작한 뒤 외부 소스만 동기화합니다(`autorag.refresh`의 `datasources` 단계). 매일 수집 뒤 색인에서도 같이 동기화됩니다. 동기화는 연결 전체를 한 번에 돕니다(AutoRAG에 연결별 갱신이 없음). 토큰은 카드의 **토큰 값** 칸으로만 받습니다: `~/.zaevis/secrets.json`(소유자만 읽기)에 환경 변수 이름으로 저장되고 검색 프로세스에만 전달되며 다시 표시되지 않습니다(앱은 셸 환경 변수를 물려받지 않으므로 이 칸이 유일한 경로). connector 설정 안에 `token` 같은 이름으로 값을 넣으면 서버가 거절합니다. 카드의 "밖으로 나가는 것"이 각 소스가 어디에 접속하는지 알려 줍니다(Obsidian·메일 내보내기·Spotlight는 없음).
 
 ### 질문 (기록을 근거로 답하기)
 

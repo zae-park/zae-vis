@@ -452,7 +452,7 @@ class _ExternalCardState extends State<_ExternalCard> {
     final failed = d.lastOk == false && d.enabled;
     final mono = TextStyle(fontFamily: 'monospace', fontSize: 13, color: scheme.onSurface);
     final Widget leading = Row(mainAxisSize: MainAxisSize.min, children: [
-      SourceIcon(d.template, dim: !d.configured || !d.enabled),
+      SourceIcon(d.template, dim: d.configured && !d.enabled),
       const SizedBox(width: 8),
       if (d.configured)
         Switch(value: d.enabled, onChanged: d.unavailable != null ? null : widget.onToggle)
@@ -745,7 +745,7 @@ class SourceIcon extends StatelessWidget {
     final (icon, rgb) = _spec[id] ?? (Icons.power_outlined, 0xFF607D8B);
     final color = Color(rgb);
     return Opacity(
-      opacity: dim ? 0.45 : 1,
+      opacity: dim ? 0.4 : 1,
       child: Container(
         width: size,
         height: size,
