@@ -9,6 +9,8 @@ import { createApp } from "../src/app.ts";
 import { normalizeSearch, type SearchBackend } from "../src/autorag.ts";
 import { Worklog } from "../src/worklog.ts";
 
+const tokenizerEvents: string[] = [];
+
 let server: Server;
 let base: string;
 const calls: string[] = [];
@@ -39,7 +41,12 @@ before(async () => {
   await writeFile(join(root, "projects", "p.md"), "---\nstatus: 진행 중\n---\n# P\n");
   const web = await mkdtemp(join(tmpdir(), "wl-web-"));
   await writeFile(join(web, "index.html"), "<html>app</html>");
-  server = createApp({ worklog: new Worklog(root), search: fake, webDir: web });
+  server = createApp({
+    worklog: new Worklog(root),
+    search: fake,
+    webDir: web,
+    tokenizer: { sync: async (canRestart) => ({ active: "whitespace", needsReindex: false, canRestart }), refreshed: (force, ok) => tokenizerEvents.push(`${force}:${ok}`) },
+  });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
@@ -80,6 +87,8 @@ test("index refresh runs once in the background", async () => {
   const s = await get("/api/index");
   assert.equal(s.body.lastRefresh.ok, true);
   assert.equal(s.body.autorag.state, "fresh");
+  assert.deepEqual(s.body.tokenizer, { active: "whitespace", needsReindex: false, canRestart: true }, "GET /index carries the tokenizer status (no refresh running → the child may restart)");
+  assert.deepEqual(tokenizerEvents, ["false:true"], "the finished refresh was reported to the tokenizer gate (not forced, ok)");
 });
 
 test("CORS only for localhost origins", async () => {

@@ -293,11 +293,13 @@ class IndexStatus {
     this.lastError,
     this.embedding,
     this.progress,
+    this.tokenizer,
   });
 
   factory IndexStatus.fromJson(Json j) {
     final a = j['autorag'] is Json ? j['autorag'] as Json : const <String, dynamic>{};
-    final diags = a['diagnostics'] is List ? a['diagnostics'] as List : const <Object?>[];
+    // the Kiwi warning is shown as its own row (with the install button), not as a raw English message
+    final diags = (a['diagnostics'] is List ? a['diagnostics'] as List : const <Object?>[]).where((d) => d is! Json || d['code'] != TokenizerStatus.warningCode);
     final last = j['lastRefresh'];
     String? lastError = _str(a['lastError']).isEmpty ? null : _str(a['lastError']);
     if (last is Json && last['ok'] == false) lastError = _str(last['error']);
@@ -309,6 +311,7 @@ class IndexStatus {
       lastError: lastError,
       embedding: j['embedding'] is Json ? EmbeddingStatus.fromJson(j['embedding'] as Json) : null,
       progress: a['progress'] is Json ? IndexProgress.fromJson(a['progress'] as Json) : null,
+      tokenizer: j['tokenizer'] is Json ? TokenizerStatus.fromJson(j['tokenizer'] as Json) : null,
     );
   }
 
@@ -323,6 +326,69 @@ class IndexStatus {
 
   /// Phase and counts while a refresh runs.
   final IndexProgress? progress;
+
+  /// Korean keyword tokenizer (Kiwi) state; null when the server does not report it.
+  final TokenizerStatus? tokenizer;
+}
+
+/// What the BM25 index tokenizes with — Kiwi morphemes (`multilingual`) or whitespace only — and whether
+/// Kiwi is installed. Mirrors `tokenizer` in GET /index and GET /settings.
+class TokenizerStatus {
+  const TokenizerStatus({required this.active, required this.needsReindex, required this.kiwi});
+
+  /// AutoRAG's diagnostic code when Kiwi is missing.
+  static const warningCode = 'lexical-tokenizer-unavailable';
+
+  factory TokenizerStatus.fromJson(Json j) => TokenizerStatus(
+        active: _str(j['active']),
+        needsReindex: j['needsReindex'] == true,
+        kiwi: j['kiwi'] is Json ? KiwiStatus.fromJson(j['kiwi'] as Json) : const KiwiStatus(installed: false),
+      );
+
+  /// 'multilingual' (Kiwi morphemes + whole words), 'whitespace', or 'unknown' (no index yet).
+  final String active;
+
+  /// Kiwi is here but the index was built without it: rebuild from scratch.
+  final bool needsReindex;
+  final KiwiStatus kiwi;
+
+  bool get morphemes => active == 'multilingual';
+
+  /// One line for the index sheet and settings.
+  String get label => morphemes
+      ? '형태소 분석 (Kiwi) — 인증서를 → 인증서처럼 조사·어미가 붙은 말도 찾습니다'
+      : kiwi.installed
+          ? (needsReindex ? 'Kiwi 설치됨 — 처음부터 다시 색인하면 형태소 분석이 켜집니다' : '아직 색인 전 — 다음 색인부터 형태소 분석')
+          : '공백 기준 — 조사·어미가 붙은 말(인증서를)은 검색어(인증서)와 맞지 않습니다';
+}
+
+/// The Kiwi library + model as the server found them (`zaevis ext install kiwi` puts them in <상태 폴더>/ext/kiwi).
+class KiwiStatus {
+  const KiwiStatus({required this.installed, this.library, this.model, this.source, this.version, this.asset, this.downloadMb = 0});
+
+  factory KiwiStatus.fromJson(Json j) => KiwiStatus(
+        installed: j['installed'] == true,
+        library: _strOrNull(j['library']),
+        model: _strOrNull(j['model']),
+        source: _strOrNull(j['source']),
+        version: _strOrNull(j['version']),
+        asset: _strOrNull(j['asset']),
+        downloadMb: j['downloadMb'] is num ? (j['downloadMb'] as num).round() : 0,
+      );
+
+  final bool installed;
+  final String? library;
+  final String? model;
+
+  /// 'zaevis' (our install), 'user' (~/.local/kiwi), 'system', 'env' (KIWI_* variables) or null.
+  final String? source;
+  final String? version;
+
+  /// Release asset for this platform; null means no one-click install here.
+  final String? asset;
+  final int downloadMb;
+
+  bool get installable => asset != null;
 }
 
 /// `minsync serve` (local Qwen3 embedding model) as reported by GET /index.
@@ -500,6 +566,7 @@ class AppSettings {
     this.notifications = true,
     this.hotkey = '',
     this.rerank,
+    this.tokenizer,
     this.scheduleHint,
     this.lastDaily,
   });
@@ -520,6 +587,7 @@ class AppSettings {
       notifications: j['notifications'] != false,
       hotkey: _str(j['hotkey']),
       rerank: j['rerank'] is Json ? RerankStatus.fromJson(j['rerank'] as Json) : null,
+      tokenizer: j['tokenizer'] is Json ? TokenizerStatus.fromJson(j['tokenizer'] as Json) : null,
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
     );
   }
@@ -534,6 +602,9 @@ class AppSettings {
 
   /// Optional OpenRouter re-ranking; null when the server does not offer it.
   final RerankStatus? rerank;
+
+  /// Korean morphological tokenizer (Kiwi); null when the server does not report it.
+  final TokenizerStatus? tokenizer;
   final String worklogDir;
   final bool scheduleSupported;
   final bool scheduleInstalled;

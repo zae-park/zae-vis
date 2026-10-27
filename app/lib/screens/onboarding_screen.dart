@@ -29,6 +29,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final Set<String> _enabled = {for (final s in _sources) s.$1};
   TimeOfDay _dailyAt = const TimeOfDay(hour: 18, minute: 30);
 
+  /// Korean morphological tokenizer for keyword search, installed before the first index so it never needs a rebuild.
+  bool _kiwi = true;
+
   bool _running = false;
   String? _error;
   final List<String> _log = [];
@@ -70,6 +73,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     });
     try {
       await widget.backend.run(params.toArgs()).forEach(_append);
+      if (_kiwi) {
+        _append('› 한국어 형태소 분석기(Kiwi) 설치 — 첫 색인부터 조사·어미가 붙은 말도 찾습니다 (약 130MB)');
+        try {
+          await widget.backend.run(const ['ext', 'install', 'kiwi']).forEach(_append);
+        } catch (e) {
+          _append('! Kiwi 설치 실패 — 나중에 설정 → 검색에서 다시 설치할 수 있습니다: $e');
+        }
+      }
       _append('› 서버 시작');
       await widget.backend.ensureServer();
       _append('› 첫 수집 시작 (지난 7일치, 끝나면 검색 색인까지 백그라운드에서 이어집니다)');
@@ -127,6 +138,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 title: Text(s.$2),
                 subtitle: Text(s.$3),
               ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _kiwi,
+              onChanged: _running ? null : (v) => setState(() => _kiwi = v == true),
+              title: const Text('한국어 형태소 분석 (Kiwi) 설치'),
+              subtitle: const Text('키워드 검색이 조사·어미가 붙은 말(인증서를)도 검색어(인증서)로 찾게 합니다. 약 130MB 다운로드, 나중에 설정에서도 설치할 수 있습니다.'),
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.schedule),

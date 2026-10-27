@@ -20,6 +20,7 @@ import * as review from "./review.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
+import { TokenizerGate } from "./kiwi.ts";
 import { Worklog } from "./worklog.ts";
 
 let cfg = loadConfig();
@@ -31,7 +32,9 @@ if (!existsSync(cfg.worklogDir)) {
 // The search child only sees the OpenRouter key while re-ranking is turned on.
 // the search child spawns connector CLIs (slacrawl, rclone …) and reads their tokens from env: give it
 // the stored secrets and a PATH that covers Homebrew, npm and zaevis's own ext folder
-const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => ({ ...datasources.secretsEnv(), ...rerank.childEnv(cfg.rerank), PATH: datasources.cliPath() }) });
+// the Korean tokenizer (Kiwi) lives outside PATH too: the gate hands its paths over and restarts the child when it appears
+const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => ({ ...datasources.secretsEnv(), ...rerank.childEnv(cfg.rerank), ...tokenizer.env(), PATH: datasources.cliPath() }) });
+const tokenizer = new TokenizerGate({ autoragConfig: cfg.autoragConfig, restart: () => search.restart() });
 // Keep AutoRAG's config in step with the setting (also clears the lite-init defaults on first start).
 rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== null);
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
@@ -73,6 +76,7 @@ const server = createApp({
         notifications: cfg.notifications,
         hotkey: cfg.hotkey,
         rerank: rerank.status(cfg.rerank),
+        tokenizer: tokenizer.status(),
       };
     },
     async update(patch) {
@@ -194,6 +198,10 @@ const server = createApp({
       }
       return became;
     },
+  },
+  tokenizer: {
+    sync: (canRestart) => tokenizer.sync(canRestart),
+    refreshed: (force, ok) => tokenizer.refreshed(force, ok),
   },
   audio: {
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),

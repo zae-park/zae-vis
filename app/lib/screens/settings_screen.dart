@@ -45,6 +45,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
+  /// Installs Kiwi through the bundle, then offers the rebuild from scratch the new tokenizer needs.
+  Future<void> _installKiwi() async {
+    final ok = await runBackendTask(context, widget.backend!, '한국어 형태소 분석 (Kiwi) 설치', const ['ext', 'install', 'kiwi']);
+    if (!mounted) return;
+    _reload();
+    if (!ok) return;
+    final rebuild = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('처음부터 다시 색인할까요?'),
+        content: const Text('Kiwi를 설치했습니다. 지금 있는 색인은 공백 기준으로 만든 것이라, 처음부터 다시 색인해야 조사·어미가 붙은 말도 찾습니다. '
+            '몇 분 걸리고, 창을 닫아도 계속됩니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('나중에')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('다시 색인')),
+        ],
+      ),
+    );
+    if (rebuild != true || !mounted) return;
+    try {
+      await widget.api.refreshIndex(force: true);
+      if (mounted) toast(context, '처음부터 다시 색인을 시작했습니다');
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    }
+    if (mounted) _reload();
+  }
+
   Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async {
     try {
       await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, hotkey: hotkey);
@@ -136,6 +164,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: s.localEmbedding,
                   onChanged: (v) => _update(localEmbedding: v),
                 ),
+                if (s.tokenizer != null) _KiwiTile(status: s.tokenizer!, managed: _managed, onInstall: _installKiwi),
                 if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
                 const SizedBox(height: 16),
                 Text('정리 (지식화)', style: t.titleMedium),
@@ -236,6 +265,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 /// Optional OpenRouter re-ranking: the only place a search leaves this machine. Off until the user
 /// turns it on and saves a key; the key is sent to the server once and only its last 4 chars come back.
+/// "한국어 형태소 분석 (Kiwi)": what the keyword index tokenizes with, and the one-click install when it is missing.
+class _KiwiTile extends StatelessWidget {
+  const _KiwiTile({required this.status, required this.managed, required this.onInstall});
+  final TokenizerStatus status;
+  final bool managed;
+  final Future<void> Function() onInstall;
+
+  @override
+  Widget build(BuildContext context) {
+    final k = status.kiwi;
+    final String subtitle;
+    if (k.installed) {
+      subtitle = '${status.label}${k.source == 'zaevis' ? '' : ' · ${k.source == 'env' ? 'KIWI_LIBRARY_PATH·KIWI_MODEL_PATH' : k.library}'}';
+    } else if (!k.installable) {
+      subtitle = '이 플랫폼용 Kiwi 릴리스가 없습니다. 직접 받아 ~/.local/kiwi/{lib,models}에 두거나 KIWI_LIBRARY_PATH·KIWI_MODEL_PATH를 설정하세요.';
+    } else if (managed) {
+      subtitle = '설치하면 조사·어미가 붙은 말(인증서를)도 검색어(인증서)로 찾습니다. 키워드 검색이 한국어 형태소 단위가 됩니다 (${k.downloadMb}MB 다운로드, 설치 뒤 처음부터 다시 색인).';
+    } else {
+      subtitle = "설치되지 않음 — 터미널에서 'zaevis ext install kiwi' 뒤 처음부터 다시 색인";
+    }
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(k.installed ? (status.needsReindex ? Icons.sync_problem_outlined : Icons.check_circle_outline) : Icons.translate_outlined),
+      title: const Text('한국어 형태소 분석 (Kiwi)'),
+      subtitle: Text(subtitle),
+      trailing: !k.installed && k.installable && managed ? FilledButton.tonal(onPressed: onInstall, child: const Text('설치')) : null,
+    );
+  }
+}
+
 class _RerankSection extends StatefulWidget {
   const _RerankSection({required this.api, required this.status, required this.onChanged});
   final WorklogApi api;

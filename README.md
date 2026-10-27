@@ -4,7 +4,7 @@
 
 - **수집 (매일, 자동)**: git 커밋, Claude Code 세션, 셸 명령, 회의 전사본, 직접 만든 커넥터를 `worklog/sources/`에 모읍니다. 매일 18:30(launchd)에 돌고, 언제든 수동으로도 돌릴 수 있습니다.
 - **주입 (실시간)**: 한 줄 기록, 전사본 붙여넣기, 앱 안에서 바로 녹음하거나 녹음 파일 업로드(whisperX 자동 전사)는 넣는 즉시 worklog에 저장됩니다. 메모리 탭에서 줄마다 ⋯ 메뉴로 고치거나 지울 수 있습니다(정리가 쓴 줄은 출처 표시가 남습니다).
-- **색인·검색**: [AutoRAG](https://github.com/Marker-Inc-Korea/AutoRAG) Lite(로컬, 무료). 키워드(BM25)에 더해 **의미 검색**: 앱이 번들된 MinSync로 Qwen3-Embedding-0.6B 모델을 이 맥에서 돌려(`minsync serve`) 뜻이 비슷한 기록도 찾습니다. 외부 서비스·키 없음, 설정에서 끌 수 있음. 처음 켤 때 모델(1.1GB)을 내려받습니다. 색인은 매일 수집 직후 + 수동 + (선택) 주입 즉시.
+- **색인·검색**: [AutoRAG](https://github.com/Marker-Inc-Korea/AutoRAG) Lite(로컬, 무료). 키워드(BM25)에 더해 **의미 검색**: 앱이 번들된 MinSync로 Qwen3-Embedding-0.6B 모델을 이 맥에서 돌려(`minsync serve`) 뜻이 비슷한 기록도 찾습니다. 외부 서비스·키 없음, 설정에서 끌 수 있음. 처음 켤 때 모델(1.1GB)을 내려받습니다. 키워드 쪽은 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/Kiwi)를 설치하면(첫 실행 마법사가 기본으로 설치, 설정 → 검색에서도 버튼 하나, 약 130MB) `인증서를`·`갱신했다` 같은 활용형도 `인증서`·`갱신`으로 찾습니다. 색인은 매일 수집 직후 + 수동 + (선택) 주입 즉시.
 - **정리 (지식화, 매주 월요일 자동)**: 수집 원본과 inbox(전사본·세션 노트)를 읽어 로그 줄·프로젝트 상태·월간 요약을 씁니다. 이 맥에 **이미 있는 것**으로 돌립니다: 설치된 에이전트 CLI(Claude Code · Codex · Gemini, 본인 구독)가 있으면 그것으로, 없으면 저장된 OpenRouter 키로. 설정 → 정리에서 어떤 것이 감지됐는지 보고 고르거나 "지금 정리하기"로 바로 돌립니다. 새 계정은 필요 없습니다.
 - **front**: Flutter 앱(데스크톱 + 브라우저)과 `zaevis` CLI에서 검색·열람·주입·데이터소스 설정을 모두 합니다. 추가 유료 서비스는 쓰지 않습니다.
 - **단축키**: ⌘K 검색 · ⌘N 한 줄 기록 · ⌘⇧R 녹음 · ⌘1~5 탭 · ⌘, 설정. 데스크톱에서는 어느 앱을 쓰고 있든 **⌘⇧Space**로 zaevis 창을 띄워 바로 한 줄 기록을 남깁니다(macOS 메뉴에도 같은 항목이 있습니다).
@@ -48,7 +48,7 @@
    **시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"** (또는 터미널에서 `xattr -dr com.apple.quarantine /Applications/zaevis.app`).
 3. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다.
 
-Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)는 앱 설정에서 버튼 한 번으로 설치합니다.
+Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)와 한국어 형태소 분석(Kiwi)은 앱 설정에서 버튼 한 번으로 설치합니다(Kiwi는 첫 실행 마법사가 기본으로 넣습니다).
 터미널 명령이 필요하면 앱 설정 → **터미널에서 zaevis 명령 쓰기**를 누르세요.
 
 ### 플랫폼
@@ -79,6 +79,8 @@ powershell -ExecutionPolicy Bypass -File tool\package_windows.ps1   # → dist\z
 GitHub Actions(`ci.yml`)가 세 OS에서 서버 테스트와 macOS·Windows 앱 빌드를 돌리고, 태그를 올리거나 수동 실행하면 두 설치본을 아티팩트로 만듭니다.
 
 Node 24 공식 배포본(체크섬 확인), 서버 의존성, MinSync, 웹·macOS 빌드를 앱 하나로 묶고 ad-hoc 서명까지 합니다. 빌드한 맥과 같은 CPU(Apple Silicon / Intel)용 DMG가 나옵니다.
+
+Kiwi(한국어 형태소 분석기, 라이브러리 28MB + 모델 104MB)는 DMG에 넣지 않습니다. 임베딩 모델(1.1GB)처럼 첫 실행 때 내려받는 편이 설치본(약 490MB)을 키우지 않고, 마법사가 기본으로 설치해 주며, 직접 둔 Kiwi가 있는 Mac은 그것을 쓰기 때문입니다. 동봉하려면 `tool/package_macos.sh`가 `ext/kiwi` 레이아웃(`lib/libkiwi.dylib`, `models/cong/base`)을 payload에 넣고 `server/src/kiwi.ts`의 후보 목록에 번들 경로를 더하면 됩니다.
 
 ### 개발용으로 소스에서 바로 쓰기
 
@@ -119,6 +121,7 @@ zaevis collect                      # 지금 수집 + 색인 (zaevis collect git
 zaevis sources                      # 데이터소스 상태 (zaevis sources off shell-history)
 zaevis schedule install 18:30       # 매일 실행 시각 바꾸기
 zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지 자동 설치)
+zaevis ext install kiwi             # 한국어 형태소 분석기 — 키워드 검색이 활용형도 찾음 (설치 뒤 zaevis index --force)
 ```
 
 ### 메모리 (이 앱이 아는 것 전부)
@@ -199,6 +202,7 @@ Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 �
 - **전역 단축키**: 기본 ⌘⇧Space(Windows: Ctrl+Shift+Space). 설정 → 단축키 → 바꾸기에서 원하는 조합을 눌러 바꿉니다. 수정키 없는 단일 키는 받지 않습니다.
 - **검색 필터**: 결과 위의 칩으로 출처(git 커밋·에이전트 세션·한 줄 기록·전사본 …)와 기간(7일·30일·이번 달)을 거릅니다. 한 번에 40건을 받아 와 앱 안에서 거릅니다.
 - **색인 진행**: 색인 창에서 "본문 읽는 중 12/40 파일 → 임베딩·색인 → 마무리"를 진행 막대로 보여 줍니다.
+- **한국어 형태소 검색 (Kiwi)**: 키워드(BM25) 검색은 기본으로 공백 단위라 `인증서를`은 `인증서`와 맞지 않습니다. Kiwi를 설치하면 MinSync가 각 단어에 형태소를 더해 색인해(`multilingual`) 활용형도 찾고 `연구목표` 같은 합성어도 그대로 맞습니다. 색인 창의 "키워드 분석" 줄과 설정 → 검색에서 상태를 보고 설치합니다(앱 설치본은 버튼, 웹은 `zaevis ext install kiwi`). 라이브러리(28MB)와 모델(104MB)은 Kiwi GitHub 릴리스(고정 버전, 체크섬 확인)에서 `~/.zaevis/ext/kiwi`로 받고, 서버가 검색 엔진에 경로를 넘깁니다. **이미 있는 색인은 공백 기준으로 만든 것이라 설치 뒤 "처음부터 다시" 색인해야** 합니다(설치 버튼이 바로 물어봅니다). 직접 둔 Kiwi(`~/.local/kiwi`, `KIWI_LIBRARY_PATH`·`KIWI_MODEL_PATH`)도 그대로 씁니다. 검색할 때도 Kiwi가 필요하니 설치 뒤에는 지우지 말고, 지웠다면 처음부터 다시 색인하세요.
 
 ### 주간·월간 정리 예약
 

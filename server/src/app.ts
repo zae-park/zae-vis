@@ -64,6 +64,11 @@ export type AppOptions = {
     /** Returns true when the daemon just became ready (caller re-indexes so vectors get built). */
     set(enabled: boolean): Promise<boolean>;
   };
+  /** Korean morphological tokenizer (Kiwi) for BM25: status, child restart when it appears, rebuild bookkeeping (kiwi.ts). */
+  tokenizer?: {
+    sync(canRestart: boolean): Promise<Record<string, unknown>>;
+    refreshed(force: boolean, ok: boolean): void;
+  };
   audio?: {
     dir(): string;
     enqueue(file: string): void;
@@ -181,11 +186,13 @@ export function createApp(opts: AppOptions): Server {
       .refresh(force, phases)
       .then((result) => {
         lastRefresh = { finishedAt: new Date().toISOString(), ok: true };
+        opts.tokenizer?.refreshed(force, true);
         if (external) opts.datasources?.recordSync(result);
       })
       .catch((err: unknown) => {
         const error = String((err as Error)?.message ?? err);
         lastRefresh = { finishedAt: new Date().toISOString(), ok: false, error };
+        opts.tokenizer?.refreshed(force, false);
         if (external) opts.datasources?.recordSync(null, error);
       })
       .finally(() => {
@@ -312,10 +319,14 @@ export function createApp(opts: AppOptions): Server {
             lastRefresh,
             autorag: await search.status(),
             ...(opts.embedding ? { embedding: await opts.embedding.status() } : {}),
+            // `tokenizer`: multilingual (Kiwi morphemes) or whitespace, and whether a rebuild is owed
+            ...(opts.tokenizer ? { tokenizer: await opts.tokenizer.sync(refreshing === null) } : {}),
           });
 
         case "POST /index": {
           const body = await readJson(req);
+          // a Kiwi installed since the child started must reach it before this refresh
+          if (refreshing === null) await opts.tokenizer?.sync(true);
           startRefresh(body.force === true);
           return send(res, 202, { refreshing: true });
         }

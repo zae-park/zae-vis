@@ -201,7 +201,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _screen() => switch (_index) {
-        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), onOpenSettings: _openSettings, focusNode: _searchFocus),
+        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api, backend: widget.backend), onOpenSettings: _openSettings, focusNode: _searchFocus),
         1 => MemoryScreen(api: api, onOpenProject: _openProject),
         2 => ReportsScreen(api: api, onOpenProject: _openProject),
         _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
@@ -262,7 +262,7 @@ class _HomeShellState extends State<HomeShell> {
             index: _index,
             onSelect: (i) => setState(() => _index = i),
             onRecord: _record,
-            onIndex: () => IndexSheet.show(context, api),
+            onIndex: () => IndexSheet.show(context, api, backend: widget.backend),
             onSettings: _openSettings,
           ),
           Expanded(
@@ -279,7 +279,7 @@ class _HomeShellState extends State<HomeShell> {
         title: Text(_dests[_index].label),
         actions: [
           IconButton(tooltip: '녹음', icon: const Icon(Icons.mic_none), onPressed: _record),
-          IconButton(tooltip: '검색 색인', icon: const Icon(Icons.storage_outlined), onPressed: () => IndexSheet.show(context, api)),
+          IconButton(tooltip: '검색 색인', icon: const Icon(Icons.storage_outlined), onPressed: () => IndexSheet.show(context, api, backend: widget.backend)),
           IconButton(tooltip: '설정', icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
         ],
       ),
