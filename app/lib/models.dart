@@ -122,6 +122,55 @@ class HitContext {
   List<String> get labels => [if (date != null) date!, sourceLabel, if (section != null) section!, if (author != null) author!];
 }
 
+/// One numbered passage the answer was written from (POST /api/ask → sources[]).
+class AskSource {
+  const AskSource({required this.n, required this.path, required this.label, required this.passage});
+  factory AskSource.fromJson(Json j) => AskSource(n: (j['n'] as num?)?.toInt() ?? 0, path: _str(j['path']), label: _str(j['label']), passage: _str(j['passage']));
+  final int n;
+  final String path;
+
+  /// "2026-10-26 · git 커밋 · zaevis · 박재"
+  final String label;
+  final String passage;
+}
+
+/// An answer with [n] citations into [sources].
+class AskResult {
+  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms});
+  factory AskResult.fromJson(Json j) => AskResult(
+        question: _str(j['q']),
+        answer: _str(j['answer']),
+        sources: (j['sources'] is List ? j['sources'] as List : const <Object?>[]).whereType<Json>().map(AskSource.fromJson).toList(),
+        agent: _str(j['agent']),
+        ms: (j['ms'] as num?)?.toInt() ?? 0,
+      );
+  final String question;
+  final String answer;
+  final List<AskSource> sources;
+  final String agent; // claude | codex | gemini | openrouter
+  final int ms;
+
+  /// The "[n]" numbers in the answer that point at an existing source.
+  List<int> get cited => RegExp(r'\[(\d+)\]').allMatches(answer).map((m) => int.parse(m.group(1)!)).where((n) => n >= 1 && n <= sources.length).toSet().toList()..sort();
+}
+
+/// GET /api/ask: which agent would answer (same choice as the weekly digest) and the last answer.
+class AskStatus {
+  const AskStatus({required this.agents, this.chosen, this.last, this.runningQuestion});
+  factory AskStatus.fromJson(Json j) => AskStatus(
+        agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
+        chosen: _strOrNull(j['chosen']),
+        last: j['last'] is Json ? AskResult.fromJson(j['last'] as Json) : null,
+        runningQuestion: j['running'] is Json ? _strOrNull((j['running'] as Json)['q']) : null,
+      );
+  final List<AgentInfo> agents;
+  final String? chosen;
+  final AskResult? last;
+  final String? runningQuestion;
+
+  AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
+}
+
 class WorklogFile {
   const WorklogFile({required this.path, required this.markdown});
   factory WorklogFile.fromJson(Json j) => WorklogFile(path: _str(j['path']), markdown: _str(j['markdown']));

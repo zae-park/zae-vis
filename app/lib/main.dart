@@ -202,7 +202,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _screen() => switch (_index) {
-        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), focusNode: _searchFocus),
+        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api), onOpenSettings: _openSettings, focusNode: _searchFocus),
         1 => LogScreen(api: api, onOpenProject: _openProject),
         2 => ProjectsScreen(api: api),
         3 => SummariesScreen(api: api, onOpenProject: _openProject),

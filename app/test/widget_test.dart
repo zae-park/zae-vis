@@ -20,6 +20,7 @@ http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
 final posted = <http.Request>[];
 int indexPolls = 0;
 String mockHotkey = '';
+String? mockAskAgent = 'claude';
 
 WorklogApi _fakeApi() => WorklogApi(
       baseUrl: 'http://127.0.0.1:4710',
@@ -49,6 +50,26 @@ WorklogApi _fakeApi() => WorklogApi(
                 },
                 {'number': 2, 'title': 'x', 'path': 'log/2026-10.md', 'snippet': '무관한 줄', 'score': 0.05, 'weak': true,
                   'context': {'kind': 'log', 'sourceLabel': '한 줄 기록', 'date': '2026-10', 'matched': <Object>[]}},
+              ],
+            });
+          case '/api/ask' when req.method == 'GET':
+            return _json({
+              'running': null, 'last': null, 'chosen': mockAskAgent,
+              'setting': {'agent': 'auto', 'model': ''},
+              'agents': [
+                {'id': 'claude', 'title': 'Claude Code', 'available': mockAskAgent != null, 'detail': '2.1.304'},
+                {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
+              ],
+            });
+          case '/api/ask' when req.method == 'POST':
+            posted.add(req);
+            if (mockAskAgent == null) return _json({'error': 'no_agent', 'message': '답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하세요.'}, 409);
+            return _json({
+              'q': (jsonDecode(req.body) as Map<String, dynamic>)['q'], 'agent': 'claude', 'ms': 12345,
+              'answer': 'GA4 매핑은 캠페인 매핑이 빠져 막혔다 [1]. 수동으로 채우기로 정했다 [2].',
+              'sources': [
+                {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · roas · 박재', 'passage': 'GA4 캠페인 매핑이 빠져서'},
+                {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '매핑 테이블을 수동으로 채우기로'},
               ],
             });
           case '/api/file':
@@ -195,6 +216,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
     expect(find.textContaining('GA4 캠페인 매핑이 빠져서 — 박재'), findsWidgets);
+  });
+
+  testWidgets('질문 mode asks the server, shows the answer with [n] marks that jump to the source, and opens the file', (tester) async {
+    tester.view.physicalSize = const Size(1200, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('질문'));
+    await tester.pumpAndSettle();
+    expect(find.text('검색한 문단만 근거로 답을 씁니다'), findsOneWidget);
+    expect(find.textContaining('답은 Claude Code가 씁니다'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'GA4 매핑은 왜 막혔지?');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    final ask = posted.singleWhere((r) => r.url.path == '/api/ask');
+    expect(jsonDecode(ask.body), {'q': 'GA4 매핑은 왜 막혔지?', 'topK': 10});
+    expect(find.textContaining('캠페인 매핑이 빠져 막혔다'), findsOneWidget);
+    expect(find.text('근거 2개'), findsOneWidget);
+    expect(find.text('2026-10-09 · git 커밋 · roas · 박재'), findsOneWidget);
+    expect(find.textContaining('Claude Code · 12.3초'), findsOneWidget);
+
+    // the [2] mark scrolls to and outlines source 2
+    await tester.tap(find.widgetWithText(InkWell, '2').first);
+    await tester.pumpAndSettle();
+    final card2 = tester.widget<Card>(find.ancestor(of: find.text('2026-10 · 한 줄 기록'), matching: find.byType(Card)).first);
+    expect(card2.shape, isA<RoundedRectangleBorder>(), reason: 'focused source is outlined');
+
+    await tester.tap(find.text('2026-10 · 한 줄 기록'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10.md'), findsOneWidget); // file screen title
+  });
+
+  testWidgets('질문 mode without an agent explains and offers the settings', (tester) async {
+    tester.view.physicalSize = const Size(1200, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockAskAgent = null;
+    addTearDown(() => mockAskAgent = 'claude');
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('질문'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('답을 쓸 에이전트가 없습니다'), findsOneWidget);
+    expect(find.text('설정 열기'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'x');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Claude Code·Codex·Gemini CLI 중 하나를 설치하세요'), findsOneWidget);
+    await tester.tap(find.text('설정 열기'));
+    await tester.pumpAndSettle();
+    expect(find.text('정리 (지식화)'), findsOneWidget); // settings opened
   });
 
   testWidgets('settings shows the OpenRouter re-ranking section, off and local by default', (tester) async {

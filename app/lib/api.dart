@@ -122,6 +122,13 @@ class WorklogApi {
 
   Future<IndexStatus> indexStatus() async => IndexStatus.fromJson(await _get('/index'));
 
+  // ── 질문 (answer from the top passages) ───────────────────────────────────
+  Future<AskStatus> askStatus() async => AskStatus.fromJson(await _get('/ask'));
+
+  /// Searches, then has the chosen agent answer from the passages. Takes tens of seconds; the server
+  /// answers 409 (no agent / busy), 404 (no hits) or 502 (agent failed) as an [ApiException].
+  Future<AskResult> ask(String question, {int topK = 10}) async => AskResult.fromJson(await _send('POST', '/ask', {'q': question, 'topK': topK}));
+
   /// A markdown file inside the worklog (the original behind a search hit).
   Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));
 
