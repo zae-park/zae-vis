@@ -132,6 +132,24 @@ zaevis ext install whisperx         # 녹음 전사 확장 (Python·ffmpeg까지
 모든 원본은 기록 전에 토큰·비밀번호·API 키를 가립니다. 설정은 앱의 **수집** 화면이나 `~/.zaevis/sources.json`에서 바꿉니다.
 Claude Cowork·claude.ai 대화는 로컬 기록이 없어 자동 수집되지 않습니다. 필요하면 내보낸 대화를 전사본처럼 넣거나 사용자 커넥터를 만드세요.
 
+### 외부 소스 (AutoRAG 데이터소스)
+
+위 데이터소스는 worklog 폴더에 Markdown으로 쌓이는 것들입니다. 그와 별도로 AutoRAG가 **직접 색인하는 외부 소스**를 붙일 수 있습니다. worklog에는 들어가지 않고, 검색할 때 AutoRAG가 worklog 히트와 함께 섞어 돌려줍니다(결과 카드의 출처가 "Obsidian 볼트"·"Slack"처럼 표시되고, 출처 칩으로 거를 수 있음). 앱 **수집** 화면 맨 아래 "외부 소스 (AutoRAG)"에서 연결합니다.
+
+| 소스 | 필요한 것 | 연결할 때 적는 것 |
+|---|---|---|
+| Obsidian 볼트 | 없음 (AutoRAG가 노트를 직접 색인, 키워드+의미 검색) | 볼트 폴더 |
+| 메일 내보내기 (.mbox/.eml) | 없음 | 파일·폴더 |
+| RSS · 뉴스 | 없음 | 피드 주소 |
+| macOS Spotlight | 없음 (macOS만) | Spotlight 질의, 폴더 |
+| GitHub 이슈·PR / Gist | 환경 변수 `GITHUB_TOKEN` (값은 저장하지 않고 변수 **이름**만) | 저장소 `owner/repo`, 토큰 변수 이름 |
+| Slack · Notion · Discord · 카카오톡 · WhatsApp · Telegram | 각 CLI(`slacrawl` `notcrawl` `discrawl` `lazykatok` `wacrawl` `telecrawl`)를 설치하고 거기서 로그인·수집을 한 번 해 둔 아카이브 | Slack은 워크스페이스 ID, 나머지는 아카이브 위치(비우면 기본값) |
+| 메일 (mailcrawl) | `mailcrawl` CLI와 그 안의 계정 | 계정 이름, 메일함 |
+| 클라우드 드라이브 | `rclone`과 `rclone config`로 만든 리모트 | 리모트 이름 |
+| 사진·스크린샷 / 브라우저 기록 | `clawgallery` / `hister` | 폴더 / 주소 |
+
+절차: 카드를 펼치면 **미설치**(설치 명령 복사 버튼) → **연결 안 됨**(필요한 칸만 있는 폼, "연결") → **연결됨**(켜기/끄기 스위치, 저장, 지금 동기화, 연결 삭제) 순으로 바뀝니다. 연결하거나 저장하면 서버가 AutoRAG의 `datasources` 설정을 고쳐 쓰고 검색 자식을 재시작한 뒤 외부 소스만 동기화합니다(`autorag.refresh`의 `datasources` 단계). 매일 수집 뒤 색인에서도 같이 동기화됩니다. 동기화는 연결 전체를 한 번에 돕니다(AutoRAG에 연결별 갱신이 없음). 토큰·비밀번호 값은 어디에도 저장되지 않으며, `token` 같은 이름의 값을 넣으면 서버가 거절합니다. 카드의 "밖으로 나가는 것"이 각 소스가 어디에 접속하는지 알려 줍니다(Obsidian·메일 내보내기·Spotlight는 없음).
+
 ### 질문 (기록을 근거로 답하기)
 
 검색 탭 위의 **검색 / 질문** 전환을 질문으로 두고 물어보면, 같은 검색으로 고른 상위 문단(기본 10개)만 근거로 한국어 답을 써 줍니다.

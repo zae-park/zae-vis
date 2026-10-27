@@ -27,12 +27,20 @@ export type SearchResponse = {
   error?: { code: string; message: string };
 };
 
+/** AutoRAG refresh phases (`autorag.refresh` → `methods`). */
+export type RefreshPhase = "parsed" | "minsync" | "datasources" | "jikji" | "everything" | "fsearch";
+
 /** What the HTTP layer needs. A fake implements this in tests. */
 export interface SearchBackend {
   status(): Promise<unknown>;
-  refresh(force?: boolean): Promise<unknown>;
+  /** `phases` limits the run (e.g. `["datasources"]` syncs only the external connections). */
+  refresh(force?: boolean, phases?: RefreshPhase[]): Promise<unknown>;
   /** `passageChars` widens the passage of each hit (the "ask" flow feeds longer excerpts to a model). */
   search(query: string, topK: number, passageChars?: number): Promise<SearchResponse>;
+  /** External connections AutoRAG has loaded (`autorag.datasources.list`); null when it cannot answer. */
+  datasources?(): Promise<Array<Record<string, unknown>> | null>;
+  /** Drops the child so the next call reads the config file again. */
+  restart?(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -81,14 +89,17 @@ export function normalizeSearch(query: string, data: unknown, roots: string[] = 
   const list = (Array.isArray(d.results) ? d.results : Array.isArray(d.hits) ? d.hits : Array.isArray(d.chunks) ? d.chunks : []) as Array<Record<string, unknown>>;
   const hits = list.map((r, i): SearchHit => {
     const src = (r.source && typeof r.source === "object" ? r.source : {}) as Record<string, unknown>;
+    const meta = (r.metadata && typeof r.metadata === "object" ? r.metadata : {}) as Record<string, unknown>;
     const rawPath = str(r.path) || str(r.virtualPath) || str(r.sourcePath) || str(src.path) || str(src.virtualPath) || str(r.source) || str(r.file);
-    const path = displayPath(rawPath, roots);
+    // An external datasource hit keeps its opaque source ("/obsidian/default/노트.md") so the kind stays visible.
+    const datasourceId = str(meta.datasourceId) || null;
+    const path = datasourceId ? rawPath : displayPath(rawPath, roots);
     const content = (str(r.snippet) || str(r.summary) || str(r.text) || str(r.content) || str(r.chunk)).trim();
-    const context = describeHit(path, content, query, passageChars);
+    const context = describeHit(path, content, query, passageChars, datasourceId ? { datasourceId, file: str(meta.path) || null, title: str(meta.title) || null } : undefined);
     const score = num(r.score) ?? num(r.relevance);
     return {
       number: num(r.number) ?? num(r.rank) ?? i + 1,
-      title: str(r.title) || str(src.title) || path.split("/").pop() || `#${i + 1}`,
+      title: str(r.title) || str(src.title) || str(meta.title) || path.split("/").pop() || `#${i + 1}`,
       path,
       snippet: context.passage || clip(content, 600),
       score,
@@ -177,11 +188,21 @@ export class AutoRAGMcp implements SearchBackend {
     }
   }
 
-  async refresh(force = false): Promise<unknown> {
+  async refresh(force = false, phases?: RefreshPhase[]): Promise<unknown> {
     const missing = this.notConfigured();
     if (missing) throw new Error(missing);
-    // First refresh builds embeddings and can take minutes.
-    return this.call("autorag.refresh", force ? { force: true } : {}, 30 * 60_000);
+    // First refresh builds embeddings and can take minutes; a datasource sync has a 30-minute budget per connector.
+    return this.call("autorag.refresh", { ...(force ? { force: true } : {}), ...(phases?.length ? { methods: phases } : {}) }, 30 * 60_000);
+  }
+
+  async datasources(): Promise<Array<Record<string, unknown>> | null> {
+    if (this.notConfigured()) return null;
+    try {
+      const d = (await this.call("autorag.datasources.list", {}, 30_000)) as { datasources?: unknown };
+      return Array.isArray(d?.datasources) ? (d.datasources as Array<Record<string, unknown>>) : null;
+    } catch {
+      return null;
+    }
   }
 
   async search(query: string, topK: number, passageChars?: number): Promise<SearchResponse> {

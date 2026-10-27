@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../api.dart';
 import '../models.dart';
@@ -33,6 +34,7 @@ class CollectScreen extends StatefulWidget {
 class _CollectScreenState extends State<CollectScreen> {
   SourcesState? _sources;
   Inbox? _inbox;
+  DatasourcesState? _external;
   Object? _error;
   Timer? _poll;
 
@@ -55,14 +57,16 @@ class _CollectScreenState extends State<CollectScreen> {
     try {
       final s = await widget.api.sources();
       final i = await widget.api.inbox();
+      final x = await widget.api.datasources();
       if (!mounted) return;
       setState(() {
         _sources = s;
         _inbox = i;
+        _external = x;
         _error = null;
       });
       _poll?.cancel();
-      if (s.collecting || i.transcribing) _poll = Timer(const Duration(seconds: 3), _load);
+      if (s.collecting || i.transcribing || x.syncing) _poll = Timer(const Duration(seconds: 3), _load);
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -176,6 +180,37 @@ class _CollectScreenState extends State<CollectScreen> {
             child: Text('Markdown이나 텍스트를 출력하는 명령이면 무엇이든 데이터소스가 됩니다 — 폴더의 노트, 캘린더, 사내 도구의 내보내기 스크립트.',
                 style: Theme.of(context).textTheme.bodySmall),
           ),
+
+          // ── external AutoRAG datasources ─────────────────────────────────
+          if (_external != null && _external!.datasources.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            SectionHeader(
+              '외부 소스 (AutoRAG)',
+              subtitle: 'Slack·Notion·Obsidian·GitHub 같은 곳을 AutoRAG가 직접 색인해 검색에 섞습니다. worklog에는 들어가지 않습니다.',
+              trailing: _external!.syncing
+                  ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 8),
+                      Text('동기화 중…'),
+                    ])
+                  : null,
+            ),
+            const SizedBox(height: 8),
+            for (final d in _external!.datasources)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ExternalCard(
+                  key: ValueKey('ext-${d.name}'),
+                  source: d,
+                  syncing: _external!.syncing,
+                  onToggle: (on) => _act(() => widget.api.saveDatasource(d.name, enabled: on), done: on ? '${d.title}을(를) 켰습니다. 동기화를 시작합니다.' : '${d.title}을(를) 껐습니다'),
+                  onSave: (connector, note) => _act(() => widget.api.saveDatasource(d.name, enabled: true, connector: connector, description: note),
+                      done: d.configured ? '저장했습니다. 동기화를 시작합니다.' : '${d.title}을(를) 연결했습니다. 첫 동기화를 시작합니다.'),
+                  onSync: () => _act(() => widget.api.syncDatasources(d.name), done: '외부 소스 동기화를 시작했습니다'),
+                  onRemove: () => _act(() => widget.api.removeDatasource(d.name), done: '${d.title} 연결을 지웠습니다'),
+                ),
+              ),
+          ],
         ]),
       ),
     );
@@ -316,6 +351,143 @@ class _SourceCardState extends State<_SourceCard> {
             if (widget.onRemove != null)
               TextButton(onPressed: widget.onRemove, child: Text('삭제', style: TextStyle(color: scheme.error))),
           ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// One AutoRAG datasource template: install hint when its CLI is missing, a connect form otherwise,
+/// and on/off · sync · delete once connected.
+class _ExternalCard extends StatefulWidget {
+  const _ExternalCard({super.key, required this.source, required this.syncing, required this.onToggle, required this.onSave, required this.onSync, required this.onRemove});
+  final ExternalDatasource source;
+  final bool syncing;
+  final void Function(bool) onToggle;
+  final void Function(Map<String, Object?> connector, String note) onSave;
+  final VoidCallback onSync;
+  final VoidCallback onRemove;
+
+  @override
+  State<_ExternalCard> createState() => _ExternalCardState();
+}
+
+class _ExternalCardState extends State<_ExternalCard> {
+  final Map<String, TextEditingController> _fields = {};
+  late final TextEditingController _note = TextEditingController(text: widget.source.note ?? '');
+
+  TextEditingController _field(DatasourceField f) => _fields.putIfAbsent(f.key, () => TextEditingController(text: widget.source.fieldText(f)));
+
+  @override
+  void dispose() {
+    for (final c in _fields.values) {
+      c.dispose();
+    }
+    _note.dispose();
+    super.dispose();
+  }
+
+  Map<String, Object?> _connector() => {
+        for (final f in widget.source.fields)
+          f.key: f.kind == 'list' ? _field(f).text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList() : _field(f).text.trim(),
+      };
+
+  String _status(ExternalDatasource d) {
+    if (d.unavailable != null) return d.unavailable!;
+    if (d.needsInstall) return '미설치 — ${d.cliBin} 명령이 없습니다';
+    if (!d.configured) return '연결 안 됨';
+    if (!d.enabled) return '꺼짐';
+    if (d.lastOk == false) return d.lastError ?? '동기화 실패';
+    final parts = <String>['연결됨'];
+    if (d.lastSync != null) parts.add('동기화 ${_ago(d.lastSync)}');
+    if (d.chunks != null) parts.add('조각 ${d.chunks}개');
+    if (d.autoragStatus == null && d.lastSync == null) parts.add('아직 동기화 안 함');
+    return parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.source;
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final failed = d.lastOk == false && d.enabled;
+    final mono = TextStyle(fontFamily: 'monospace', fontSize: 13, color: scheme.onSurface);
+    final Widget leading = d.configured
+        ? Switch(value: d.enabled, onChanged: d.unavailable != null ? null : widget.onToggle)
+        : Icon(d.unavailable != null ? Icons.block : d.needsInstall ? Icons.download_outlined : Icons.add_link, color: scheme.outline);
+    return Card.outlined(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: leading,
+        title: Text(d.title, style: t.titleSmall),
+        subtitle: Text(_status(d), maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: failed ? scheme.error : null)),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(d.description, style: t.bodySmall),
+          if (d.external != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('밖으로 나가는 것: ${d.external}', style: t.bodySmall?.copyWith(color: scheme.outline))),
+          if (d.needsInstall) ...[
+            const SizedBox(height: 10),
+            Text('먼저 터미널에서 설치하고 로그인·수집을 한 번 해 두세요:', style: t.bodySmall),
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(8)),
+              child: SelectableText(d.install ?? '', style: mono, minLines: 1, maxLines: 3),
+            ),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, children: [
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: d.install ?? ''));
+                  if (context.mounted) toast(context, '설치 명령을 복사했습니다');
+                },
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('설치 명령 복사'),
+              ),
+              if (d.homepage != null) OutlinedButton(onPressed: () => Clipboard.setData(ClipboardData(text: d.homepage!)), child: Text(d.homepage!, style: t.bodySmall)),
+            ]),
+          ] else if (d.unavailable == null) ...[
+            if (d.archive == false)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('${d.cliBin}의 아카이브가 아직 없습니다. 먼저 ${d.cliBin}으로 로그인·수집을 한 번 하세요.', style: t.bodySmall?.copyWith(color: scheme.error)),
+              ),
+            for (final e in d.env)
+              if (!e.set)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text('환경 변수 ${e.name}이(가) 서버에 없습니다. 값은 여기 적지 말고 서버를 띄운 셸에 설정하세요.', style: t.bodySmall?.copyWith(color: scheme.error)),
+                ),
+            for (final f in d.fields)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: TextField(
+                  controller: _field(f),
+                  minLines: f.kind == 'list' ? 2 : 1,
+                  maxLines: f.kind == 'list' ? 6 : 1,
+                  style: f.kind == 'list' || f.kind == 'env' ? mono : null,
+                  decoration: InputDecoration(
+                    labelText: f.required ? '${f.label} *' : f.label,
+                    hintText: f.placeholder,
+                    helperText: f.help ?? (f.kind == 'list' ? '한 줄에 하나씩' : f.kind == 'env' ? '값이 아니라 환경 변수 이름' : null),
+                    helperMaxLines: 2,
+                    isDense: true,
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextField(controller: _note, decoration: const InputDecoration(labelText: '메모 (선택)', helperText: '이 연결이 무엇인지. 질문 모드의 에이전트에게도 보입니다.', isDense: true)),
+            ),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, children: [
+              FilledButton(onPressed: () => widget.onSave(_connector(), _note.text.trim()), child: Text(d.configured ? '저장' : '연결')),
+              if (d.configured) OutlinedButton(onPressed: widget.syncing || !d.enabled ? null : widget.onSync, child: const Text('지금 동기화')),
+              if (d.configured) TextButton(onPressed: widget.onRemove, child: Text('연결 삭제', style: TextStyle(color: scheme.error))),
+            ]),
+          ],
         ],
       ),
     );

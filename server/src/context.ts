@@ -2,12 +2,18 @@
 // the chunk that best matches the query. AutoRAG Lite returns whole chunks (up to ~4K chars) with no
 // highlight, and a file path like sources/git/2026-10-26.md — everything shown is derived from those.
 
-export type HitKind = "git" | "claude-code" | "shell-history" | "transcripts" | "custom" | "log" | "project" | "summary" | "inbox" | "other";
+import { datasourceLabel, TEMPLATES } from "./datasources.ts";
+
+export type HitKind = "git" | "claude-code" | "shell-history" | "transcripts" | "custom" | "log" | "project" | "summary" | "inbox" | "external" | "other";
 
 export type HitContext = {
   kind: HitKind;
-  /** Korean label for the UI: "git 커밋", "Claude Code 세션", "한 줄 기록" … */
+  /** Korean label for the UI: "git 커밋", "Claude Code 세션", "한 줄 기록", "Obsidian 볼트" … */
   sourceLabel: string;
+  /** External AutoRAG datasource the hit came from (config key such as "obsidian", "slack"); null for worklog hits. */
+  datasource: string | null;
+  /** Absolute path of the original behind an external hit, when the datasource has one (Obsidian notes). */
+  file: string | null;
   /** YYYY-MM-DD, or YYYY-MM for monthly files; null when the path has no date. */
   date: string | null;
   /** Nearest "## " heading above the passage: repository, session title, project name … */
@@ -30,24 +36,34 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const NOISE_LINE = /^\s*$|^<!--|^#\s|^\s*-{3,}\s*$/;
 
-/** Path → kind, label, date. Paths are relative to the worklog root (sources/git/2026-10-26.md). */
-export function classifyPath(path: string): { kind: HitKind; sourceLabel: string; date: string | null } {
+const TEMPLATE_IDS = new Set(TEMPLATES.map((t) => t.name));
+
+/**
+ * Path → kind, label, date. Paths are relative to the worklog root (sources/git/2026-10-26.md), or an
+ * AutoRAG datasource source ("/obsidian/default/노트.md", "/slack/default/C01/…") — `datasourceId`
+ * says so for sure; without it, a leading segment that is a known template name is taken as one.
+ */
+export function classifyPath(path: string, datasourceId?: string | null): { kind: HitKind; sourceLabel: string; date: string | null; datasource: string | null } {
+  const file = path.split("/").pop() ?? path;
+  const date = /(\d{4}-\d{2}-\d{2})/.exec(file)?.[1] ?? /(\d{4}-\d{2})(?!\d)/.exec(file)?.[1] ?? null;
+  const external = datasourceId || (/^\/([^/]+)\//.test(path) && TEMPLATE_IDS.has(path.split("/")[1]) ? path.split("/")[1] : null);
+  // external sources carry the date in any segment ("/slack/default/C01/2026-10-20/p1.md"), not just the file name
+  if (external) return { kind: "external", sourceLabel: datasourceLabel(external), date: date ?? /(\d{4}-\d{2}-\d{2})/.exec(path)?.[1] ?? null, datasource: external };
   // The worklog folders are matched anywhere in the path: AutoRAG may hand back an absolute path
   // the server could not shorten (e.g. /private/tmp/… vs /tmp/…).
   const p = path.replace(/^\/+/, "");
-  const file = p.split("/").pop() ?? p;
-  const date = /(\d{4}-\d{2}-\d{2})/.exec(file)?.[1] ?? /(\d{4}-\d{2})(?!\d)/.exec(file)?.[1] ?? null;
   let m: RegExpExecArray | null;
+  const local = (kind: HitKind, sourceLabel: string, d: string | null = date) => ({ kind, sourceLabel, date: d, datasource: null });
   if ((m = /(?:^|\/)sources\/([^/]+)\/[^/]+$/.exec(p))) {
     const name = m[1];
-    if (name in SOURCE_LABELS) return { kind: name as HitKind, sourceLabel: SOURCE_LABELS[name], date };
-    return { kind: "custom", sourceLabel: `${name} (커넥터)`, date };
+    if (name in SOURCE_LABELS) return local(name as HitKind, SOURCE_LABELS[name]);
+    return local("custom", `${name} (커넥터)`);
   }
-  if (/(?:^|\/)log\/[^/]+$/.test(p)) return { kind: "log", sourceLabel: "한 줄 기록", date };
-  if (/(?:^|\/)projects\/[^/]+$/.test(p)) return { kind: "project", sourceLabel: "프로젝트", date: null };
-  if (/(?:^|\/)summaries\/[^/]+$/.test(p)) return { kind: "summary", sourceLabel: "월간 정리", date };
-  if (/(?:^|\/)(inbox|processed)\//.test(p)) return { kind: "inbox", sourceLabel: /transcripts/.test(p) ? "회의 전사본" : "inbox", date };
-  return { kind: "other", sourceLabel: "worklog", date };
+  if (/(?:^|\/)log\/[^/]+$/.test(p)) return local("log", "한 줄 기록");
+  if (/(?:^|\/)projects\/[^/]+$/.test(p)) return local("project", "프로젝트", null);
+  if (/(?:^|\/)summaries\/[^/]+$/.test(p)) return local("summary", "월간 정리");
+  if (/(?:^|\/)(inbox|processed)\//.test(p)) return local("inbox", /transcripts/.test(p) ? "회의 전사본" : "inbox");
+  return local("other", "worklog");
 }
 
 // Korean particles and endings stripped from the end of a query word, longest first, so that
@@ -165,10 +181,14 @@ export function gitAuthor(passage: string): string | null {
   return null;
 }
 
-export function describeHit(path: string, content: string, query: string, passageChars = 420): HitContext {
-  const { kind, sourceLabel, date } = classifyPath(path);
+/** Extra facts AutoRAG attaches to an external datasource hit (metadata.datasourceId / path / title). */
+export type ExternalHit = { datasourceId: string; file?: string | null; title?: string | null };
+
+export function describeHit(path: string, content: string, query: string, passageChars = 420, external?: ExternalHit): HitContext {
+  const { kind, sourceLabel, date, datasource } = classifyPath(path, external?.datasourceId);
   const { passage, matched, lineIndex } = bestPassage(content, query, passageChars);
-  const section = sectionAbove(content, lineIndex);
+  // an external note has no "## section" convention; its title (metadata) is the best context
+  const section = sectionAbove(content, lineIndex) ?? (kind === "external" ? external?.title ?? null : null);
   const author = kind === "git" ? gitAuthor(passage) : null;
-  return { kind, sourceLabel, date, section, author, passage, matched };
+  return { kind, sourceLabel, datasource, file: external?.file ?? null, date, section, author, passage, matched };
 }

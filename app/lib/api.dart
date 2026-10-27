@@ -214,6 +214,38 @@ class WorklogApi {
     await _send('POST', '/collect', {if (only != null) 'sources': only});
   }
 
+  // ── external AutoRAG datasources (Slack, Obsidian, GitHub …) ─────────────
+  /// Templates with their probe (installed? archive?) and connection state. An older server answers
+  /// 404, which reads as "none".
+  Future<DatasourcesState> datasources() async {
+    try {
+      return DatasourcesState.fromJson(await _get('/datasources'));
+    } on ApiException catch (e) {
+      if (e.status == 404) return const DatasourcesState(datasources: [], syncing: false);
+      rethrow;
+    }
+  }
+
+  /// Creates or updates a connection; the server then syncs the external sources. Only env-var
+  /// names go in [connector] — the server refuses token values (400 → [ApiException]).
+  Future<void> saveDatasource(String name, {bool? enabled, String? description, Map<String, Object?>? connector, String? type}) async {
+    await _send('PUT', '/datasources/${Uri.encodeComponent(name)}', {
+      if (enabled != null) 'enabled': enabled,
+      if (description != null) 'description': description,
+      if (connector != null) 'connector': connector,
+      if (type != null) 'type': type,
+    });
+  }
+
+  Future<void> removeDatasource(String name) async {
+    await _send('DELETE', '/datasources/${Uri.encodeComponent(name)}');
+  }
+
+  /// Syncs every enabled external connection (AutoRAG has no per-connection refresh). 409 while busy.
+  Future<void> syncDatasources(String name) async {
+    await _send('POST', '/datasources/${Uri.encodeComponent(name)}/sync', {});
+  }
+
   // ── settings ─────────────────────────────────────────────────────────────
   /// Saves re-ranking settings; an empty [apiKey] removes the stored key. The key is never returned.
   Future<RerankStatus> updateRerank({bool? enabled, String? apiKey, String? model}) async => RerankStatus.fromJson(

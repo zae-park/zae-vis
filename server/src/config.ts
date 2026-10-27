@@ -147,6 +147,8 @@ export type CollectState = {
   embedding?: { model: string; builtAt: string };
   /** Last weekly digest run. */
   digest?: { lastRun: string; agent: string; ok: boolean; report: string };
+  /** Last sync of each external AutoRAG datasource (config key → outcome), see datasources.ts. */
+  datasources?: Record<string, { lastSync: string; ok: boolean; error?: string; chunks?: number }>;
 };
 
 export const stateFile = (): string => join(stateDir(), "state.json");

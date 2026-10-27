@@ -10,6 +10,7 @@ import { AskRunner } from "./ask.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
+import * as datasources from "./datasources.ts";
 import { DigestRunner, detectAgents, pickAgent } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
@@ -175,6 +176,30 @@ const server = createApp({
       queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), whisperxBin: ts.whisperxBin as string | undefined });
     },
     jobs: () => queue.jobs,
+  },
+  datasources: {
+    list: async () => datasources.listStatus(cfg.autoragConfig, (await search.datasources()) as datasources.AutoragDatasource[] | null, loadState().datasources ?? {}),
+    async save(name, patch) {
+      const entry = datasources.saveDatasource(cfg.autoragConfig, name, patch as datasources.SavePatch);
+      await search.restart(); // the child reads config.json only at start
+      return { enabled: entry.enabled !== false };
+    },
+    async remove(name) {
+      const removed = datasources.removeDatasource(cfg.autoragConfig, name);
+      if (removed) {
+        await search.restart();
+        const state = loadState();
+        if (state.datasources) delete state.datasources[name];
+        saveState(state);
+      }
+      return removed;
+    },
+    file: (path) => datasources.readExternalFile(cfg.autoragConfig, path),
+    recordSync(result, error) {
+      const state = loadState();
+      state.datasources = { ...(state.datasources ?? {}), ...datasources.syncRecords(result, error, Object.keys(datasources.readDatasources(cfg.autoragConfig))) };
+      saveState(state);
+    },
   },
 });
 

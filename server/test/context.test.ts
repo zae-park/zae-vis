@@ -3,16 +3,30 @@ import { test } from "node:test";
 import { bestPassage, classifyPath, describeHit, gitAuthor, queryTerms, sectionAbove, stemKo } from "../src/context.ts";
 
 test("classifyPath: sources, log, projects, summaries, inbox", () => {
-  assert.deepEqual(classifyPath("sources/git/2026-10-26.md"), { kind: "git", sourceLabel: "git 커밋", date: "2026-10-26" });
-  assert.deepEqual(classifyPath("sources/claude-code/2026-10-21.md"), { kind: "claude-code", sourceLabel: "Claude Code 세션", date: "2026-10-21" });
-  assert.deepEqual(classifyPath("sources/slack/2026-10-21.md"), { kind: "custom", sourceLabel: "slack (커넥터)", date: "2026-10-21" });
-  assert.deepEqual(classifyPath("log/2026-10.md"), { kind: "log", sourceLabel: "한 줄 기록", date: "2026-10" });
-  assert.deepEqual(classifyPath("projects/roas.md"), { kind: "project", sourceLabel: "프로젝트", date: null });
-  assert.deepEqual(classifyPath("summaries/2026-09.md"), { kind: "summary", sourceLabel: "월간 정리", date: "2026-09" });
+  const local = (kind: string, sourceLabel: string, date: string | null) => ({ kind, sourceLabel, date, datasource: null });
+  assert.deepEqual(classifyPath("sources/git/2026-10-26.md"), local("git", "git 커밋", "2026-10-26"));
+  assert.deepEqual(classifyPath("sources/claude-code/2026-10-21.md"), local("claude-code", "Claude Code 세션", "2026-10-21"));
+  assert.deepEqual(classifyPath("sources/slack/2026-10-21.md"), local("custom", "slack (커넥터)", "2026-10-21"), "a worklog connector named slack is not the AutoRAG datasource");
+  assert.deepEqual(classifyPath("log/2026-10.md"), local("log", "한 줄 기록", "2026-10"));
+  assert.deepEqual(classifyPath("projects/roas.md"), local("project", "프로젝트", null));
+  assert.deepEqual(classifyPath("summaries/2026-09.md"), local("summary", "월간 정리", "2026-09"));
   assert.equal(classifyPath("inbox/transcripts/2026-10-06_회의.md").sourceLabel, "회의 전사본");
   assert.equal(classifyPath("README.md").kind, "other");
-  assert.deepEqual(classifyPath("tmp/zv-home/worklog/sources/git/2026-10-26.md"), { kind: "git", sourceLabel: "git 커밋", date: "2026-10-26" });
+  assert.deepEqual(classifyPath("tmp/zv-home/worklog/sources/git/2026-10-26.md"), local("git", "git 커밋", "2026-10-26"));
   assert.equal(classifyPath("/Users/me/worklog/log/2026-10.md").kind, "log");
+});
+
+test("classifyPath: external AutoRAG datasource sources", () => {
+  assert.deepEqual(classifyPath("/obsidian/default/프로젝트/연결실험.md"), { kind: "external", sourceLabel: "Obsidian 볼트", date: null, datasource: "obsidian" });
+  assert.deepEqual(classifyPath("/slack/default/C01ABC/2026-10-20/p123.md"), { kind: "external", sourceLabel: "Slack", date: "2026-10-20", datasource: "slack" });
+  assert.equal(classifyPath("/work-notes/default/a.md", "work-notes").datasource, "work-notes", "an alias is external when AutoRAG says so");
+  assert.equal(classifyPath("/work-notes/default/a.md").kind, "other", "…but an unknown leading segment alone is not");
+  assert.equal(classifyPath("/Users/me/worklog/sources/git/2026-10-26.md").kind, "git", "absolute worklog paths still classify locally");
+  const hit = describeHit("/obsidian/default/회의.md", "# 회의 메모\n\n청록앵무 킥오프.", "청록앵무", 420, { datasourceId: "obsidian", file: "/v/회의.md", title: "회의" });
+  assert.equal(hit.kind, "external");
+  assert.equal(hit.file, "/v/회의.md");
+  assert.equal(hit.section, "회의", "no ## heading → the note title stands in");
+  assert.match(hit.passage, /청록앵무/);
 });
 
 test("queryTerms: particles stripped, content words kept, bigrams only for long words", () => {

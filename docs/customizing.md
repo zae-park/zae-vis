@@ -34,6 +34,10 @@
 | POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
 | GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
 | GET / POST | `/api/collect` | 수집 상태 · 수집 시작 (`{ sources?: [], index?: false }`) |
+| GET | `/api/datasources` | 외부 AutoRAG 데이터소스: 템플릿마다 `{ name, template, title, description, fields[], cli{bin,install}, external, probe{installed, binPath, archive, env[{name,set}], unavailable}, configured, enabled, note, connector, channels, autorag(autorag.datasources.list의 항목), sync{lastSync, ok, error?, chunks?} }` + `syncing`, `lastRefresh`. 템플릿 목록·probe는 `server/src/datasources.ts` |
+| PUT | `/api/datasources/:name` | 연결 만들기·고치기 `{ enabled?, description?, connector?, channels?, type?(별칭일 때 템플릿), sync?: false }`. AutoRAG `config.json`의 `datasources.<name>`만 바꾸고(다른 키 보존) 검색 자식을 재시작한 뒤 켜져 있으면 `datasources` 단계만 refresh. 토큰·비밀번호처럼 보이는 키나 환경 변수 이름이 아닌 `tokenEnv`는 400 |
+| DELETE | `/api/datasources/:name` | 연결 삭제 (설정 항목 제거 + 재시작) |
+| POST | `/api/datasources/:name/sync` | 외부 소스 동기화 시작 (202; AutoRAG는 연결별 갱신이 없어 전체를 돈다). 색인 중이면 409 |
 | GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인), `notifications`(시스템 알림, 기본 켬), `hotkey`(전역 단축키 스펙 `"meta+shift+space"` 꼴, `""`=플랫폼 기본). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`) 포함 |
 | PUT | `/api/settings/rerank` | OpenRouter 재정렬 `{ enabled?, model?, apiKey? }` — `apiKey: ""`는 키 삭제. 키는 `secrets.json`(0600)에 저장되고 응답엔 끝 4자리만. AutoRAG 설정의 `rerank`를 다시 쓰고 검색 자식 프로세스를 재시작 |
 | POST | `/api/settings/rerank/test` | `{ apiKey? }` 키를 OpenRouter에 확인 (`{ ok, message }`), 저장하지 않음 |
@@ -47,6 +51,8 @@ GET이 아닌 요청은 `x-zaevis: 1` 헤더가 있어야 하고, 다른 사이�
 설정은 `~/.zaevis/config.json`이고, 환경변수 `WORKLOG_DIR`, `AUTORAG_CONFIG`, `ZAEVIS_PORT`, `ZAEVIS_WEB_DIR`로 덮어쓸 수 있습니다.
 
 AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSearch()`가 흔한 필드 이름을 모두 받아 정규화합니다. AutoRAG를 올린 뒤 결과가 비어 보이면 이 함수부터 확인하세요.
+
+외부 데이터소스 히트는 `source`가 `/obsidian/default/노트.md`처럼 불투명 경로이고 `metadata.datasourceId`가 붙습니다. `normalizeSearch()`는 그 경로를 그대로 두고, `context.ts`의 `classifyPath`가 `kind: "external"`, `datasource`, `sourceLabel`(템플릿의 한국어 제목)을 붙입니다. 원문이 로컬 파일인 소스(Obsidian)는 `metadata.path`를 `context.file`로 넘기고 `GET /api/file?path=/obsidian/…`가 볼트에서 읽어 줍니다. `autorag.search`는 `datasourceIds`를 주지 않으면 설정된 외부 소스를 모두 포함하므로 zaevis는 선택 없이 호출합니다.
 
 ## 앱 화면 추가
 

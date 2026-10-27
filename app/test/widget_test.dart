@@ -21,6 +21,7 @@ http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
 final posted = <http.Request>[];
 int indexPolls = 0;
 String mockHotkey = '';
+bool mockObsidianConfigured = false;
 String? mockAskAgent = 'claude';
 
 WorklogApi _fakeApi() => WorklogApi(
@@ -177,6 +178,43 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/collect':
             posted.add(req);
             return _json({'started': true}, 202);
+          case '/api/datasources' when req.method == 'GET':
+            return _json({
+              'syncing': false,
+              'datasources': [
+                {
+                  'name': 'obsidian', 'template': 'obsidian', 'title': 'Obsidian 볼트', 'description': '볼트의 노트를 색인합니다.',
+                  'fields': [{'key': 'vaultPath', 'label': '볼트 폴더', 'kind': 'path', 'required': true, 'placeholder': '/Users/me/Vault'}],
+                  'cli': null, 'external': '없음', 'probe': {'installed': null, 'binPath': null, 'archive': null, 'env': <Object>[], 'unavailable': null},
+                  'configured': mockObsidianConfigured, 'enabled': true, 'note': null, 'connector': mockObsidianConfigured ? {'vaultPath': '/tmp/vault'} : <String, Object>{},
+                  'channels': null, 'autorag': mockObsidianConfigured ? {'datasourceId': 'obsidian', 'status': 'active'} : null,
+                  'sync': mockObsidianConfigured ? {'lastSync': '2026-10-27T05:48:02Z', 'ok': true, 'chunks': 2} : null,
+                },
+                {
+                  'name': 'slack', 'template': 'slack', 'title': 'Slack', 'description': 'slacrawl 아카이브를 검색합니다.',
+                  'fields': [{'key': 'workspace', 'label': '워크스페이스(팀) ID', 'kind': 'text', 'required': true}],
+                  'cli': {'bin': 'slacrawl', 'install': 'npm install -g slacrawl', 'homepage': 'https://github.com/openclaw/slacrawl'},
+                  'external': null, 'probe': {'installed': false, 'binPath': null, 'archive': false, 'env': <Object>[], 'unavailable': null},
+                  'configured': false, 'enabled': false, 'note': null, 'connector': <String, Object>{}, 'channels': null, 'autorag': null, 'sync': null,
+                },
+                {
+                  'name': 'github', 'template': 'github', 'title': 'GitHub 이슈·PR', 'description': 'REST API로 이슈·PR을 가져옵니다.',
+                  'fields': [
+                    {'key': 'repos', 'label': '저장소', 'kind': 'list', 'required': true},
+                    {'key': 'tokenEnv', 'label': '토큰 환경 변수 이름', 'kind': 'env', 'defaultValue': 'GITHUB_TOKEN'},
+                  ],
+                  'cli': null, 'external': 'api.github.com에 요청', 'probe': {'installed': null, 'binPath': null, 'archive': null, 'env': [{'name': 'GITHUB_TOKEN', 'set': false}], 'unavailable': null},
+                  'configured': false, 'enabled': false, 'note': null, 'connector': <String, Object>{}, 'channels': null, 'autorag': null, 'sync': null,
+                },
+              ],
+            });
+          case '/api/datasources/obsidian' when req.method == 'PUT' || req.method == 'DELETE':
+            posted.add(req);
+            if (req.method == 'PUT') mockObsidianConfigured = true;
+            return _json({'ok': true, 'syncing': true});
+          case '/api/datasources/obsidian/sync':
+            posted.add(req);
+            return _json({'syncing': true}, 202);
           default:
             return _json({'error': 'not_found'}, 404);
         }
@@ -716,5 +754,82 @@ void main() {
     expect(added['name'], 'notes');
     expect(added['command'], contains('-newermt {fromDate}'));
     expect(jsonDecode(posted.last.body), {'sources': ['notes']});
+  });
+
+  testWidgets('collect tab: external sources show install hints, and connecting Obsidian sends the vault path', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockObsidianConfigured = false;
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('수집').first);
+    await tester.pumpAndSettle();
+    final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
+    await tester.dragUntilVisible(find.text('외부 소스 (AutoRAG)').hitTestable(), list, const Offset(0, -250));
+    await tester.pumpAndSettle();
+
+    // not installed → the card says so and offers the install command
+    expect(find.text('미설치 — slacrawl 명령이 없습니다'), findsOneWidget);
+    await tester.dragUntilVisible(find.text('Slack').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('Slack'));
+    await tester.pumpAndSettle();
+    expect(find.text('npm install -g slacrawl'), findsOneWidget);
+    expect(find.text('설치 명령 복사'), findsOneWidget);
+    expect(find.text('연결'), findsNothing, reason: 'no connect form without the CLI');
+
+    // connect Obsidian
+    await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('Obsidian 볼트'));
+    await tester.pumpAndSettle();
+    expect(find.text('연결 안 됨'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, '볼트 폴더 *'), '/tmp/vault');
+    await tester.dragUntilVisible(find.text('연결').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('연결'));
+    await tester.pumpAndSettle();
+
+    final put = posted.singleWhere((r) => r.url.path == '/api/datasources/obsidian');
+    expect(put.method, 'PUT');
+    expect(jsonDecode(put.body), {'enabled': true, 'connector': {'vaultPath': '/tmp/vault'}, 'description': ''});
+    // after the reload the card is connected with its sync record
+    expect(find.textContaining('연결됨 · 동기화'), findsOneWidget);
+    expect(find.textContaining('조각 2개'), findsOneWidget);
+  });
+
+  testWidgets('collect tab: a connected external source can be synced, toggled off and removed', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockObsidianConfigured = true;
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('수집').first);
+    await tester.pumpAndSettle();
+    final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
+    await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('Obsidian 볼트'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, '볼트 폴더 *'), findsOneWidget);
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, '볼트 폴더 *')).controller!.text, '/tmp/vault');
+
+    await tester.dragUntilVisible(find.text('지금 동기화').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('지금 동기화'));
+    await tester.pumpAndSettle();
+    expect(posted.last.url.path, '/api/datasources/obsidian/sync');
+
+    // the GitHub card warns about the missing token env var and never asks for the value
+    await tester.dragUntilVisible(find.text('GitHub 이슈·PR').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('GitHub 이슈·PR'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('환경 변수 GITHUB_TOKEN이(가) 서버에 없습니다'), findsOneWidget);
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, '토큰 환경 변수 이름')).controller!.text, 'GITHUB_TOKEN');
+
+    await tester.dragUntilVisible(find.text('연결 삭제').hitTestable(), list, const Offset(0, -250));
+    await tester.tap(find.text('연결 삭제'));
+    await tester.pumpAndSettle();
+    expect(posted.last.method, 'DELETE');
+    expect(posted.last.url.path, '/api/datasources/obsidian');
   });
 }

@@ -5,7 +5,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join, normalize, sep } from "node:path";
 import type { AskOutcome } from "./ask.ts";
-import type { SearchBackend } from "./autorag.ts";
+import type { RefreshPhase, SearchBackend } from "./autorag.ts";
 import { AUDIO_EXT } from "./transcribe.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
@@ -65,6 +65,18 @@ export type AppOptions = {
     dir(): string;
     enqueue(file: string): void;
     jobs(): unknown[];
+  };
+  /** External AutoRAG datasources (Slack, Obsidian, GitHub …) — see datasources.ts. */
+  datasources?: {
+    /** Every template with its probe + config + what AutoRAG has loaded. */
+    list(): Promise<unknown[]>;
+    /** Creates/updates a connection in AutoRAG's config and restarts the search child. Throws on bad input (→ 400). */
+    save(name: string, patch: Record<string, unknown>): Promise<{ enabled: boolean }>;
+    remove(name: string): Promise<boolean>;
+    /** The original behind an external hit ("/obsidian/default/노트.md"), when it is a local file. */
+    file(path: string): Promise<{ path: string; markdown: string } | null>;
+    /** Outcome of a `datasources` refresh phase (AutoRAG's result, or the error). */
+    recordSync(result: unknown, error?: string): void;
   };
 };
 
@@ -139,15 +151,19 @@ export function createApp(opts: AppOptions): Server {
   let collecting: Promise<unknown> | null = null;
   let lastCollect: { finishedAt: string; report: CollectReportLike; error?: string } | null = null;
 
-  function startRefresh(force: boolean): void {
+  function startRefresh(force: boolean, phases?: RefreshPhase[]): void {
     if (refreshing) return;
+    const external = phases?.includes("datasources") ?? true; // a full refresh syncs the external connections too
     refreshing = search
-      .refresh(force)
-      .then(() => {
+      .refresh(force, phases)
+      .then((result) => {
         lastRefresh = { finishedAt: new Date().toISOString(), ok: true };
+        if (external) opts.datasources?.recordSync(result);
       })
       .catch((err: unknown) => {
-        lastRefresh = { finishedAt: new Date().toISOString(), ok: false, error: String((err as Error)?.message ?? err) };
+        const error = String((err as Error)?.message ?? err);
+        lastRefresh = { finishedAt: new Date().toISOString(), ok: false, error };
+        if (external) opts.datasources?.recordSync(null, error);
       })
       .finally(() => {
         refreshing = null;
@@ -242,7 +258,8 @@ export function createApp(opts: AppOptions): Server {
         case "GET /file": {
           const rel = (url.searchParams.get("path") ?? "").trim();
           if (!rel) return send(res, 400, { error: "missing_path" });
-          const f = await worklog.file(rel);
+          // "/obsidian/default/노트.md" is an external datasource source, not a worklog file
+          const f = rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel);
           return f ? send(res, 200, f) : notFound(res);
         }
 
@@ -381,6 +398,44 @@ export function createApp(opts: AppOptions): Server {
         case "DELETE /sources":
           if (!opts.sources || !arg) return notFound(res);
           return opts.sources.remove(arg) ? send(res, 200, { ok: true }) : send(res, 400, { error: "기본 데이터소스는 끌 수만 있고 지울 수 없습니다." });
+
+        // ── external AutoRAG datasources ──────────────────────────────────
+        case "GET /datasources":
+          // GET /api/datasources → { datasources[], syncing, lastRefresh }
+          if (!opts.datasources || arg) return notFound(res);
+          return send(res, 200, { datasources: await opts.datasources.list(), syncing: refreshing !== null, lastRefresh });
+
+        case "PUT /datasources": {
+          // PUT /api/datasources/:name { enabled?, description?, type?, connector?, channels? } — then syncs the connections
+          if (!opts.datasources || !arg) return notFound(res);
+          const b = await readJson(req);
+          const patch: Record<string, unknown> = {};
+          if (typeof b.enabled === "boolean") patch.enabled = b.enabled;
+          if (typeof b.description === "string") patch.description = b.description;
+          if (typeof b.type === "string" && b.type) patch.type = b.type;
+          if (b.connector && typeof b.connector === "object" && !Array.isArray(b.connector)) patch.connector = b.connector;
+          if (b.channels && typeof b.channels === "object" && !Array.isArray(b.channels)) patch.channels = b.channels;
+          let saved;
+          try {
+            saved = await opts.datasources.save(arg, patch);
+          } catch (err) {
+            throw new HttpError(400, (err as Error).message);
+          }
+          if (saved.enabled && b.sync !== false) startRefresh(false, ["datasources"]);
+          return send(res, 200, { ok: true, syncing: refreshing !== null });
+        }
+
+        case "DELETE /datasources":
+          if (!opts.datasources || !arg) return notFound(res);
+          return (await opts.datasources.remove(arg)) ? send(res, 200, { ok: true }) : notFound(res);
+
+        case "POST /datasources": {
+          // POST /api/datasources/:name/sync — AutoRAG syncs every enabled connection (there is no per-connection refresh)
+          if (!opts.datasources || !arg || parts[3] !== "sync") return notFound(res);
+          if (refreshing) return send(res, 409, { error: "busy", message: "이미 색인이 진행 중입니다. 끝난 뒤 다시 시도하세요." });
+          startRefresh(false, ["datasources"]);
+          return send(res, 202, { syncing: true });
+        }
 
         case "GET /collect":
           return send(res, 200, { collecting: collecting !== null, lastCollect });

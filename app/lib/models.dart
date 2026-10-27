@@ -100,19 +100,31 @@ class SearchHit {
 }
 
 class HitContext {
-  const HitContext({required this.kind, required this.sourceLabel, this.date, this.section, this.author, this.matched = const []});
+  const HitContext({required this.kind, required this.sourceLabel, this.datasource, this.file, this.date, this.section, this.author, this.matched = const []});
 
-  factory HitContext.fromJson(Json j) => HitContext(
-        kind: _str(j['kind']),
-        sourceLabel: _str(j['sourceLabel']),
-        date: _strOrNull(j['date']),
-        section: _strOrNull(j['section']),
-        author: _strOrNull(j['author']),
-        matched: (j['matched'] is List ? j['matched'] as List : const <Object?>[]).whereType<String>().toList(),
-      );
+  factory HitContext.fromJson(Json j) {
+    final datasource = _strOrNull(j['datasource']);
+    return HitContext(
+      // one filter chip per external source: "external:obsidian", "external:slack" …
+      kind: datasource == null ? _str(j['kind']) : 'external:$datasource',
+      sourceLabel: _str(j['sourceLabel']),
+      datasource: datasource,
+      file: _strOrNull(j['file']),
+      date: _strOrNull(j['date']),
+      section: _strOrNull(j['section']),
+      author: _strOrNull(j['author']),
+      matched: (j['matched'] is List ? j['matched'] as List : const <Object?>[]).whereType<String>().toList(),
+    );
+  }
 
-  final String kind; // git | claude-code | shell-history | transcripts | custom | log | project | summary | inbox | other
+  final String kind; // git | claude-code | shell-history | transcripts | custom | log | project | summary | inbox | external:<id> | other
   final String sourceLabel;
+
+  /// AutoRAG external datasource the hit came from (obsidian, slack …); null for worklog hits.
+  final String? datasource;
+
+  /// Absolute path of the original behind an external hit, when it is a local file.
+  final String? file;
   final String? date;
   final String? section;
   final String? author;
@@ -760,4 +772,136 @@ class IndexProgress {
       _ => phase,
     };
   }
+}
+
+// ── external AutoRAG datasources (GET /api/datasources) ──────────────────────
+
+class DatasourceField {
+  const DatasourceField({required this.key, required this.label, required this.kind, this.required = false, this.help, this.placeholder, this.defaultValue});
+  factory DatasourceField.fromJson(Json j) => DatasourceField(
+        key: _str(j['key']),
+        label: _str(j['label']),
+        kind: _str(j['kind']),
+        required: j['required'] == true,
+        help: _strOrNull(j['help']),
+        placeholder: _strOrNull(j['placeholder']),
+        defaultValue: _strOrNull(j['defaultValue']),
+      );
+  final String key;
+  final String label;
+  final String kind; // text | path | list | env
+  final bool required;
+  final String? help;
+  final String? placeholder;
+  final String? defaultValue;
+}
+
+/// What the server knows about one CLI-backed or built-in AutoRAG datasource template (plus its connection, if any).
+class ExternalDatasource {
+  const ExternalDatasource({
+    required this.name,
+    required this.template,
+    required this.title,
+    required this.description,
+    required this.fields,
+    required this.configured,
+    required this.enabled,
+    required this.connector,
+    this.cliBin,
+    this.install,
+    this.homepage,
+    this.external,
+    this.installed,
+    this.archive,
+    this.env = const [],
+    this.unavailable,
+    this.note,
+    this.autoragStatus,
+    this.lastSync,
+    this.lastOk,
+    this.lastError,
+    this.chunks,
+  });
+
+  factory ExternalDatasource.fromJson(Json j) {
+    final cli = j['cli'] is Json ? j['cli'] as Json : null;
+    final probe = j['probe'] is Json ? j['probe'] as Json : const <String, dynamic>{};
+    final autorag = j['autorag'] is Json ? j['autorag'] as Json : null;
+    final sync = j['sync'] is Json ? j['sync'] as Json : null;
+    return ExternalDatasource(
+      name: _str(j['name']),
+      template: _str(j['template']),
+      title: _str(j['title']),
+      description: _str(j['description']),
+      fields: (j['fields'] is List ? j['fields'] as List : const <Object?>[]).whereType<Json>().map(DatasourceField.fromJson).toList(),
+      configured: j['configured'] == true,
+      enabled: j['enabled'] == true,
+      connector: j['connector'] is Json ? j['connector'] as Json : const <String, dynamic>{},
+      cliBin: cli == null ? null : _strOrNull(cli['bin']),
+      install: cli == null ? null : _strOrNull(cli['install']),
+      homepage: cli == null ? null : _strOrNull(cli['homepage']),
+      external: _strOrNull(j['external']),
+      installed: _boolOrNull(probe['installed']),
+      archive: _boolOrNull(probe['archive']),
+      env: (probe['env'] is List ? probe['env'] as List : const <Object?>[])
+          .whereType<Json>()
+          .map((e) => (name: _str(e['name']), set: e['set'] == true))
+          .toList(),
+      unavailable: _strOrNull(probe['unavailable']),
+      note: _strOrNull(j['note']),
+      autoragStatus: autorag == null ? null : _strOrNull(autorag['status']),
+      lastSync: sync == null ? null : DateTime.tryParse(_str(sync['lastSync'])),
+      lastOk: sync == null ? null : _boolOrNull(sync['ok']),
+      lastError: sync == null ? null : _strOrNull(sync['error']),
+      chunks: sync == null ? null : (sync['chunks'] is num ? (sync['chunks'] as num).toInt() : null),
+    );
+  }
+
+  final String name;
+  final String template;
+  final String title;
+  final String description;
+  final List<DatasourceField> fields;
+  final bool configured;
+  final bool enabled;
+  final Json connector;
+  final String? cliBin;
+  final String? install;
+  final String? homepage;
+
+  /// What leaves the machine, if anything.
+  final String? external;
+
+  /// null when the template needs no CLI.
+  final bool? installed;
+  final bool? archive;
+  final List<({String name, bool set})> env;
+  final String? unavailable;
+  final String? note;
+  final String? autoragStatus;
+  final DateTime? lastSync;
+  final bool? lastOk;
+  final String? lastError;
+  final int? chunks;
+
+  /// Needs a CLI that is not on this machine.
+  bool get needsInstall => installed == false;
+
+  /// Value of a connector field as editable text (lists one item per line).
+  String fieldText(DatasourceField f) {
+    final v = connector[f.key];
+    if (v is List) return v.map((e) => '$e').join('\n');
+    if (v == null) return f.kind == 'env' ? (f.defaultValue ?? '') : '';
+    return '$v';
+  }
+}
+
+class DatasourcesState {
+  const DatasourcesState({required this.datasources, required this.syncing});
+  factory DatasourcesState.fromJson(Json j) => DatasourcesState(
+        datasources: (j['datasources'] is List ? j['datasources'] as List : const <Object?>[]).whereType<Json>().map(ExternalDatasource.fromJson).toList(),
+        syncing: j['syncing'] == true,
+      );
+  final List<ExternalDatasource> datasources;
+  final bool syncing;
 }
