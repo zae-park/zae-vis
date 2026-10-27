@@ -2,8 +2,8 @@
 
 우선순위 순. 끝난 항목은 지우고 CLAUDE.md "현재 상태"에 한 줄로 남긴다.
 
-1. **자동 업데이트** — 앱이 새 DMG를 확인·내려받아 교체. 지금은 DMG를 열어 끌어다 놓는 수동 절차.
-2. **번들 용량** — 약 500MB 중 onnxruntime-node 287MB 등 AutoRAG 의존성 정리.
+1. **자동 업데이트** — 앱이 새 DMG를 확인·내려받아 교체. 지금은 DMG를 열어 끌어다 놓는 수동 절차. **빌드를 Cloud Build에 연결한 뒤** 그 아티팩트 저장소를 갱신 원천으로 삼아 진행하기로 (2026-10-27, 사용자 결정). 권한 설정이 번거로워 지금은 보류.
+2. **번들 용량** — 약 520MB 중 onnxruntime-node 287MB 등 AutoRAG 의존성 정리. 1번과 함께 Cloud Build 파이프라인에서 다룬다.
 3. **셸 이력** — `setopt EXTENDED_HISTORY`가 없는 zsh 이력(시각 없음)도 수집할지 결정.
 4. **Intel Mac DMG** — Intel Mac에서 한 번 빌드.
 5. **한국어 형태소 키워드 검색** — AutoRAG가 `lexical-tokenizer-unavailable`(Kiwi 네이티브 라이브러리·모델 없음)을 경고한다. 번들에 Kiwi를 넣으면 `연구목표`·`인증서를` 같은 활용형도 키워드로 매치된다.
