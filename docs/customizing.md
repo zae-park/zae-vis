@@ -28,6 +28,7 @@
 | GET | `/api/file?path=` | worklog 안의 markdown 원문 `{ path, markdown }` (검색 결과 원문 보기) |
 | GET / POST | `/api/index` | 색인 상태(+ `embedding`: 로컬 임베딩 데몬 상태 off/starting/ready/failed) · 색인 갱신 시작 (`{ force?: true }`) |
 | POST | `/api/logs` | 한 줄 기록 `{ text, tags[], projects[], date? }` |
+| PUT / DELETE | `/api/logs/:YYYY-MM` | 한 줄 편집 `{ raw, text?, tags?, projects?, date? }` · 삭제 `{ raw }`. `raw`는 파일에 있는 현재 줄 그대로이며, 못 찾으면 409(다른 곳에서 바뀜). 정리가 쓴 줄의 `(src: …)`는 보존 |
 | GET | `/api/inbox` | inbox 파일과 전사 작업 |
 | POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
 | GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
