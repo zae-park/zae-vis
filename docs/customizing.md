@@ -33,11 +33,13 @@
 | POST | `/api/inbox/transcripts` · `/api/inbox/audio?name=` | 전사본 저장 · 녹음 업로드(본문 그대로, 최대 1GB) |
 | GET / POST / PUT / DELETE | `/api/sources[/:name]` | 데이터소스 목록 · 사용자 커넥터 추가 · 설정 변경 · 삭제 |
 | GET / POST | `/api/collect` | 수집 상태 · 수집 시작 (`{ sources?: [], index?: false }`) |
-| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`) 포함 |
+| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인), `notifications`(시스템 알림, 기본 켬), `hotkey`(전역 단축키 스펙 `"meta+shift+space"` 꼴, `""`=플랫폼 기본). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`) 포함 |
 | PUT | `/api/settings/rerank` | OpenRouter 재정렬 `{ enabled?, model?, apiKey? }` — `apiKey: ""`는 키 삭제. 키는 `secrets.json`(0600)에 저장되고 응답엔 끝 4자리만. AutoRAG 설정의 `rerank`를 다시 쓰고 검색 자식 프로세스를 재시작 |
 | POST | `/api/settings/rerank/test` | `{ apiKey? }` 키를 OpenRouter에 확인 (`{ ok, message }`), 저장하지 않음 |
-| GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키), 설정(`agent: auto|…`, `model`, `weekly`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last` |
+| GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키), 설정(`agent: auto|…`, `model`, `weekly`, `review`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last`(검토 모드면 `proposalId`) |
 | POST | `/api/digest/run` | 지금 정리 시작 (202). 쓸 수 있는 에이전트가 없거나 이미 실행 중이면 409 `{ started: false, reason }` |
+| GET | `/api/digest/proposals[/:id]` | 검토 대기 제안 목록(`id, createdAt, agent, status, lines, projects, summaries, processed`) · 하나의 내용(`logLines[{month,line,entry}]`, `removedLines`, `projects[{slug,before,after}]`, `summaries[{path,before,after}]`, `processed[{from,to}]`, `report`). 서버는 정리 전 스냅샷과 후를 비교해 제안을 만들고 worklog는 원상 복구한다(`server/src/review.ts`) |
+| POST | `/api/digest/proposals/:id` | `{ action: "apply", lines?: [idx], projects?: [slug], summaries?: bool, processed?: bool }` 고른 부분만 worklog에 씀 (생략=전부) · `{ action: "dismiss" }`. pending이 아니면 409 |
 
 GET이 아닌 요청은 `x-zaevis: 1` 헤더가 있어야 하고, 다른 사이트(Origin)나 다른 호스트 이름에서 온 요청은 거절합니다. 사용자 커넥터가 명령을 실행하기 때문에 넣은 보호 장치입니다.
 
@@ -72,7 +74,10 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 { "custom": [ { "name": "calendar", "command": "python3 ~/bin/cal_export.py --since {from} --until {to}" } ] }
 ```
 
-명령은 Markdown을 출력하면 됩니다. 날짜별로 나누려면 `<!-- zaevis:date 2026-10-23 -->` 줄을 넣습니다.
+명령은 Markdown을 출력하면 됩니다. `{from}` `{to}`는 ISO 시각, `{fromDate}` `{toDate}`는 `YYYY-MM-DD`로 바뀝니다(`find -newermt {fromDate}`처럼 긴 형식을 못 읽는 도구용).
+날짜별로 나누려면 `<!-- zaevis:date 2026-10-23 -->` 줄을 넣습니다. 앱의 프리셋 목록은 `app/lib/screens/collect_screen.dart`의 `ConnectorPreset.all`에 있습니다.
+
+내장 소스의 옵션(`options[]`)에 `help`를 주면 앱이 입력란 아래 한 줄 설명으로 보여 줍니다. `kind: "bool"`은 스위치로 그려집니다.
 
 **내장 커넥터로**: `server/src/sources/`에 `Source`(`types.ts`)를 구현하고 `sources/index.ts`의 `BUILTIN`에 추가합니다.
 `collect()`는 수집 구간의 날짜별 Markdown을 돌려주고, 수집기가 `sources/<이름>/<날짜>.md`에 씁니다.
