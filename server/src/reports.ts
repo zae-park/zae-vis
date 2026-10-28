@@ -2,8 +2,8 @@
 // what was done, decided, blocked, and what comes next — each item with the date/file it rests on.
 // The inputs are gathered here (log lines, sources/*/<date>.md, inbox and processed transcripts and
 // session notes, and the smaller reports a bigger one can build on); the text is written by the same
-// agent the question mode uses (ask.ts `generateText`: an installed CLI run without tools, or the
-// OpenRouter key), so nothing new is configured.
+// agents the question mode uses (ask.ts `generateWithFallback`: an installed CLI run without tools, or the
+// OpenRouter key, hopping to the next only on a quota error when the digest setting is auto).
 //
 //   setting  config.json → reports: { daily: { enabled, days[] }, weekly: { enabled, day }, monthly: { enabled, day } }
 //   state    state.json  → reports: { lastRun: { daily?, weekly?, monthly? } }
@@ -13,7 +13,8 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { generateText, type GenerateOpts } from "./ask.ts";
+import { generateWithFallback, type GenerateOpts } from "./ask.ts";
+import { fallbackCandidates, plannedRail, type RailStop } from "./rail.ts";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
 import { DEFAULT_OPENROUTER_MODEL, type AgentId, type AgentInfo } from "./digest.ts";
 import { parseFrontMatter, parseLog } from "./worklog.ts";
@@ -46,13 +47,13 @@ export const DEFAULT_REPORTS: ReportsSetting = {
   monthly: { enabled: true, day: 1 },
 };
 
-export type ReportRun = { kind: ReportKind; period: string; at: string; ok: boolean; agent: AgentId; ms: number; path?: string; error?: string };
+export type ReportRun = { kind: ReportKind; period: string; at: string; ok: boolean; agent: AgentId; ms: number; path?: string; error?: string; rail?: RailStop[] };
 export type ReportsState = { lastRun: Partial<Record<ReportKind, ReportRun>> };
 export type ReportEntry = { kind: ReportKind; period: string; path: string; createdAt: string; agent: string | null };
 export type Report = ReportEntry & { range: { from: string; to: string; label: string }; markdown: string };
 export type ReportsStatus = {
   setting: ReportsSetting;
-  running: { kind: ReportKind; period: string; startedAt: string; agent: AgentId } | null;
+  running: { kind: ReportKind; period: string; startedAt: string; agent: AgentId; rail?: RailStop[] } | null;
   lastRun: Partial<Record<ReportKind, ReportRun>>;
   reports: Record<ReportKind, ReportEntry[]>;
   /** What `POST /api/reports/run` without a period would make right now. */
@@ -382,14 +383,15 @@ export type ReportRunnerOpts = GenerateOpts & { notify?: (title: string, body: s
 /** One report at a time; shared by the server (API) and the daily job. */
 export class ReportRunner {
   private running: { kind: ReportKind; period: string; startedAt: string; agent: AgentId; promise: Promise<ReportRun> } | null = null;
+  private rail: RailStop[] = [];
   private readonly opts: ReportRunnerOpts;
 
   constructor(opts: ReportRunnerOpts = {}) {
     this.opts = opts;
   }
 
-  get current(): { kind: ReportKind; period: string; startedAt: string; agent: AgentId } | null {
-    return this.running ? { kind: this.running.kind, period: this.running.period, startedAt: this.running.startedAt, agent: this.running.agent } : null;
+  get current(): { kind: ReportKind; period: string; startedAt: string; agent: AgentId; rail: RailStop[] } | null {
+    return this.running ? { kind: this.running.kind, period: this.running.period, startedAt: this.running.startedAt, agent: this.running.agent, rail: this.rail } : null;
   }
 
   async status(cfg: Pick<AppConfig, "worklogDir" | "reports">, now = new Date()): Promise<ReportsStatus> {
@@ -406,7 +408,7 @@ export class ReportRunner {
    * Writes the report for `period` (overwriting an older one), records the outcome in state.json
    * and notifies. While a run is in progress the same promise is returned to a second caller.
    */
-  run(cfg: Pick<AppConfig, "worklogDir" | "digest">, agent: AgentInfo, kind: ReportKind, period: string): Promise<ReportRun> {
+  run(cfg: Pick<AppConfig, "worklogDir" | "digest">, agent: AgentInfo, kind: ReportKind, period: string, chain?: AgentInfo[]): Promise<ReportRun> {
     if (this.running) return this.running.promise;
     if (!isValidPeriod(kind, period)) return Promise.reject(new Error(`기간 형식이 올바르지 않습니다: ${period}`));
     const startedAt = new Date().toISOString();
@@ -424,20 +426,35 @@ export class ReportRunner {
         const range = periodRange(kind, period);
         const inputs = await gatherReportInputs(cfg.worklogDir, kind, range);
         if (!inputs.files.length) throw new Error(`${range.label} 에 해당하는 기록이 없습니다.`);
-        log(`${title} 시작 (${agent.title}, 입력 ${inputs.files.length}개 파일 ${inputs.text.length}자, 로그 ${inputs.logLines}줄${inputs.truncated ? ", 잘림" : ""})`);
-        let body = await generateText(agent, buildReportPrompt(kind, period, inputs), cfg.digest.model || DEFAULT_OPENROUTER_MODEL, cfg.worklogDir, { ...this.opts, timeoutMs: this.opts.timeoutMs ?? RUN_TIMEOUT_MS });
-        body = body.replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/, "$1").trim(); // a fenced answer
+        const candidates = chain && cfg.digest.agent === "auto" ? fallbackCandidates(cfg.digest, chain) : [];
+        const list = candidates.length ? candidates : [agent];
+        this.rail = chain ? plannedRail(cfg.digest, chain) : plannedRail({ agent: agent.id }, [agent]);
+        if (this.running) this.running.agent = list[0].id;
+        log(`${title} 시작 (${list.map((a) => a.title).join(" → ")}, 입력 ${inputs.files.length}개 파일 ${inputs.text.length}자, 로그 ${inputs.logLines}줄${inputs.truncated ? ", 잘림" : ""})`);
+        const produced = await generateWithFallback(list, buildReportPrompt(kind, period, inputs), cfg.digest.model || DEFAULT_OPENROUTER_MODEL, cfg.worklogDir, {
+          ...this.opts,
+          timeoutMs: this.opts.timeoutMs ?? RUN_TIMEOUT_MS,
+          planned: this.rail,
+          onTrail: (stops) => {
+            this.rail = stops;
+            const cur = stops.find((s) => s.state === "running" || s.state === "wrote");
+            if (cur && this.running) this.running.agent = cur.id;
+          },
+        });
+        let body = produced.text.replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/, "$1").trim(); // a fenced answer
         if (!body.startsWith("#")) body = `# ${reportTitle(kind, period)}\n\n${body}`;
         const path = reportPath(kind, period);
         const createdAt = new Date().toISOString();
         const file = join(cfg.worklogDir, path);
         await mkdir(join(file, ".."), { recursive: true });
-        await writeFile(file, frontMatter({ kind, period, range: `${range.from}..${range.to}`, createdAt, agent: agent.id, inputs: inputs.files.length }) + body + "\n");
-        run = { kind, period, at: createdAt, ok: true, agent: agent.id, ms: Date.now() - started, path };
-        log(`${title} 완료 (${run.ms}ms) → ${path}`);
-        this.opts.notify?.(`${KIND_LABEL[kind]} 리포트 준비`, `${range.label} — 리포트 탭에서 보세요.`);
+        await writeFile(file, frontMatter({ kind, period, range: `${range.from}..${range.to}`, createdAt, agent: produced.agent.id, inputs: inputs.files.length }) + body + "\n");
+        run = { kind, period, at: createdAt, ok: true, agent: produced.agent.id, ms: Date.now() - started, path, rail: produced.rail };
+        log(`${title} 완료 (${run.ms}ms, ${produced.agent.title}) → ${path}`);
+        const skipped = produced.rail.filter((s) => s.state === "quota").map((s) => s.title);
+        this.opts.notify?.(`${KIND_LABEL[kind]} 리포트 준비`, `${skipped.length ? `${skipped.join(", ")} 할당량 → ${produced.agent.title}. ` : ""}${range.label} — 리포트 탭에서 보세요.`);
       } catch (err) {
-        run = { kind, period, at: new Date().toISOString(), ok: false, agent: agent.id, ms: Date.now() - started, error: (err as Error).message };
+        const failed = err as Error & { rail?: RailStop[] };
+        run = { kind, period, at: new Date().toISOString(), ok: false, agent: this.running?.agent ?? agent.id, ms: Date.now() - started, error: failed.message, ...(failed.rail ? { rail: failed.rail } : this.rail.length ? { rail: this.rail } : {}) };
         log(`${title} 실패: ${run.error}`);
         this.opts.notify?.(`${KIND_LABEL[kind]} 리포트 실패`, run.error ?? "");
       }
@@ -447,6 +464,7 @@ export class ReportRunner {
       return run;
     })().finally(() => {
       this.running = null;
+      this.rail = [];
     });
     this.running = { kind, period, startedAt, agent: agent.id, promise };
     return promise;

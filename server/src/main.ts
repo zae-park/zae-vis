@@ -12,6 +12,7 @@ import { createApp } from "./app.ts";
 import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
 import * as datasources from "./datasources.ts";
 import { DigestRunner, detectAgents, noAgentReason, pickAgent } from "./digest.ts";
+import { plannedRail } from "./rail.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
@@ -96,7 +97,8 @@ const server = createApp({
     async status() {
       const agents = await detectAgents();
       const chosen = pickAgent(cfg.digest, agents);
-      return { ...digest.status(cfg.digest, cfg.worklogDir), setting: cfg.digest, agents, chosen: chosen?.id ?? null };
+      const st = digest.status(cfg.digest, cfg.worklogDir);
+      return { ...st, setting: cfg.digest, agents, chosen: chosen?.id ?? null, rail: st.running && st.rail.length ? st.rail : plannedRail(cfg.digest, agents) };
     },
     async update(patch) {
       const agent = (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === patch.agent) ?? cfg.digest.agent;
@@ -134,7 +136,7 @@ const server = createApp({
       const chosen = pickAgent(cfg.digest, agents);
       if (!chosen) return { started: false, reason: noAgentReason(agents) };
       if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
-      void digest.run(cfg, cfg.digest, chosen);
+      void digest.run(cfg, cfg.digest, chosen, agents);
       return { started: true };
     },
   },
@@ -142,7 +144,8 @@ const server = createApp({
     async status() {
       const agents = await detectAgents();
       const chosen = pickAgent(cfg.digest, agents);
-      return { ...ask.status(), agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model } };
+      const st = ask.status();
+      return { ...st, agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model }, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
     },
     async run(q, topK, conversationId) {
       const agents = await detectAgents();
@@ -155,7 +158,8 @@ const server = createApp({
   reports: {
     async status() {
       const agents = await detectAgents();
-      return { ...(await reports.status(cfg)), agents, chosen: pickAgent(cfg.digest, agents)?.id ?? null };
+      const st = await reports.status(cfg);
+      return { ...st, agents, chosen: pickAgent(cfg.digest, agents)?.id ?? null, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
     },
     read: async (kind, period) => (isKind(kind) ? readReport(cfg.worklogDir, kind, period) : null),
     async update(patch) {
@@ -172,7 +176,7 @@ const server = createApp({
       if (!chosen) return { started: false, status: 409, error: "no_agent", reason: noAgentReason(agents) };
       const cur = reports.current;
       if (cur) return { started: false, status: 409, error: "busy", reason: `이미 ${KIND_LABEL[cur.kind]} 리포트 ${cur.period} 를 만드는 중입니다.` };
-      void reports.run(cfg, chosen, kind, p);
+      void reports.run(cfg, chosen, kind, p, agents);
       return { started: true, kind, period: p, agent: chosen.id };
     },
   },

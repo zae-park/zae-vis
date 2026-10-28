@@ -19,9 +19,12 @@ String defaultBaseUrl() {
 }
 
 class ApiException implements Exception {
-  ApiException(this.status, this.message);
+  ApiException(this.status, this.message, {this.rail = const []});
   final int status;
   final String message;
+
+  /// The agent rail when a question failed after one or more attempts.
+  final List<RailStop> rail;
 
   @override
   String toString() => status == 0 ? message : '$message ($status)';
@@ -54,11 +57,15 @@ class WorklogApi {
     final body = utf8.decode(res.bodyBytes);
     if (res.statusCode >= 400) {
       String? message;
+      var rail = const <RailStop>[];
       try {
         final j = jsonDecode(body);
-        if (j is Json) message = (j['message'] ?? j['reason']) is String ? (j['message'] ?? j['reason']) as String : null;
+        if (j is Json) {
+          message = (j['message'] ?? j['reason']) is String ? (j['message'] ?? j['reason']) as String : null;
+          rail = RailStop.list(j['rail']);
+        }
       } catch (_) {}
-      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'));
+      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'), rail: rail);
     }
     final Object? decoded;
     try {

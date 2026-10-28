@@ -81,11 +81,12 @@ async function main(): Promise<void> {
 
   // Mondays: the weekly digest, with whatever agent the user has (see digest.ts).
   if (!only.length && weeklyDue(cfg.digest, cfg.worklogDir)) {
-    const chosen = pickAgent(cfg.digest, await detectAgents());
+    const agents = await detectAgents();
+    const chosen = pickAgent(cfg.digest, agents);
     if (!chosen) console.log(`[${ts()}] 주간 정리 건너뜀: 쓸 수 있는 에이전트가 없습니다 (Claude Code·Codex·Gemini CLI 또는 OpenRouter 키).`);
     else {
       console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
-      const r = await new DigestRunner({ notify }).run(cfg, cfg.digest, chosen);
+      const r = await new DigestRunner({ notify }).run(cfg, cfg.digest, chosen, agents);
       console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
     }
   }
@@ -93,13 +94,14 @@ async function main(): Promise<void> {
   if (!only.length) {
     const due = dueReports(cfg.reports, cfg.worklogDir, loadState().reports);
     if (due.length) {
-      const chosen = pickAgent(cfg.digest, await detectAgents());
+      const agents = await detectAgents();
+      const chosen = pickAgent(cfg.digest, agents);
       if (!chosen) console.log(`[${ts()}] 리포트 건너뜀 (${due.map((d) => `${KIND_LABEL[d.kind]} ${d.period}`).join(", ")}): 쓸 수 있는 에이전트가 없습니다.`);
       else {
         const runner = new ReportRunner({ notify });
         for (const d of due) {
           console.log(`[${ts()}] ${KIND_LABEL[d.kind]} 리포트 ${d.period} 시작 (${chosen.title})`);
-          const r = await runner.run(cfg, chosen, d.kind, d.period);
+          const r = await runner.run(cfg, chosen, d.kind, d.period, agents);
           console.log(`  ${r.ok ? `✓ ${r.path}` : `✗ ${r.error}`}`);
         }
       }

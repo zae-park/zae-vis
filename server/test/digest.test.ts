@@ -165,6 +165,45 @@ test("digest: OpenRouter path gathers inputs since the last run and applies the 
   assert.match(again.output, /새 입력이 없습니다/, "nothing newer than today, inbox emptied");
 });
 
+test("digest: auto skips a quota failure that wrote nothing, and stops once the worklog changed", async () => {
+  const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
+  const claudeBin = await stubCli(bins, "claude", 'echo "You have hit your usage limit" >&2; exit 1');
+  const codexBin = await stubCli(bins, "codex", 'echo "- 10-25 [[roas]] #done 다음 서비스 (src: git roas ccccccc)" >> log/2026-10.md; echo "로그 1줄"');
+  const claude = { id: "claude" as const, title: "Claude Code", available: true, detail: "x", bin: claudeBin, loggedIn: true };
+  const codex = { id: "codex" as const, title: "Codex CLI", available: true, detail: "x", bin: codexBin, loggedIn: true };
+  const env = { PATH: bins, HOME: bins };
+  const auto = { agent: "auto" as const, model: "", weekly: true, review: false };
+  const w = await worklog();
+  const hopped = await new DigestRunner({ env }).run({ worklogDir: w, reposRoot: "/r" } as never, auto, claude, [claude, codex]);
+  assert.equal(hopped.ok, true);
+  assert.equal(hopped.agent, "codex");
+  assert.equal(hopped.rail?.find((s) => s.id === "claude")?.state, "quota");
+  assert.equal(hopped.rail?.find((s) => s.id === "codex")?.state, "wrote");
+  assert.match(await readFile(join(w, "log", "2026-10.md"), "utf8"), /다음 서비스/);
+
+  const wPinned = await worklog();
+  const pinned = await new DigestRunner({ env }).run({ worklogDir: wPinned, reposRoot: "/r" } as never, { ...auto, agent: "claude" }, claude, [claude, codex]);
+  assert.equal(pinned.ok, false);
+  assert.equal(pinned.agent, "claude");
+  assert.equal(existsSync(join(wPinned, "log", "2026-10.md")), false);
+
+  const wrote = await mkdtemp(join(tmpdir(), "zv-bins-"));
+  const claudeWrote = await stubCli(wrote, "claude", 'echo "- 10-25 [[roas]] #done 쓴 뒤 할당량 (src: git roas ddddddd)" >> log/2026-10.md; echo "You have hit your usage limit" >&2; exit 1');
+  const codexNo = await stubCli(wrote, "codex", 'echo SHOULD-NOT >> log/2026-10.md; echo no');
+  const w2 = await worklog();
+  const stopped = await new DigestRunner({ env: { PATH: wrote, HOME: wrote } }).run(
+    { worklogDir: w2, reposRoot: "/r" } as never,
+    auto,
+    { ...claude, bin: claudeWrote },
+    [{ ...claude, bin: claudeWrote }, { ...codex, bin: codexNo }],
+  );
+  assert.equal(stopped.ok, false);
+  assert.equal(stopped.agent, "claude");
+  const body = await readFile(join(w2, "log", "2026-10.md"), "utf8");
+  assert.match(body, /쓴 뒤 할당량/);
+  assert.doesNotMatch(body, /SHOULD-NOT/);
+});
+
 test("digest: setSection replaces or appends", () => {
   assert.equal(setSection("# T\n\n## A\n\nold\n\n## B\n\nb\n", "A", "new"), "# T\n\n## A\n\nnew\n\n## B\n\nb\n");
   assert.match(setSection("# T\n", "C", "c"), /# T\n\n## C\n\nc\n$/);

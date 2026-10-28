@@ -292,7 +292,7 @@ export function createApp(opts: AppOptions): Server {
           const topK = typeof b.topK === "number" && Number.isFinite(b.topK) ? b.topK : undefined;
           const conversationId = typeof b.conversationId === "string" && b.conversationId ? b.conversationId : undefined;
           const r = await opts.ask.run(q, topK, conversationId);
-          if (!r.ok) return send(res, r.status, { error: r.error, message: r.message });
+          if (!r.ok) return send(res, r.status, { error: r.error, message: r.message, ...(r.rail ? { rail: r.rail } : {}) });
           return send(res, 200, r.result);
         }
 

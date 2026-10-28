@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
+import { fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
 import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
 import { Worklog } from "./worklog.ts";
@@ -46,8 +47,8 @@ export type DetectOptions = {
 };
 export type AgentCacheEntry = { at: number; version?: string; loggedIn?: boolean | null };
 
-export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string };
-export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; last: DigestRun | null; nextWeekly: string | null };
+export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string; rail?: RailStop[] };
+export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; last: DigestRun | null; nextWeekly: string | null; rail: RailStop[] };
 
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5";
 const RUN_TIMEOUT_MS = 30 * 60_000;
@@ -414,6 +415,7 @@ export async function runOpenRouter(cfg: Pick<AppConfig, "worklogDir">, model: s
 
 export class DigestRunner {
   private running: { startedAt: string; agent: AgentId; promise: Promise<DigestRun> } | null = null;
+  private rail: RailStop[] = [];
   private readonly opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; notify?: (title: string, body: string) => void };
 
   constructor(opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; notify?: (title: string, body: string) => void } = {}) {
@@ -427,57 +429,90 @@ export class DigestRunner {
       ...(this.running ? { startedAt: this.running.startedAt, agent: this.running.agent } : {}),
       last,
       nextWeekly: setting.weekly ? nextMonday() : null,
+      rail: this.running ? this.rail : [],
     };
   }
 
-  /** Starts a run unless one is in progress; the returned promise resolves with the outcome. */
-  run(cfg: AppConfig, setting: DigestSetting, agent: AgentInfo): Promise<DigestRun> {
+  /**
+   * Starts a run unless one is in progress. `chain` is the detected agent list: in auto mode a quota
+   * error before any file change tries the next usable agent. Once the worklog has changed, the run
+   * stops on that agent. Without `chain` (and whenever the setting is pinned) only `agent` runs.
+   */
+  run(cfg: AppConfig, setting: DigestSetting, agent: AgentInfo, chain?: AgentInfo[]): Promise<DigestRun> {
     if (this.running) return this.running.promise;
     const startedAt = new Date().toISOString();
+    const candidates = chain && setting.agent === "auto" ? fallbackCandidates(setting, chain) : [];
+    const list = candidates.length ? candidates : [agent];
+    this.rail = chain ? plannedRail(setting, chain) : plannedRail({ agent: agent.id }, [agent]);
     const logFile = join(stateDir(), "digest.log");
     mkdirSync(stateDir(), { recursive: true });
     const log = (line: string) => {
       void appendFile(logFile, `[${new Date().toLocaleString("sv-SE")}] ${line}\n`).catch(() => {});
     };
+    const holder: { startedAt: string; agent: AgentId; promise: Promise<DigestRun> } = { startedAt, agent: list[0].id, promise: undefined as never };
     const promise = (async (): Promise<DigestRun> => {
-      log(`정리 시작 (${agent.title}${setting.review ? ", 검토 후 적용" : ""})`);
-      // Review mode: remember the worklog, let the agent work, then lift its changes into a proposal.
-      const before = setting.review ? await takeSnapshot(cfg.worklogDir) : null;
-      let r: { ok: boolean; output: string };
-      try {
-        if (agent.id === "openrouter") r = await runOpenRouter(cfg, setting.model || DEFAULT_OPENROUTER_MODEL, { fetchImpl: this.opts.fetchImpl, log });
-        else r = await runCli(agent.bin!, cliArgs(agent.id, buildPrompt(cfg)), cfg.worklogDir, { env: this.opts.env, log });
-      } catch (err) {
-        r = { ok: false, output: (err as Error).message };
-      }
-      let proposalId: string | undefined;
-      if (before) {
-        const diff = await diffSnapshot(cfg.worklogDir, before);
-        await restoreSnapshot(cfg.worklogDir, before);
-        if (!isEmptyProposal(diff)) {
-          proposalId = newProposalId();
-          await saveProposal({ id: proposalId, createdAt: new Date().toISOString(), agent: agent.id, report: r.output.slice(-4000), status: "pending", ...diff });
-          const summary = `검토 대기: 로그 ${diff.logLines.length}줄 · 프로젝트 ${diff.projects.length}개 · inbox ${diff.processed.length}개${diff.summaries.length ? ` · 월간 초안 ${diff.summaries.length}` : ""}${diff.removedLines.length ? ` · 지운 줄 ${diff.removedLines.length}(검토 필요)` : ""}`;
-          log(summary);
-          r = { ok: r.ok, output: `${summary}\n\n${r.output}` };
-        } else if (r.ok) {
-          r = { ok: true, output: `바뀐 것이 없습니다.\n\n${r.output}` };
+      let run: DigestRun | undefined;
+      for (let i = 0; i < list.length; i++) {
+        const current = list[i];
+        const more = setting.agent === "auto" && i < list.length - 1;
+        holder.agent = current.id;
+        this.rail = withStop(this.rail, current.id, "running");
+        log(`정리 시작 (${current.title}${setting.review ? ", 검토 후 적용" : ""})`);
+        // A snapshot when we might fall through, and always in review mode (the proposal is the diff).
+        const before = setting.review || more ? await takeSnapshot(cfg.worklogDir) : null;
+        let r: { ok: boolean; output: string };
+        try {
+          if (current.id === "openrouter") r = await runOpenRouter(cfg, setting.model || DEFAULT_OPENROUTER_MODEL, { fetchImpl: this.opts.fetchImpl, log });
+          else r = await runCli(current.bin!, cliArgs(current.id, buildPrompt(cfg)), cfg.worklogDir, { env: this.opts.env, log });
+        } catch (err) {
+          r = { ok: false, output: (err as Error).message };
         }
+        const quota = !r.ok ? quotaReason(r.output) : null;
+        if (before && quota && more) {
+          const diff = await diffSnapshot(cfg.worklogDir, before);
+          const wrote = !isEmptyProposal(diff) || diff.removedLines.length > 0 || diff.stateAfter != null;
+          if (!wrote) {
+            await restoreSnapshot(cfg.worklogDir, before);
+            this.rail = withStop(this.rail, current.id, "quota", quota);
+            log(`${current.title} 할당량으로 건너뜀 (${quota})`);
+            continue;
+          }
+        }
+        this.rail = withStop(this.rail, current.id, r.ok ? "wrote" : quota ? "quota" : "error", quota ?? (!r.ok ? r.output.split("\n").filter((l) => l.trim()).at(-1)?.slice(0, 80) : undefined));
+        let proposalId: string | undefined;
+        if (before && setting.review) {
+          const diff = await diffSnapshot(cfg.worklogDir, before);
+          await restoreSnapshot(cfg.worklogDir, before);
+          if (!isEmptyProposal(diff)) {
+            proposalId = newProposalId();
+            await saveProposal({ id: proposalId, createdAt: new Date().toISOString(), agent: current.id, report: r.output.slice(-4000), status: "pending", ...diff });
+            const summary = `검토 대기: 로그 ${diff.logLines.length}줄 · 프로젝트 ${diff.projects.length}개 · inbox ${diff.processed.length}개${diff.summaries.length ? ` · 월간 초안 ${diff.summaries.length}` : ""}${diff.removedLines.length ? ` · 지운 줄 ${diff.removedLines.length}(검토 필요)` : ""}`;
+            log(summary);
+            r = { ok: r.ok, output: `${summary}\n\n${r.output}` };
+          } else if (r.ok) {
+            r = { ok: true, output: `바뀐 것이 없습니다.\n\n${r.output}` };
+          }
+        }
+        log(`정리 ${r.ok ? "완료" : "실패"}: ${r.output.split("\n").slice(-3).join(" / ")}`);
+        const skipped = this.rail.filter((s) => s.state === "quota").map((s) => s.title);
+        run = { lastRun: new Date().toISOString(), agent: current.id, ok: r.ok, report: r.output.slice(-4000), rail: this.rail.map((s) => ({ ...s })), ...(proposalId ? { proposalId } : {}) };
+        this.opts.notify?.(
+          proposalId ? "정리 제안이 준비됐습니다" : r.ok ? "정리 완료" : "정리 실패",
+          skipped.length ? `${skipped.join(", ")} 할당량 → ${current.title}. ${proposalId ? "앱에서 검토하세요." : ""}`.trim() : proposalId ? "앱의 로그 탭이나 설정 → 정리에서 검토하고 적용하세요." : r.output.split("\n").find((l) => l.trim()) ?? "",
+        );
+        break;
       }
-      log(`정리 ${r.ok ? "완료" : "실패"}: ${r.output.split("\n").slice(-3).join(" / ")}`);
-      const run: DigestRun = { lastRun: new Date().toISOString(), agent: agent.id, ok: r.ok, report: r.output.slice(-4000), ...(proposalId ? { proposalId } : {}) };
-      this.opts.notify?.(
-        proposalId ? "정리 제안이 준비됐습니다" : r.ok ? "정리 완료" : "정리 실패",
-        proposalId ? "앱의 로그 탭이나 설정 → 정리에서 검토하고 적용하세요." : r.output.split("\n").find((l) => l.trim()) ?? "",
-      );
+      const finished = run ?? { lastRun: new Date().toISOString(), agent: list[0].id, ok: false, report: "넘길 서비스가 없습니다.", rail: this.rail };
       const state = loadState() as Record<string, unknown>;
-      state.digest = run;
+      state.digest = finished;
       saveState(state as never);
-      return run;
+      return finished;
     })().finally(() => {
       this.running = null;
+      this.rail = [];
     });
-    this.running = { startedAt, agent: agent.id, promise };
+    holder.promise = promise;
+    this.running = holder;
     return promise;
   }
 }

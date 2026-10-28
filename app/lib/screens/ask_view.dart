@@ -1,19 +1,31 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import 'file_screen.dart';
 
 const agentTitles = {'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter'};
 
+/// "Codex CLI" or "Claude Code 할당량 → Codex CLI가 작성" when an earlier stop was skipped.
+String _who(AskResult result, String fallback) {
+  final skips = result.rail.where((s) => s.state == 'quota').map((s) => s.title).toList();
+  final wrote = result.rail.where((s) => s.state == 'wrote').map((s) => s.title).firstOrNull ?? fallback;
+  if (skips.isEmpty) return wrote;
+  return '${skips.join(', ')} 할당량 → $wrote가 작성';
+}
+
 /// One exchange in the thread: the question, then the answer (or the error) once the server replies.
 class AskTurn {
-  AskTurn(this.question, {this.result, this.error});
+  AskTurn(this.question, {this.result, this.error, this.rail = const []});
   final String question;
   AskResult? result;
   Object? error;
+  List<RailStop> rail;
   bool get pending => result == null && error == null;
 }
 
@@ -34,11 +46,35 @@ class AskController extends ChangeNotifier {
   late Future<AskStatus> status = api.askStatus();
   SelectedSource? selected;
 
+  /// The rail of the question in flight, refreshed while the server tries the next service.
+  List<RailStop> liveRail = const [];
+  Timer? _poll;
+
   bool get busy => turns.any((t) => t.pending);
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
 
   void refreshStatus() {
     status = api.askStatus();
     notifyListeners();
+  }
+
+  void _watchRail() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 1), (_) async {
+      try {
+        final s = await api.askStatus();
+        final next = s.runningRail.isNotEmpty ? s.runningRail : s.rail;
+        if (next.isEmpty) return;
+        liveRail = next;
+        status = Future.value(s);
+        notifyListeners();
+      } catch (_) {}
+    });
   }
 
   /// Asks in the current conversation (a new one when there is none).
@@ -48,14 +84,21 @@ class AskController extends ChangeNotifier {
     final turn = AskTurn(q);
     turns.add(turn);
     selected = null;
+    liveRail = const [];
     notifyListeners();
+    _watchRail();
     try {
       final r = await api.ask(q, conversationId: conversationId);
       turn.result = r;
+      turn.rail = r.rail;
       conversationId = r.conversationId.isEmpty ? conversationId : r.conversationId;
       status = api.askStatus(); // the conversation list changed
     } catch (e) {
       turn.error = e;
+      turn.rail = e is ApiException && e.rail.isNotEmpty ? e.rail : liveRail;
+    } finally {
+      _poll?.cancel();
+      _poll = null;
     }
     notifyListeners();
   }
@@ -205,9 +248,9 @@ class _AskViewState extends State<AskView> {
           _QuestionBubble(text: t.question),
           const SizedBox(height: 8),
           if (t.pending)
-            _PendingBubble(status: c.status)
+            _PendingBubble(status: c.status, rail: c.liveRail)
           else if (t.error != null)
-            _ErrorBubble(error: t.error!, onRetry: () => c.retry(t), onOpenSettings: widget.onOpenSettings)
+            _ErrorBubble(error: t.error!, rail: t.rail, onRetry: () => c.retry(t), onOpenSettings: widget.onOpenSettings)
           else
             _AnswerBubble(result: t.result!, selected: c.selected?.turn == i ? c.selected!.n : null, onCite: (n) => _cite(i, n)),
         ]),
@@ -324,6 +367,7 @@ class _Intro extends StatelessWidget {
               '질문으로 기록을 검색하고, 상위 문단을 이 맥에 있는 에이전트(Claude Code·Codex·Gemini CLI)나 OpenRouter에 넣어 출처 [번호]가 달린 답을 받습니다. '
               '이어서 물으면 앞의 대화를 기억합니다. 에이전트는 파일을 읽기만 합니다.', icon: Icons.question_answer_outlined),
           if (agent != null) Text('답은 ${agent.title}가 씁니다 · ${agent.detail}', style: t.bodySmall?.copyWith(color: scheme.outline)),
+          if (st != null && st.rail.isNotEmpty) AgentRail(stops: st.rail),
           for (final a in st?.agents.where((a) => a.needsLogin) ?? const <AgentInfo>[])
             Text('${a.title}: ${a.loginNote}', style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
           if (noAgent) ...[
@@ -363,28 +407,33 @@ class _QuestionBubble extends StatelessWidget {
 }
 
 class _PendingBubble extends StatelessWidget {
-  const _PendingBubble({required this.status});
+  const _PendingBubble({required this.status, required this.rail});
   final Future<AskStatus> status;
+  final List<RailStop> rail;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return _Bubble(
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-        const SizedBox(width: 10),
-        FutureBuilder<AskStatus>(
-          future: status,
-          builder: (context, snap) => Text('${snap.data?.chosenAgent?.title ?? '에이전트'}가 기록을 읽고 답을 쓰는 중… (수십 초)', style: t.bodyMedium),
-        ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (rail.isNotEmpty) AgentRail(stops: rail),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+          FutureBuilder<AskStatus>(
+            future: status,
+            builder: (context, snap) => Text('${snap.data?.chosenAgent?.title ?? '에이전트'}가 기록을 읽고 답을 쓰는 중… (수십 초)', style: t.bodyMedium),
+          ),
+        ]),
       ]),
     );
   }
 }
 
 class _ErrorBubble extends StatelessWidget {
-  const _ErrorBubble({required this.error, required this.onRetry, this.onOpenSettings});
+  const _ErrorBubble({required this.error, required this.onRetry, this.rail = const [], this.onOpenSettings});
   final Object error;
+  final List<RailStop> rail;
   final VoidCallback onRetry;
   final VoidCallback? onOpenSettings;
 
@@ -398,6 +447,7 @@ class _ErrorBubble extends StatelessWidget {
     return _Bubble(
       color: scheme.errorContainer.withValues(alpha: 0.35),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (rail.isNotEmpty) AgentRail(stops: rail),
         Text(message, style: t.bodyMedium),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
@@ -425,6 +475,7 @@ class _AnswerBubble extends StatelessWidget {
     final agent = agentTitles[result.agent] ?? result.agent;
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (result.rail.isNotEmpty) AgentRail(stops: result.rail),
         SelectableText.rich(citationSpan(context, result.answer, sources: result.sources, base: t.bodyLarge, selected: selected, onCite: onCite), minLines: 1, maxLines: 80),
         const SizedBox(height: 10),
         Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -432,7 +483,7 @@ class _AnswerBubble extends StatelessWidget {
           for (final s in result.sources) _SourceChip(source: s, selected: selected == s.n, onTap: () => onCite(s.n)),
         ]),
         const SizedBox(height: 6),
-        Text('$agent · ${(result.ms / 1000).toStringAsFixed(1)}초 · 발췌 ${result.sources.length}개만 근거로 썼습니다', style: t.labelSmall?.copyWith(color: scheme.outline)),
+        Text('${_who(result, agent)} · ${(result.ms / 1000).toStringAsFixed(1)}초 · 발췌 ${result.sources.length}개만 근거로 썼습니다', style: t.labelSmall?.copyWith(color: scheme.outline)),
       ]),
     );
   }

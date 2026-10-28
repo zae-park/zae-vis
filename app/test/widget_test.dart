@@ -25,6 +25,9 @@ int indexPolls = 0;
 String mockHotkey = '';
 bool mockObsidianConfigured = false;
 String? mockAskAgent = 'claude';
+List<Object>? mockAskRail;
+List<Object>? mockAskStatusRail;
+List<Object>? mockDigestRail;
 bool mockKiwiInstalled = false;
 
 /// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
@@ -110,6 +113,7 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/ask' when req.method == 'GET':
             return _json({
               'running': null, 'last': null, 'chosen': mockAskAgent,
+              if (mockAskStatusRail != null) 'rail': mockAskStatusRail,
               'conversations': [{'id': '20261027-120000', 'title': '예전 대화', 'updatedAt': '2026-10-27T03:00:00Z', 'turns': 1}],
               'setting': {'agent': 'auto', 'model': ''},
               'agents': [
@@ -126,6 +130,7 @@ WorklogApi _fakeApi() => WorklogApi(
               'q': askBody['q'], 'agent': 'claude', 'ms': 12345,
               'conversationId': askBody['conversationId'] ?? '20261027-120000', 'turn': askBody['conversationId'] == null ? 0 : 1,
               'answer': 'GA4 매핑은 캠페인 매핑이 빠져 막혔다 [1]. 수동으로 채우기로 정했다 [2].',
+              if (mockAskRail != null) 'rail': mockAskRail,
               'sources': [
                 {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · roas · 박재', 'passage': 'GA4 캠페인 매핑이 빠져서'},
                 {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '매핑 테이블을 수동으로 채우기로'},
@@ -158,6 +163,7 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/digest' when req.method == 'GET':
             return _json({
               'running': false, 'nextWeekly': '2026-11-02', 'chosen': 'claude',
+              if (mockDigestRail != null) 'rail': mockDigestRail,
               'setting': {'agent': 'auto', 'model': '', 'weekly': true},
               'agents': [
                 {'id': 'claude', 'title': 'Claude Code', 'available': true, 'detail': '2.1.304 (Claude Code)', 'loggedIn': true, 'loginHint': '터미널에서 claude login'},
@@ -165,7 +171,10 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'id': 'gemini', 'title': 'Gemini CLI', 'available': false, 'detail': '설치되지 않음'},
                 {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
               ],
-              'last': {'lastRun': '2026-10-26T12:00:00Z', 'agent': 'claude', 'ok': true, 'report': '로그 3줄 추가, inbox 1개 처리'},
+              'last': {
+                'lastRun': '2026-10-26T12:00:00Z', 'agent': 'claude', 'ok': true, 'report': '로그 3줄 추가, inbox 1개 처리',
+                if (mockDigestRail != null) 'rail': mockDigestRail,
+              },
             });
           case '/api/digest/run':
             posted.add(req);
@@ -430,6 +439,60 @@ void main() {
     await tester.tap(find.byTooltip('닫기'));
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsNothing);
+  });
+
+  testWidgets('질문 rail names the quota skip and who wrote', (tester) async {
+    tester.view.physicalSize = const Size(1200, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockAskStatusRail = [
+      {'id': 'claude', 'title': 'Claude Code', 'state': 'ready'},
+      {'id': 'codex', 'title': 'Codex CLI', 'state': 'ready'},
+      {'id': 'openrouter', 'title': 'OpenRouter API', 'state': 'ready', 'metered': true},
+    ];
+    mockAskRail = [
+      {'id': 'claude', 'title': 'Claude Code', 'state': 'quota', 'reason': 'You have hit your usage limit'},
+      {'id': 'codex', 'title': 'Codex CLI', 'state': 'wrote'},
+      {'id': 'openrouter', 'title': 'OpenRouter API', 'state': 'ready', 'metered': true},
+    ];
+    addTearDown(() {
+      mockAskRail = null;
+      mockAskStatusRail = null;
+    });
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.text('질문'));
+    await tester.pumpAndSettle();
+    expect(find.text('서비스 순서'), findsOneWidget);
+    expect(find.text('OpenRouter API · 사용량'), findsOneWidget);
+    expect(find.text('Claude Code · 할당량'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '누가 썼지?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(find.text('Claude Code · 할당량'), findsOneWidget);
+    expect(find.text('Codex CLI · 작성'), findsOneWidget);
+    expect(find.textContaining('Claude Code 할당량 → Codex CLI가 작성 · 12.3초'), findsOneWidget);
+  });
+
+  testWidgets('설정 정리 shows the rail and names a quota skip on the last run', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockDigestRail = [
+      {'id': 'claude', 'title': 'Claude Code', 'state': 'quota', 'reason': 'You have hit your usage limit'},
+      {'id': 'codex', 'title': 'Codex CLI', 'state': 'wrote'},
+    ];
+    addTearDown(() => mockDigestRail = null);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('서비스 순서'), findsOneWidget);
+    expect(find.text('Claude Code · 할당량'), findsOneWidget);
+    expect(find.text('Codex CLI · 작성'), findsOneWidget);
+    expect(find.textContaining('Claude Code 할당량으로 건너뜀'), findsOneWidget);
   });
 
   testWidgets('질문 mode without an agent explains and offers the settings', (tester) async {

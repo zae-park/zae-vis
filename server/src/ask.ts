@@ -21,12 +21,13 @@ import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
 import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
+import { fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
-export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string; conversationId: string; turn: number };
+export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string; conversationId: string; turn: number; rail?: RailStop[] };
 export type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; turns: AskResult[] };
 export type ConversationSummary = Pick<Conversation, "id" | "title" | "createdAt" | "updatedAt"> & { turns: number };
-export type AskError = { status: 400 | 404 | 409 | 502; error: "missing_query" | "no_hits" | "no_agent" | "busy" | "search_failed" | "agent_failed"; message: string };
+export type AskError = { status: 400 | 404 | 409 | 502; error: "missing_query" | "no_hits" | "no_agent" | "busy" | "search_failed" | "agent_failed"; message: string; rail?: RailStop[] };
 export type AskOutcome = { ok: true; result: AskResult } | ({ ok: false } & AskError);
 
 export const DEFAULT_TOP_K = 10;
@@ -209,8 +210,17 @@ export function cleanAnswer(text: string): string {
     .trim();
 }
 
+/** A failure that already knows which rail stops were tried, so the app can draw them. */
+export class AgentFailed extends Error {
+  readonly rail: RailStop[];
+  constructor(message: string, rail: RailStop[]) {
+    super(message);
+    this.rail = rail;
+  }
+}
+
 export class AskRunner {
-  private running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null } | null = null;
+  private running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null; rail: RailStop[] } | null = null;
   private lastResult: AskResult | null = null;
   readonly store: ConversationStore;
   private readonly opts: { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; log?: (line: string) => void };
@@ -220,7 +230,7 @@ export class AskRunner {
     this.store = opts.store ?? new ConversationStore();
   }
 
-  status(): { running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null } | null; last: AskResult | null; conversations: ConversationSummary[] } {
+  status(): { running: { q: string; startedAt: string; agent: AgentId; conversationId: string | null; rail: RailStop[] } | null; last: AskResult | null; conversations: ConversationSummary[] } {
     return { running: this.running, last: this.lastResult, conversations: this.store.list() };
   }
 
@@ -229,7 +239,7 @@ export class AskRunner {
    * `conversationId` the question continues that conversation (404-ish `missing_query`
    * is not raised for an unknown id: a new conversation starts instead).
    */
-  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model">; worklogDir: string; topK?: number; conversationId?: string; /** all detected agents, so the no-agent message can name one that only needs a login */ agents?: AgentInfo[] }): Promise<AskOutcome> {
+  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model"> & { agent?: DigestSetting["agent"] }; worklogDir: string; topK?: number; conversationId?: string; /** all detected agents, so the no-agent message can name one that only needs a login, and auto can fall through on quota */ agents?: AgentInfo[] }): Promise<AskOutcome> {
     const question = q.trim();
     if (!question) return { ok: false, status: 400, error: "missing_query", message: "질문을 입력하세요." };
     if (!opts.agent) return { ok: false, status: 409, error: "no_agent", message: opts.agents ? `답을 쓸 ${noAgentReason(opts.agents)}` : NO_AGENT_MESSAGE };
@@ -237,7 +247,10 @@ export class AskRunner {
     const topK = Math.min(Math.max(opts.topK ?? DEFAULT_TOP_K, 1), MAX_TOP_K);
     const started = Date.now();
     const existing = opts.conversationId ? this.store.get(opts.conversationId) : null;
-    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: opts.agent.id, conversationId: existing?.id ?? null };
+    const mode = opts.setting.agent;
+    const chain = mode === "auto" && opts.agents ? fallbackCandidates({ agent: "auto" }, opts.agents) : [opts.agent];
+    const rail = mode && opts.agents ? plannedRail({ agent: mode }, opts.agents) : plannedRail({ agent: opts.agent.id }, [opts.agent]);
+    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: chain[0]?.id ?? opts.agent.id, conversationId: existing?.id ?? null, rail };
     try {
       const previous = existing?.turns.at(-1);
       // fetch a few more than needed so weak hits can be dropped
@@ -246,17 +259,27 @@ export class AskRunner {
       const sources = pickSources(r.hits, topK);
       if (!sources.length) return { ok: false, status: 404, error: "no_hits", message: `"${question}"과 관련된 기록을 찾지 못했습니다.` };
       const prompt = buildAskPrompt(question, sources, existing?.turns ?? []);
-      this.opts.log?.(`질문 (${opts.agent.title}, 발췌 ${sources.length}개): ${question}`);
-      let answer: string;
+      this.opts.log?.(`질문 (${chain.map((a) => a.title).join(" → ")}, 발췌 ${sources.length}개): ${question}`);
+      let produced: { text: string; agent: AgentInfo; rail: RailStop[] };
       try {
-        answer = await this.answer(opts.agent, prompt, opts.setting.model, opts.worklogDir);
+        produced = await generateWithFallback(chain, prompt, opts.setting.model, opts.worklogDir, {
+          ...this.opts,
+          planned: rail,
+          onTrail: (stops) => {
+            if (!this.running) return;
+            this.running.rail = stops;
+            const cur = stops.find((s) => s.state === "running" || s.state === "wrote");
+            if (cur) this.running.agent = cur.id;
+          },
+        });
       } catch (err) {
         this.opts.log?.(`질문 실패: ${(err as Error).message}`);
-        return { ok: false, status: 502, error: "agent_failed", message: (err as Error).message };
+        const failed = err instanceof AgentFailed ? err.rail : this.running?.rail;
+        return { ok: false, status: 502, error: "agent_failed", message: (err as Error).message, ...(failed ? { rail: failed } : {}) };
       }
       const now = new Date();
       const conv: Conversation = existing ?? { id: this.store.newId(now), title: clipText(question, 60), createdAt: now.toISOString(), updatedAt: now.toISOString(), turns: [] };
-      const result: AskResult = { q: question, answer, sources, agent: opts.agent.id, ms: Date.now() - started, at: now.toISOString(), conversationId: conv.id, turn: conv.turns.length };
+      const result: AskResult = { q: question, answer: produced.text, sources, agent: produced.agent.id, ms: Date.now() - started, at: now.toISOString(), conversationId: conv.id, turn: conv.turns.length, rail: produced.rail };
       conv.turns.push(result);
       conv.updatedAt = now.toISOString();
       try {
@@ -265,15 +288,11 @@ export class AskRunner {
         this.opts.log?.(`대화 저장 실패: ${(err as Error).message}`);
       }
       this.lastResult = result;
-      this.opts.log?.(`답 (${result.ms}ms): ${answer.slice(0, 120).replace(/\n/g, " ")}`);
+      this.opts.log?.(`답 (${result.ms}ms, ${produced.agent.title}): ${produced.text.slice(0, 120).replace(/\n/g, " ")}`);
       return { ok: true, result };
     } finally {
       this.running = null;
     }
-  }
-
-  private answer(agent: AgentInfo, prompt: string, model: string, cwd: string): Promise<string> {
-    return generateText(agent, prompt, model, cwd, this.opts);
   }
 }
 
@@ -300,10 +319,46 @@ export async function generateText(agent: AgentInfo, prompt: string, model: stri
     let text = r.stdout;
     if (outFile) text = await readFile(outFile, "utf8").catch(() => r.stdout);
     text = cleanAnswer(text);
+    const quota = !r.ok ? quotaReason(`${r.stderr}\n${r.stdout}`) : null;
+    if (quota) throw new Error(quota);
     if (!r.ok && !text) throw new Error(`${agent.title} 실행 실패: ${(r.stderr || r.stdout).split("\n").slice(-3).join(" / ") || "출력 없음"}`);
     if (!text) throw new Error(`${agent.title}가 답을 돌려주지 않았습니다. ${r.stderr.split("\n").slice(-2).join(" / ")}`.trim());
     return text;
   } finally {
     if (tmp) await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/**
+ * Tries `agents` in order. A quota error marks that stop and continues; any other failure stops.
+ * `planned` is the full rail (including tools that will not be called) so the app can draw it live.
+ */
+export async function generateWithFallback(agents: AgentInfo[], prompt: string, model: string, cwd: string, opts: GenerateOpts & { planned?: RailStop[]; onTrail?: (rail: RailStop[]) => void } = {}): Promise<{ text: string; agent: AgentInfo; rail: RailStop[] }> {
+  let rail = opts.planned ? opts.planned.map((s) => ({ ...s })) : agents.map((a) => ({ id: a.id, title: a.title, metered: a.id === "openrouter", state: "ready" as const }));
+  const note = () => opts.onTrail?.(rail.map((s) => ({ ...s })));
+  note();
+  let last = "답을 쓰지 못했습니다.";
+  for (const agent of agents) {
+    rail = withStop(rail, agent.id, "running");
+    note();
+    try {
+      const text = await generateText(agent, prompt, model, cwd, opts);
+      rail = withStop(rail, agent.id, "wrote");
+      note();
+      return { text, agent, rail };
+    } catch (err) {
+      const message = (err as Error).message;
+      const quota = quotaReason(message);
+      if (quota) {
+        rail = withStop(rail, agent.id, "quota", quota);
+        last = rail.filter((s) => s.state === "quota").map((s) => `${s.title} 할당량 (${s.reason})`).join(" → ");
+        note();
+        continue;
+      }
+      rail = withStop(rail, agent.id, "error", message.replace(/\s+/g, " ").slice(0, 80));
+      note();
+      throw new AgentFailed(message, rail);
+    }
+  }
+  throw new AgentFailed(`${last}. 넘길 서비스가 없습니다.`, rail);
 }

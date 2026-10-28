@@ -8,6 +8,7 @@ import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ask-state-"));
 const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, pickSources, searchQueryFor } = await import("../src/ask.ts");
+const { quotaReason } = await import("../src/rail.ts");
 const { createApp } = await import("../src/app.ts");
 const { normalizeSearch } = await import("../src/autorag.ts");
 const { Worklog } = await import("../src/worklog.ts");
@@ -224,6 +225,48 @@ test("ask: a follow-up continues the conversation — history in the prompt, sho
   assert.equal(store.remove(conv.id), true);
   assert.equal(store.get(conv.id), null);
   assert.throws(() => store.get("../x"));
+});
+
+test("ask: auto retries the next agent only on quota; a pinned agent and other failures stay put", async () => {
+  assert.equal(quotaReason("Not logged in\nRun claude login"), null);
+  assert.equal(quotaReason("모델이 빈 답을 돌려줬습니다."), null);
+  assert.equal(quotaReason("[시간 초과]"), null);
+  assert.match(quotaReason("progress\nYou have hit your usage limit") ?? "", /hit your usage limit/);
+  assert.match(quotaReason("OpenRouter HTTP 429: rate limit") ?? "", /429/);
+
+  const calls: string[] = [];
+  const exec: Exec = async (bin) => {
+    calls.push(bin);
+    if (bin.endsWith("claude")) return { ok: false, stdout: "", stderr: "You have hit your usage limit" };
+    return { ok: true, stdout: "다음이 쓴 답 [1]", stderr: "" };
+  };
+  const agents = [claude, codex];
+  const base = { search: fakeSearch, worklogDir: "/w", agent: claude, agents };
+  const hopped = await new AskRunner({ exec }).ask("q", { ...base, setting: { agent: "auto", model: "" } });
+  assert.equal(hopped.ok, true);
+  if (!hopped.ok) return;
+  assert.equal(hopped.result.agent, "codex");
+  assert.equal(hopped.result.answer, "다음이 쓴 답 [1]");
+  assert.deepEqual(calls, ["/bin/claude", "/bin/codex"]);
+  assert.equal(hopped.result.rail.find((s) => s.id === "claude")?.state, "quota");
+  assert.equal(hopped.result.rail.find((s) => s.id === "codex")?.state, "wrote");
+
+  calls.length = 0;
+  const pinned = await new AskRunner({ exec }).ask("q", { ...base, setting: { agent: "claude", model: "" } });
+  assert.equal(pinned.ok, false);
+  assert.deepEqual(calls, ["/bin/claude"]);
+
+  calls.length = 0;
+  const crashed: Exec = async (bin) => {
+    calls.push(bin);
+    if (bin.endsWith("claude")) return { ok: false, stdout: "", stderr: "You have hit your usage limit" };
+    return { ok: false, stdout: "", stderr: "segfault" };
+  };
+  const stopped = await new AskRunner({ exec: crashed }).ask("q", { ...base, setting: { agent: "auto", model: "" } });
+  assert.equal(stopped.ok, false);
+  assert.match(!stopped.ok ? stopped.message : "", /segfault/);
+  assert.equal(!stopped.ok ? stopped.rail?.find((s) => s.id === "codex")?.state : "", "error");
+  assert.deepEqual(calls, ["/bin/claude", "/bin/codex"]);
 });
 
 test("ask: GET /api/ask/:id returns a conversation and DELETE removes it", async () => {

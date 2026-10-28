@@ -8,6 +8,7 @@ import '../backend/backend.dart';
 import '../models.dart';
 import '../shortcuts.dart';
 import '../theme.dart';
+import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
 import '../widgets/task_dialog.dart';
@@ -463,7 +464,12 @@ class _DigestSectionState extends State<_DigestSection> {
     _reload();
   }
 
-  static const _labels = {'auto': '자동 (설치된 것 중 첫 번째)', 'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter API'};
+  static const _labels = {'auto': '자동 (할당량이면 다음 서비스)', 'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter API'};
+
+  String _quotaNote(List<RailStop> rail) {
+    final names = rail.where((s) => s.state == 'quota').map((s) => s.title).toList();
+    return names.isEmpty ? '' : ' · ${names.join(', ')} 할당량으로 건너뜀';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -480,8 +486,10 @@ class _DigestSectionState extends State<_DigestSection> {
         final chosen = s.agents.where((a) => a.id == s.chosen).firstOrNull;
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. '
-              '이 맥에 설치된 에이전트(본인 구독)나 저장된 OpenRouter 키 중 쓸 수 있는 것으로 돌립니다.', style: t.bodySmall),
+              '이 맥에 설치된 에이전트(본인 구독)나 저장된 OpenRouter 키 중 쓸 수 있는 것으로 돌립니다. '
+              '자동이면 할당량으로 막히고 아직 파일을 쓰지 않았을 때만 다음 서비스로 넘깁니다.', style: t.bodySmall),
           const SizedBox(height: 8),
+          if (s.rail.isNotEmpty) AgentRail(stops: s.rail),
           for (final a in s.agents)
             ListTile(
               dense: true,
@@ -564,7 +572,7 @@ class _DigestSectionState extends State<_DigestSection> {
           ),
           if (s.last != null) ...[
             const SizedBox(height: 8),
-            Text('마지막 정리: ${s.last!.ok ? (s.last!.proposalId != null ? '검토 대기' : '완료') : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
+            Text('마지막 정리: ${s.last!.ok ? (s.last!.proposalId != null ? '검토 대기' : '완료') : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent}${_quotaNote(s.last!.rail)} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
                 style: t.bodySmall?.copyWith(color: s.last!.ok ? null : scheme.error)),
             Container(
               margin: const EdgeInsets.only(top: 6),

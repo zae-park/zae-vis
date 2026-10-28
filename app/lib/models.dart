@@ -148,7 +148,7 @@ class AskSource {
 
 /// An answer with [n] citations into [sources].
 class AskResult {
-  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0});
+  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0, this.rail = const []});
   factory AskResult.fromJson(Json j) => AskResult(
         question: _str(j['q']),
         answer: _str(j['answer']),
@@ -157,6 +157,7 @@ class AskResult {
         ms: (j['ms'] as num?)?.toInt() ?? 0,
         conversationId: _str(j['conversationId']),
         turn: (j['turn'] as num?)?.toInt() ?? 0,
+        rail: RailStop.list(j['rail']),
       );
   final String question;
   final String answer;
@@ -167,6 +168,9 @@ class AskResult {
   /// The conversation this turn belongs to and its index in it.
   final String conversationId;
   final int turn;
+
+  /// How the answer was produced: quota skips, then the stop that wrote it.
+  final List<RailStop> rail;
 
   /// The "[n]" numbers in the answer that point at an existing source.
   List<int> get cited => RegExp(r'\[(\d+)\]').allMatches(answer).map((m) => int.parse(m.group(1)!)).where((n) => n >= 1 && n <= sources.length).toSet().toList()..sort();
@@ -202,19 +206,30 @@ class Conversation {
 
 /// GET /api/ask: which agent would answer (same choice as the weekly digest), the last answer and the conversations.
 class AskStatus {
-  const AskStatus({required this.agents, this.chosen, this.last, this.runningQuestion, this.conversations = const []});
-  factory AskStatus.fromJson(Json j) => AskStatus(
-        agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
-        chosen: _strOrNull(j['chosen']),
-        last: j['last'] is Json ? AskResult.fromJson(j['last'] as Json) : null,
-        runningQuestion: j['running'] is Json ? _strOrNull((j['running'] as Json)['q']) : null,
-        conversations: (j['conversations'] is List ? j['conversations'] as List : const <Object?>[]).whereType<Json>().map(ConversationSummary.fromJson).toList(),
-      );
+  const AskStatus({required this.agents, this.chosen, this.last, this.runningQuestion, this.conversations = const [], this.rail = const [], this.runningRail = const []});
+  factory AskStatus.fromJson(Json j) {
+    final running = j['running'] is Json ? j['running'] as Json : null;
+    return AskStatus(
+      agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
+      chosen: _strOrNull(j['chosen']),
+      last: j['last'] is Json ? AskResult.fromJson(j['last'] as Json) : null,
+      runningQuestion: running == null ? null : _strOrNull(running['q']),
+      runningRail: running == null ? const [] : RailStop.list(running['rail']),
+      conversations: (j['conversations'] is List ? j['conversations'] as List : const <Object?>[]).whereType<Json>().map(ConversationSummary.fromJson).toList(),
+      rail: RailStop.list(j['rail']),
+    );
+  }
   final List<AgentInfo> agents;
   final String? chosen;
   final AskResult? last;
   final String? runningQuestion;
   final List<ConversationSummary> conversations;
+
+  /// The chain as it stands now: the live attempt while a question runs, otherwise who would be tried.
+  final List<RailStop> rail;
+
+  /// Stops reported on the in-flight question, including ones already skipped for quota.
+  final List<RailStop> runningRail;
 
   AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
 }
@@ -671,14 +686,36 @@ class AgentInfo {
   String get loginNote => '로그인 필요: ${loginHint ?? '터미널에서 로그인'}';
 }
 
+/// One stop on the agent rail: ready, writing, skipped for quota, or the one that wrote.
+class RailStop {
+  const RailStop({required this.id, required this.title, required this.state, this.metered = false, this.reason});
+  factory RailStop.fromJson(Json j) => RailStop(
+        id: _str(j['id']),
+        title: _str(j['title']),
+        state: _str(j['state']).isEmpty ? 'off' : _str(j['state']),
+        metered: j['metered'] == true,
+        reason: _strOrNull(j['reason']),
+      );
+  static List<RailStop> list(Object? raw) => raw is List ? raw.whereType<Json>().map(RailStop.fromJson).toList() : const [];
+
+  final String id;
+  final String title;
+
+  /// off | login | ready | running | quota | wrote | error
+  final String state;
+  final bool metered;
+  final String? reason;
+}
+
 class DigestRun {
-  const DigestRun({required this.at, required this.agent, required this.ok, required this.report, this.proposalId});
+  const DigestRun({required this.at, required this.agent, required this.ok, required this.report, this.proposalId, this.rail = const []});
   factory DigestRun.fromJson(Json j) => DigestRun(
         at: DateTime.tryParse(_str(j['lastRun'])),
         agent: _str(j['agent']),
         ok: j['ok'] == true,
         report: _str(j['report']),
         proposalId: _strOrNull(j['proposalId']),
+        rail: RailStop.list(j['rail']),
       );
   final DateTime? at;
   final String agent;
@@ -687,6 +724,7 @@ class DigestRun {
 
   /// Set when the run was held for review instead of being written to the worklog.
   final String? proposalId;
+  final List<RailStop> rail;
 }
 
 /// GET /api/digest: detected agents, the setting, what would run, and the last run.
@@ -702,6 +740,7 @@ class DigestStatus {
     this.runningAgent,
     this.last,
     this.nextWeekly,
+    this.rail = const [],
   });
 
   factory DigestStatus.fromJson(Json j) {
@@ -717,6 +756,7 @@ class DigestStatus {
       chosen: _strOrNull(j['chosen']),
       last: j['last'] is Json ? DigestRun.fromJson(j['last'] as Json) : null,
       nextWeekly: _strOrNull(j['nextWeekly']),
+      rail: RailStop.list(j['rail']),
     );
   }
 
@@ -731,6 +771,9 @@ class DigestStatus {
   final String? chosen;
   final DigestRun? last;
   final String? nextWeekly;
+
+  /// Who would run, or the live attempt while a digest is in progress.
+  final List<RailStop> rail;
 
   /// Review before apply: a run leaves a proposal instead of writing the worklog directly.
   final bool review;
@@ -1132,7 +1175,7 @@ class Report {
 
 /// The last run of one kind (state.json), successful or not.
 class ReportRun {
-  const ReportRun({required this.kind, required this.period, required this.ok, this.at, this.agent, this.error, this.path});
+  const ReportRun({required this.kind, required this.period, required this.ok, this.at, this.agent, this.error, this.path, this.rail = const []});
   factory ReportRun.fromJson(Json j) => ReportRun(
         kind: _str(j['kind']),
         period: _str(j['period']),
@@ -1141,6 +1184,7 @@ class ReportRun {
         agent: _strOrNull(j['agent']),
         error: _strOrNull(j['error']),
         path: _strOrNull(j['path']),
+        rail: RailStop.list(j['rail']),
       );
   final String kind;
   final String period;
@@ -1149,6 +1193,7 @@ class ReportRun {
   final String? agent;
   final String? error;
   final String? path;
+  final List<RailStop> rail;
 }
 
 /// config.reports: when the daily job writes which report.
@@ -1192,7 +1237,7 @@ class ReportSettings {
 
 /// GET /api/reports.
 class ReportsStatus {
-  const ReportsStatus({required this.settings, required this.reports, this.running, this.lastRun = const {}, this.defaults = const {}, this.agents = const [], this.chosen});
+  const ReportsStatus({required this.settings, required this.reports, this.running, this.lastRun = const {}, this.defaults = const {}, this.agents = const [], this.chosen, this.rail = const []});
   factory ReportsStatus.fromJson(Json j) {
     final r = j['reports'] is Json ? j['reports'] as Json : const <String, dynamic>{};
     final last = j['lastRun'] is Json ? j['lastRun'] as Json : const <String, dynamic>{};
@@ -1203,7 +1248,8 @@ class ReportsStatus {
       reports: {
         for (final k in reportKinds) k: (r[k] is List ? r[k] as List : const <Object?>[]).whereType<Json>().map(ReportEntry.fromJson).toList(),
       },
-      running: run is Json ? ReportRunning(kind: _str(run['kind']), period: _str(run['period']), agent: _strOrNull(run['agent'])) : null,
+      running: run is Json ? ReportRunning(kind: _str(run['kind']), period: _str(run['period']), agent: _strOrNull(run['agent']), rail: RailStop.list(run['rail'])) : null,
+      rail: RailStop.list(j['rail']),
       lastRun: {for (final e in last.entries) if (e.value is Json) e.key: ReportRun.fromJson(e.value as Json)},
       defaults: {for (final e in defaults.entries) e.key: _str(e.value)},
       agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
@@ -1218,6 +1264,7 @@ class ReportsStatus {
   /// The agents the server found (same list as the digest) and which one would write a report now.
   final List<AgentInfo> agents;
   final String? chosen;
+  final List<RailStop> rail;
   AgentInfo? get chosenAgent => agents.where((a) => a.id == chosen).firstOrNull;
 
   /// What a run without a period would make now, per kind.
@@ -1227,8 +1274,9 @@ class ReportsStatus {
 }
 
 class ReportRunning {
-  const ReportRunning({required this.kind, required this.period, this.agent});
+  const ReportRunning({required this.kind, required this.period, this.agent, this.rail = const []});
   final String kind;
   final String period;
   final String? agent;
+  final List<RailStop> rail;
 }

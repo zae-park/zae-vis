@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
+import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import '../widgets/markdown_view.dart';
 
@@ -174,6 +175,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ]),
       ),
       if (status.agents.isNotEmpty) _AgentLine(status: status),
+      if (_reportRail(status, running, _kind, _period) case final rail?) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: AgentRail(stops: rail)),
       if (running != null) _RunningBar(running: running),
       if (_notice != null)
         MaterialBanner(
@@ -246,6 +248,15 @@ class _MakeNowButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Live rail while a report is being written; the trail of the open report when it skipped a quota; otherwise who would write the next one.
+List<RailStop>? _reportRail(ReportsStatus status, ReportRunning? running, String kind, String? period) {
+  if (running != null && running.rail.isNotEmpty) return running.rail;
+  final last = status.lastRun[kind];
+  if (running == null && last != null && last.period == period && last.rail.any((s) => s.state == 'quota')) return last.rail;
+  if (status.rail.isNotEmpty) return status.rail;
+  return null;
 }
 
 /// Which agent writes the reports — or why none can right now (a CLI that only needs a login).
