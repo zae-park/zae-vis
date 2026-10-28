@@ -174,7 +174,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ]),
       ),
       if (status.agents.isNotEmpty) _AgentLine(status: status),
-      if (!(failedHere && (failed?.rail.isNotEmpty ?? false)))
+      if (!(failedHere && failed.rail.isNotEmpty))
         if (_reportRail(status, running, _kind, _period) case final rail?) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: AgentRail(stops: rail)),
       if (running != null) _RunningBar(running: running),
       if (_settingsOpen)

@@ -16,7 +16,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stateDir } from "./config.ts";
-import { spawn } from "node:child_process";
+import { spawnBin } from "./spawnbin.ts";
 import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
 import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
@@ -170,7 +170,7 @@ export type Exec = (bin: string, args: string[], cwd: string, env?: NodeJS.Proce
 /** Like digest.runCli but keeps stdout (the answer) apart from stderr (progress chatter). */
 export const execCli: Exec = (bin, args, cwd, env, timeoutMs = RUN_TIMEOUT_MS) =>
   new Promise((res) => {
-    const child = spawn(bin, args, { cwd, env: { ...(env ?? process.env), PATH: searchDirs(env).join(delimiter), NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnBin(bin, args, { cwd, env: { ...(env ?? process.env), PATH: searchDirs(env).join(delimiter), NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (c: Buffer) => (stdout = (stdout + c.toString()).slice(-40_000)));

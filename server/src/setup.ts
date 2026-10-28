@@ -5,7 +5,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { loadState, saveState, stateDir } from "./config.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 
@@ -69,8 +69,9 @@ export function excludeFromGit(paths: string[], roots: string[], log: (l: string
     const realTop = realpathSync(top);
     for (const p of paths) {
       const real = existsSync(p) ? realpathSync(p) : join(realpathSync(dirname(p)), basename(p)); // CLAUDE.md may not exist yet
-      const rel = real.startsWith(realTop + (WIN ? "\\" : "/")) ? real.slice(realTop.length + 1).split("\\").join("/") : null;
-      if (!rel) continue;
+      const relRaw = relative(realTop, real);
+      if (!relRaw || relRaw === ".." || relRaw.startsWith(`..${sep}`) || relRaw.startsWith("../")) continue;
+      const rel = relRaw.split(sep).join("/");
       const line = `/${rel}`;
       const cur = existsSync(ex) ? readFileSync(ex, "utf8").split("\n") : [];
       if (cur.includes(line)) continue;

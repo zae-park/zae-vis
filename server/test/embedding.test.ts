@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { EmbeddingDaemon, findMinsync } from "../src/embedding.ts";
 
@@ -19,8 +19,8 @@ const serving = (event: string, pid = "$$") =>
 
 test("embedding: findMinsync looks on PATH", async () => {
   const bin = await fakeMinsync("exit 0");
-  assert.equal(findMinsync({ PATH: `/nonexistent:${join(bin, "..")}` }), bin);
-  assert.equal(findMinsync({ PATH: "/nonexistent" }), null);
+  assert.equal(findMinsync({ PATH: ["nonexistent", dirname(bin)].join(delimiter) }), bin);
+  assert.equal(findMinsync({ PATH: "nonexistent" }), null);
 });
 
 test("embedding: no binary → failed with a clear error, never throws", async () => {
@@ -61,7 +61,7 @@ test("embedding: adopted event (daemon already running) → ready + external, ex
 
 test("embedding: stop() also terminates an adopted daemon by pid", async () => {
   const { spawn } = await import("node:child_process");
-  const orphan = spawn("sleep", ["30"], { stdio: "ignore" });
+  const orphan = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
   const bin = await fakeMinsync(`${serving("adopted", String(orphan.pid))}\nexit 0`);
   const d = new EmbeddingDaemon({ binary: bin, healthTimeoutMs: 200 });
   assert.equal((await d.start()).pid, orphan.pid);

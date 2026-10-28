@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../src/app.ts";
@@ -48,7 +48,7 @@ test("probe: missing CLI → not installed; no CLI → null; platform gate; env 
   const slackPlan = installPlan("slacrawl", { PATH: "/nonexistent" });
   assert.ok(slackPlan.kind === "brew" ? slackPlan.pkg === "openclaw/tap/slacrawl" : /Homebrew/.test(slackPlan.reason));
   const katok = installPlan("lazykatok", { PATH: "/nonexistent" });
-  assert.ok(katok.kind === "release" ? katok.repo === "changeroa/lazykatok" && katok.asset("0.3.3")!.includes("0.3.3") && katok.dir.endsWith("ext/bin") : katok.kind === "none");
+  assert.ok(katok.kind === "release" ? katok.repo === "changeroa/lazykatok" && katok.asset("0.3.3")!.includes("0.3.3") && katok.dir.endsWith(join("ext", "bin")) : katok.kind === "none");
   assert.equal(installPlan("mailcrawl").kind, "none", "no automated path for mailcrawl yet");
   const rclone = installPlan("rclone", { PATH: "/nonexistent" });
   assert.ok(rclone.kind === "brew" ? rclone.pkg === "rclone" : /Homebrew/.test(rclone.reason));
@@ -69,7 +69,7 @@ test("shapeConnector: typed fields, required check, env names, no secrets", () =
   assert.throws(() => shapeConnector(templateByName("github")!, { repos: ["a/b"], token: "ghp_abc" }), /저장할 수 없습니다/);
   assert.throws(() => shapeConnector(templateByName("github")!, { repos: ["not a repo"] }), /owner\/repo/);
   const ob = shapeConnector(templateByName("obsidian")!, { vaultPath: "~/Vault" });
-  assert.ok((ob.vaultPath as string).startsWith("/") && (ob.vaultPath as string).endsWith("/Vault"), "~ expanded");
+  assert.equal(ob.vaultPath, join(homedir(), "Vault"), "~ expanded");
   assert.throws(() => shapeConnector(templateByName("obsidian")!, { vaultPath: "" }), /볼트 폴더/);
 });
 

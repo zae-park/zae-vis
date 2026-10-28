@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { loadState, saveState, stateDir } from "./config.ts";
@@ -87,15 +87,19 @@ export type KiwiStatus = {
   downloadMb: number;
 };
 
+/** Paths of the platform being probed, not the machine running the probe (tests simulate other OSes). */
+const pathFor = (platform: NodeJS.Platform) => (platform === "win32" ? win32 : posix);
+
 function userRoots({ env, platform, home }: KiwiEnvironment): string[] {
+  const p = pathFor(platform);
   if (platform === "win32") {
     const roots: string[] = [];
-    if (env.LOCALAPPDATA) roots.push(join(env.LOCALAPPDATA, "kiwi"));
+    if (env.LOCALAPPDATA) roots.push(p.join(env.LOCALAPPDATA, "kiwi"));
     const profile = env.USERPROFILE ?? home;
-    if (profile) roots.push(join(profile, "AppData", "Local", "kiwi"));
+    if (profile) roots.push(p.join(profile, "AppData", "Local", "kiwi"));
     return roots;
   }
-  return home ? [join(home, ".local", "kiwi")] : [];
+  return home ? [p.join(home, ".local", "kiwi")] : [];
 }
 
 function systemLibraryDirs(platform: NodeJS.Platform): string[] {
@@ -113,18 +117,20 @@ function systemModelDirs(platform: NodeJS.Platform): string[] {
 /** Library candidates in search order, each with where it would come from. */
 function libraryCandidates(e: KiwiEnvironment): Array<{ path: string; source: KiwiSource }> {
   const file = libraryFileName(e.platform);
+  const p = pathFor(e.platform);
   return [
-    { path: join(e.dir, "lib", file), source: "zaevis" as const },
-    ...userRoots(e).map((root) => ({ path: join(root, "lib", file), source: "user" as const })),
-    ...systemLibraryDirs(e.platform).map((dir) => ({ path: join(dir, file), source: "system" as const })),
+    { path: p.join(e.dir, "lib", file), source: "zaevis" as const },
+    ...userRoots(e).map((root) => ({ path: p.join(root, "lib", file), source: "user" as const })),
+    ...systemLibraryDirs(e.platform).map((dir) => ({ path: p.join(dir, file), source: "system" as const })),
   ];
 }
 
 function modelCandidates(e: KiwiEnvironment): Array<{ path: string; source: KiwiSource }> {
+  const p = pathFor(e.platform);
   return [
-    { path: join(e.dir, "models", "cong", "base"), source: "zaevis" as const },
-    ...userRoots(e).map((root) => ({ path: join(root, "models", "cong", "base"), source: "user" as const })),
-    ...systemModelDirs(e.platform).map((dir) => ({ path: join(dir, "cong", "base"), source: "system" as const })),
+    { path: p.join(e.dir, "models", "cong", "base"), source: "zaevis" as const },
+    ...userRoots(e).map((root) => ({ path: p.join(root, "models", "cong", "base"), source: "user" as const })),
+    ...systemModelDirs(e.platform).map((dir) => ({ path: p.join(dir, "cong", "base"), source: "system" as const })),
   ];
 }
 
@@ -141,7 +147,7 @@ export function probeKiwi(over: Partial<KiwiEnvironment> = {}): KiwiStatus {
   };
   const library = pick(e.env.KIWI_LIBRARY_PATH, libraryCandidates(e));
   const model = pick(e.env.KIWI_MODEL_PATH, modelCandidates(e));
-  const versionFile = join(e.dir, "VERSION");
+  const versionFile = pathFor(e.platform).join(e.dir, "VERSION");
   let version: string | null = null;
   if (e.exists(versionFile)) {
     try {

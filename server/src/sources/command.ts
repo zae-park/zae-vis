@@ -47,7 +47,7 @@ export function commandSource(name: string, command: string, description?: strin
         .replaceAll("{from}", from.toISOString())
         .replaceAll("{to}", to.toISOString());
       const stdout = await new Promise<string>((resolve, reject) => {
-        exec(cmd, { shell: process.env.SHELL || "/bin/sh", maxBuffer: 32 * 1024 * 1024, timeout: 10 * 60_000 }, (err, so, se) =>
+        exec(cmd, { shell: process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : process.env.SHELL || "/bin/sh", maxBuffer: 32 * 1024 * 1024, timeout: 10 * 60_000 }, (err, so, se) =>
           err ? reject(new Error(`명령 실패: ${String(se || err.message).trim().split("\n").slice(-2).join(" ")}`)) : resolve(so),
         );
       });

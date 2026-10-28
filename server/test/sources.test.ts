@@ -119,9 +119,10 @@ test("schedule: plist is valid XML with the time; staleness rule", () => {
   assert.match(xml, /<key>Hour<\/key>\s*<integer>18<\/integer>\s*<key>Minute<\/key>\s*<integer>30<\/integer>/);
   assert.match(xml, /<string>--if-stale<\/string>/);
   assert.doesNotMatch(xml, /ZAEVIS_HOME/);
-  assert.equal(labelFor(undefined, "/Users/me"), "io.github.zaepark.zaevis.daily");
-  assert.equal(labelFor("/Users/me/.zaevis", "/Users/me"), "io.github.zaepark.zaevis.daily");
-  assert.match(labelFor("/tmp/zv test", "/Users/me"), /^io\.github\.zaepark\.zaevis\.daily\.zv-test-[0-9a-f]{6}$/);
+  const home = join(tmpdir(), "label-home");
+  assert.equal(labelFor(undefined, home), "io.github.zaepark.zaevis.daily");
+  assert.equal(labelFor(join(home, ".zaevis"), home), "io.github.zaepark.zaevis.daily");
+  assert.match(labelFor(join(tmpdir(), "zv test"), home), /^io\.github\.zaepark\.zaevis\.daily\.zv-test-[0-9a-f]{6}$/);
   const custom = renderPlist({ dailyAt: "18:30", bin: "/b", path: "/usr/bin", logFile: "/l", env: { ZAEVIS_HOME: "/tmp/zv&test" } });
   assert.match(custom, /<key>ZAEVIS_HOME<\/key>\s*<string>\/tmp\/zv&amp;test<\/string>/);
   assert.throws(() => parseTime("25:00"));
@@ -141,6 +142,8 @@ test("collect(): writes day files, appends for event sources, records state; whi
   await mkdir(exportDir);
   await writeFile(join(exportDir, "주간회의.txt"), "회의 내용");
   await writeFile(join(worklog, "inbox", "audio", "2026-10-21_스탠드업.m4a"), "fake-audio");
+  const memoJs = join(home, "memo.js");
+  await writeFile(memoJs, "process.stdout.write('<!-- zaevis:date 2026-10-21 -->\\n- 메모 하나\\n');\n");
 
   // fake whisperx: writes <stem>.txt into --output_dir
   const fake = join(home, "whisperx");
@@ -158,7 +161,7 @@ test("collect(): writes day files, appends for event sources, records state; whi
       "agent-sessions": { enabled: false },
       "shell-history": { enabled: false },
       transcripts: { importDirs: [exportDir] },
-      custom: [{ name: "memo", command: "printf '<!-- zaevis:date 2026-10-21 -->\\n- 메모 하나\\n'" }, { name: "Bad Name!", command: "true" }],
+      custom: [{ name: "memo", command: `"${process.execPath}" "${memoJs}"` }, { name: "Bad Name!", command: "true" }],
     }),
   );
   const { loadConfig, loadState } = await import("../src/config.ts");

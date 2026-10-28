@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 
@@ -57,7 +57,7 @@ test("kiwi probe: explicit KIWI_* paths are authoritative, even when they are mi
 
 test("kiwi probe: platform file names and asset table", () => {
   const win = probeKiwi({ platform: "win32", arch: "x64", home: "C:\\Users\\me", env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" }, dir: "C:\\st\\ext\\kiwi", exists: (p) => p.includes("AppData") });
-  assert.equal(win.library, join("C:\\Users\\me\\AppData\\Local", "kiwi", "lib", "kiwi.dll"));
+  assert.equal(win.library, win32.join("C:\\Users\\me\\AppData\\Local", "kiwi", "lib", "kiwi.dll"));
   assert.equal(win.asset, `kiwi_win_x64_v${KIWI_VERSION}.zip`);
   const linux = probeKiwi({ platform: "linux", arch: "arm64", home: "/home/me", env: {}, dir: "/s", exists: (p) => p.startsWith("/usr/lib") || p.startsWith("/usr/share") });
   assert.equal(linux.library, "/usr/lib/libkiwi.so");

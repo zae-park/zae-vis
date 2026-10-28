@@ -6,7 +6,8 @@
 // `minsync serve` for the same model adopts the running one (event "adopted") and exits 0.
 // The first start downloads the model (~1.1GB) into ~/.cache/minsync/models.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawnBin } from "./spawnbin.ts";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
@@ -32,8 +33,11 @@ type ServeEvent = { event?: string; url?: string; model_id?: string; device?: st
 export function findMinsync(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const dir of (env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
-    const p = join(dir, process.platform === "win32" ? "minsync.exe" : "minsync");
-    if (existsSync(p)) return p;
+    const names = process.platform === "win32" ? ["minsync.exe", "minsync.cmd", "minsync"] : ["minsync"];
+    for (const name of names) {
+      const p = join(dir, name);
+      if (existsSync(p)) return p;
+    }
   }
   return null;
 }
@@ -83,7 +87,7 @@ export class EmbeddingDaemon {
   private spawnDaemon(): Promise<EmbeddingStatus> {
     const args = ["serve", "--format", "json", "--quiet", "--idle-timeout", String(this.opts.idleTimeout ?? 0)];
     const detached = this.opts.detached === true && process.platform !== "win32";
-    const child = spawn(this.binary!, args, { env: this.opts.env ?? process.env, detached, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnBin(this.binary!, args, { env: this.opts.env ?? process.env, detached, stdio: ["ignore", "pipe", "pipe"] });
     this.child = child;
     let stderr = "";
     let buffer = "";

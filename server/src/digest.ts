@@ -8,13 +8,13 @@
 //   state    state.json  → digest: { lastRun, agent, ok, report }
 //   log      $ZAEVIS_HOME/digest.log
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
+import { spawnBin } from "./spawnbin.ts";
 import { fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
 import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
@@ -83,7 +83,7 @@ export function findBin(name: string, env: NodeJS.ProcessEnv = process.env, dirs
 
 function probeCli(bin: string, args: string[], timeoutMs: number): Promise<ExecResult> {
   return new Promise((res) => {
-    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnBin(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout?.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr?.on("data", (c: Buffer) => (out += c.toString()));
@@ -235,7 +235,7 @@ type RunOpts = { env?: NodeJS.ProcessEnv; timeoutMs?: number; log?: (line: strin
 
 export function runCli(bin: string, args: string[], cwd: string, opts: RunOpts = {}): Promise<{ ok: boolean; output: string }> {
   return new Promise((res) => {
-    const child = spawn(bin, args, { cwd, env: { ...(opts.env ?? process.env), PATH: searchDirs(opts.env).join(delimiter), NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnBin(bin, args, { cwd, env: { ...(opts.env ?? process.env), PATH: searchDirs(opts.env).join(delimiter), NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     const take = (c: Buffer) => {
       const s = c.toString();
@@ -301,7 +301,7 @@ export async function gatherInputs(worklogDir: string, since: string | null, cap
   const files: string[] = [];
   for (const f of picked) {
     if (!statSync(f).isFile()) continue;
-    const rel = f.slice(worklogDir.length + 1);
+    const rel = f.slice(worklogDir.length + 1).replaceAll("\\", "/");
     let body = await readFile(f, "utf8");
     if (body.length > 12_000) body = body.slice(0, 12_000) + "\n…(잘림)";
     const chunk = `\n\n===== ${rel} =====\n${body}`;

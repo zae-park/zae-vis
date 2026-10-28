@@ -11,7 +11,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { expandHome, stateDir } from "./config.ts";
 import { allEnvSecrets, getEnvSecret, setEnvSecret } from "./rerank.ts";
 
@@ -546,7 +546,10 @@ export function readExternalFile(autoragConfig: string, source: string): { path:
   const vault = String(entry.connector?.vaultPath ?? "");
   if (!vault) return null;
   const file = join(vault, ...rel.split("/").map((s) => decodeURIComponent(s)));
-  if (!file.startsWith(vault + "/") || rel.split("/").includes("..")) return null;
+  const root = resolve(vault);
+  const abs = resolve(file);
+  if (abs !== root && !abs.startsWith(root.endsWith(sep) ? root : root + sep)) return null;
+  if (rel.split("/").includes("..")) return null;
   if (!existsSync(file) || !/\.(md|markdown|txt)$/i.test(file)) return null;
   return { path: source, markdown: readFileSync(file, "utf8") };
 }

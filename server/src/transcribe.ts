@@ -1,10 +1,10 @@
 // Audio → text with whisperX (optional extension, installed by `zaevis ext install whisperx`).
 
-import { execFile } from "node:child_process";
+import { execFileBin } from "./spawnbin.ts";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, delimiter, dirname, extname, join } from "node:path";
 import { expandHome, stateDir } from "./config.ts";
 import { redact } from "./redact.ts";
 import { dayKey } from "./sources/types.ts";
@@ -61,8 +61,8 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
     if (hf) args.push("--diarize", "--hf_token", hf);
     await new Promise<void>((resolve, reject) => {
       // whisperX shells out to `ffmpeg`; the extension links one next to the whisperx binary.
-      const env = { ...process.env, PATH: `${dirname(bin)}:${process.env.PATH ?? ""}` };
-      execFile(bin, args, { env, maxBuffer: 64 * 1024 * 1024, timeout: 3 * 60 * 60_000 }, (err, _so, se) =>
+      const env = { ...process.env, PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter) };
+      execFileBin(bin, args, { env, maxBuffer: 64 * 1024 * 1024, timeout: 3 * 60 * 60_000 }, (err, _so, se) =>
         err ? reject(new Error(`whisperX 실패: ${String(se || err.message).trim().split("\n").slice(-3).join(" ")}`)) : resolve(),
       );
     });

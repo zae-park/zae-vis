@@ -11,7 +11,7 @@ test("rerank: key is stored with mode 0600 and only hinted back", async () => {
   assert.equal(getKey(), null);
   setKey("sk-or-v1-abcdef1234");
   assert.equal(getKey(), "sk-or-v1-abcdef1234");
-  assert.equal(((await stat(secretsFile())).mode & 0o777), 0o600);
+  if (process.platform !== "win32") assert.equal(((await stat(secretsFile())).mode & 0o777), 0o600);
   const s = status({ enabled: true, model: "" });
   assert.equal(s.hasKey, true);
   assert.equal(s.keyHint, "1234");

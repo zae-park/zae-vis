@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { generateWithFallback, type GenerateOpts } from "./ask.ts";
 import { fallbackCandidates, plannedRail, type RailStop } from "./rail.ts";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
@@ -184,7 +184,7 @@ export function periodRange(kind: ReportKind, period: string): { from: string; t
 
 /** Where the report lives, relative to the worklog. The monthly one keeps the summaries/ place the digest used. */
 export function reportPath(kind: ReportKind, period: string): string {
-  return kind === "monthly" ? join("summaries", `${period}.md`) : join("reports", kind, `${period}.md`);
+  return kind === "monthly" ? posix.join("summaries", `${period}.md`) : posix.join("reports", kind, `${period}.md`);
 }
 
 export function reportTitle(kind: ReportKind, period: string): string {
@@ -247,7 +247,7 @@ export async function gatherReportInputs(worklogDir: string, kind: ReportKind, r
   // 1. log/YYYY-MM.md — only the lines dated inside the range
   const months = [...new Set(dates.map((d) => d.slice(0, 7)))];
   for (const month of months) {
-    const rel = join("log", `${month}.md`);
+    const rel = posix.join("log", `${month}.md`);
     const md = await readFile(join(worklogDir, rel), "utf8").catch(() => null);
     if (md === null) continue;
     const lines = parseLog(md).filter((e) => {
@@ -281,14 +281,14 @@ export async function gatherReportInputs(worklogDir: string, kind: ReportKind, r
   for (const src of await listDir(join(worklogDir, "sources"))) {
     for (const name of await listDir(join(worklogDir, "sources", src))) {
       const day = /^(\d{4}-\d{2}-\d{2})\.md$/.exec(name)?.[1];
-      if (day && dateSet.has(day)) raw.push({ rel: join("sources", src, name), date: day });
+      if (day && dateSet.has(day)) raw.push({ rel: posix.join("sources", src, name), date: day });
     }
   }
   for (const box of ["inbox", "processed"]) {
     for (const sub of ["transcripts", "claude-sessions"]) {
       for (const name of await listDir(join(worklogDir, box, sub))) {
         const day = /^(\d{4}-\d{2}-\d{2})/.exec(name)?.[1];
-        if (day && dateSet.has(day) && /\.(md|txt)$/.test(name)) raw.push({ rel: join(box, sub, name), date: day });
+        if (day && dateSet.has(day) && /\.(md|txt)$/.test(name)) raw.push({ rel: posix.join(box, sub, name), date: day });
       }
     }
   }
