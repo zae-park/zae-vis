@@ -30,7 +30,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String? _period;
   bool _settingsOpen = false;
   Timer? _poll;
-  String? _notice; // the last run's failure, shown once until dismissed
 
   // What the body shows: a new load each time kind/period changes (AsyncView reloads when the closure changes).
   late Future<Report> Function() _load = _loader();
@@ -62,17 +61,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
       setState(() {
         _status = s;
         _error = null;
-        if (initial && s.of(_kind).isEmpty) {
-          // open on whatever exists (the monthly summaries, typically)
-          _kind = reportKinds.firstWhere((k) => s.of(k).isNotEmpty, orElse: () => 'daily');
+        if (initial && _periodsOf(s, _kind).isEmpty) {
+          // open on whatever exists (a failed attempt counts; otherwise the monthly summaries)
+          _kind = reportKinds.firstWhere((k) => _periodsOf(s, k).isNotEmpty, orElse: () => 'daily');
         }
         if (justFinished != null && reportKinds.contains(justFinished.kind)) {
           _kind = justFinished.kind;
           _period = justFinished.period;
-          final run = s.lastRun[justFinished.kind];
-          if (run != null && !run.ok && run.period == justFinished.period) _notice = run.error ?? '리포트 생성에 실패했습니다.';
         }
-        final entries = s.of(_kind);
+        final entries = _periodsOf(s, _kind);
         if (_period == null || !entries.any((e) => e.period == _period)) _period = entries.isEmpty ? null : entries.first.period;
         _load = _loader();
       });
@@ -106,14 +103,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
   void _select(String kind, [String? period]) {
     setState(() {
       _kind = kind;
-      final entries = _status?.of(kind) ?? const [];
+      final entries = _status == null ? const <ReportEntry>[] : _periodsOf(_status!, kind);
       _period = period != null && entries.any((e) => e.period == period) ? period : (entries.isEmpty ? null : entries.first.period);
       _load = _loader();
     });
   }
 
   Future<void> _run(String kind, String? period) async {
-    setState(() => _notice = null);
     try {
       final made = await widget.api.runReport(kind, period: period);
       if (!mounted) return;
@@ -149,9 +145,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     final status = _status;
     if (status == null) return _error == null ? const Center(child: CircularProgressIndicator()) : ErrorPane(error: _error!, onRetry: () => _refresh(initial: true));
-    final entries = status.of(_kind);
+    final entries = _periodsOf(status, _kind);
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final running = status.running;
+    final failed = status.lastRun[_kind];
+    final failedHere = failed != null && !failed.ok && failed.period == _period;
+    final hasFile = status.of(_kind).any((e) => e.period == _period);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
@@ -175,45 +174,62 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ]),
       ),
       if (status.agents.isNotEmpty) _AgentLine(status: status),
-      if (_reportRail(status, running, _kind, _period) case final rail?) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: AgentRail(stops: rail)),
+      if (!(failedHere && (failed?.rail.isNotEmpty ?? false)))
+        if (_reportRail(status, running, _kind, _period) case final rail?) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: AgentRail(stops: rail)),
       if (running != null) _RunningBar(running: running),
-      if (_notice != null)
-        MaterialBanner(
-          content: Text(_notice!),
-          leading: const Icon(Icons.error_outline),
-          actions: [TextButton(onPressed: () => setState(() => _notice = null), child: const Text('닫기'))],
-        ),
       if (_settingsOpen)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: _SettingsPanel(settings: status.settings, onSave: _saveSettings, api: widget.api),
         ),
       const Divider(height: 1),
-      Expanded(
-        child: entries.isEmpty
-            ? EmptyPane(
-                '아직 ${reportKindLabel(_kind)} 리포트가 없습니다.\n"지금 만들기"로 바로 만들거나, 설정(⚙︎)에서 요일을 켜 두면 매일 수집 뒤 자동으로 만듭니다.',
-                icon: Icons.summarize_outlined,
-              )
-            : wide
-                ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    SizedBox(width: 220, child: _PeriodList(entries: entries, selected: _period, onSelect: (p) => _select(_kind, p))),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: _ReportBody(load: _load, onOpenProject: widget.onOpenProject, onRemake: running == null ? () => _run(_kind, _period) : null)),
-                  ])
-                : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: DropdownButton<String>(
-                        value: _period,
-                        isExpanded: true,
-                        items: [for (final e in entries) DropdownMenuItem(value: e.period, child: Text(e.period))],
-                        onChanged: (p) => _select(_kind, p),
-                      ),
-                    ),
-                    Expanded(child: _ReportBody(load: _load, onOpenProject: widget.onOpenProject, onRemake: running == null ? () => _run(_kind, _period) : null)),
-                  ]),
-      ),
+      Expanded(child: _body(entries, wide, running, failedHere ? failed : null, hasFile)),
+    ]);
+  }
+
+  Widget _body(List<ReportEntry> entries, bool wide, ReportRunning? running, ReportRun? failedHere, bool hasFile) {
+    if (entries.isEmpty) {
+      return EmptyPane(
+        '아직 ${reportKindLabel(_kind)} 리포트가 없습니다.\n"지금 만들기"로 바로 만들거나, 설정(⚙︎)에서 요일을 켜 두면 매일 수집 뒤 자동으로 만듭니다.',
+        icon: Icons.summarize_outlined,
+      );
+    }
+    final remake = running == null ? () => _run(_kind, _period) : null;
+    final report = _ReportBody(load: _load, onOpenProject: widget.onOpenProject, onRemake: remake);
+    final card = failedHere == null ? null : _UnavailableCard(run: failedHere, onRemake: remake);
+    final Widget pane;
+    if (card != null && !hasFile) {
+      pane = SingleChildScrollView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 32), child: card);
+    } else if (card != null) {
+      pane = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 0), child: card),
+        Expanded(child: report),
+      ]);
+    } else {
+      pane = report;
+    }
+    final unavailable = failedHere?.period;
+    if (!wide) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: DropdownButton<String>(
+            value: _period,
+            isExpanded: true,
+            items: [
+              for (final e in entries)
+                DropdownMenuItem(value: e.period, child: Text(e.period == unavailable ? '${e.period} · 서비스 없음' : e.period)),
+            ],
+            onChanged: (p) => _select(_kind, p),
+          ),
+        ),
+        Expanded(child: pane),
+      ]);
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(width: 220, child: _PeriodList(entries: entries, selected: _period, unavailable: unavailable, onSelect: (p) => _select(_kind, p))),
+      const VerticalDivider(width: 1),
+      Expanded(child: pane),
     ]);
   }
 }
@@ -250,13 +266,53 @@ class _MakeNowButton extends StatelessWidget {
   }
 }
 
-/// Live rail while a report is being written; the trail of the open report when it skipped a quota; otherwise who would write the next one.
+/// Periods on disk, plus the latest failed attempt when it never wrote a file.
+List<ReportEntry> _periodsOf(ReportsStatus status, String kind) {
+  final files = status.of(kind);
+  final last = status.lastRun[kind];
+  if (last == null || last.ok || last.period.isEmpty || files.any((e) => e.period == last.period)) return files;
+  final extra = ReportEntry(kind: kind, period: last.period, path: '', createdAt: last.at, agent: last.agent);
+  return [...files, extra]..sort((a, b) => b.period.compareTo(a.period));
+}
+
+/// Live rail while a report is being written; the trail of a failed or quota-skipping run; otherwise who would write the next one.
 List<RailStop>? _reportRail(ReportsStatus status, ReportRunning? running, String kind, String? period) {
   if (running != null && running.rail.isNotEmpty) return running.rail;
   final last = status.lastRun[kind];
-  if (running == null && last != null && last.period == period && last.rail.any((s) => s.state == 'quota')) return last.rail;
+  if (running == null && last != null && last.rail.isNotEmpty && (!last.ok || (last.period == period && last.rail.any((s) => s.state == 'quota')))) return last.rail;
   if (status.rail.isNotEmpty) return status.rail;
   return null;
+}
+
+/// The attempt stayed in the list, with why no service could write it.
+class _UnavailableCard extends StatelessWidget {
+  const _UnavailableCard({required this.run, this.onRemake});
+  final ReportRun run;
+  final VoidCallback? onRemake;
+
+  bool get _noService {
+    final wrote = run.rail.any((s) => s.state == 'wrote');
+    return !wrote && (run.rail.any((s) => s.state == 'quota') || (run.error?.contains('넘길 서비스') ?? false));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Panel(divided: false, padding: const EdgeInsets.fromLTRB(16, 14, 16, 12), children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.error_outline, color: scheme.error),
+        const SizedBox(width: 10),
+        Expanded(child: Text(_noService ? '사용 가능한 서비스가 없었습니다' : '리포트를 만들지 못했습니다', style: t.titleSmall)),
+        TextButton.icon(onPressed: onRemake, icon: const Icon(Icons.refresh, size: 16), label: const Text('다시 만들기')),
+      ]),
+      if (run.error != null && run.error!.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Text(run.error!, style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+      ],
+      if (run.rail.isNotEmpty) AgentRail(stops: run.rail),
+    ]);
+  }
 }
 
 /// Which agent writes the reports — or why none can right now (a CLI that only needs a login).
@@ -308,9 +364,10 @@ class _RunningBar extends StatelessWidget {
 }
 
 class _PeriodList extends StatelessWidget {
-  const _PeriodList({required this.entries, required this.selected, required this.onSelect});
+  const _PeriodList({required this.entries, required this.selected, required this.onSelect, this.unavailable});
   final List<ReportEntry> entries;
   final String? selected;
+  final String? unavailable;
   final void Function(String period) onSelect;
 
   @override
@@ -324,7 +381,10 @@ class _PeriodList extends StatelessWidget {
             dense: true,
             selected: e.period == selected,
             title: Text(e.period),
-            subtitle: Text(e.createdAt == null ? (e.agent ?? '정리') : '${e.createdAt!.toLocal().toString().substring(0, 16)}${e.agent == null ? '' : ' · ${e.agent}'}', style: t.bodySmall),
+            subtitle: Text(
+              e.period == unavailable ? '사용 가능한 서비스 없음' : (e.createdAt == null ? (e.agent ?? '정리') : '${e.createdAt!.toLocal().toString().substring(0, 16)}${e.agent == null ? '' : ' · ${e.agent}'}'),
+              style: t.bodySmall,
+            ),
             onTap: () => onSelect(e.period),
           ),
       ],

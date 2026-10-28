@@ -17,6 +17,7 @@ int statusPolls = 0;
 bool empty = false;
 bool signedOut = false;
 List<Object>? rail;
+Map<String, dynamic> lastRun = {};
 Map<String, dynamic> setting = {
   'daily': {'enabled': false, 'days': ['mon', 'tue', 'wed', 'thu', 'fri']},
   'weekly': {'enabled': false, 'day': 'mon'},
@@ -36,7 +37,7 @@ WorklogApi _fakeApi() => WorklogApi(
           return _json({
             'setting': setting,
             'running': running ? {'kind': 'daily', 'period': '2026-10-27', 'startedAt': '2026-10-27T06:00:00Z', 'agent': 'claude'} : null,
-            'lastRun': {},
+            'lastRun': lastRun,
             'reports': empty
                 ? {'daily': <Object>[], 'weekly': <Object>[], 'monthly': <Object>[]}
                 : {
@@ -97,6 +98,7 @@ void main() {
     empty = false;
     signedOut = false;
     rail = null;
+    lastRun = {};
   });
 
   testWidgets('reports: the header names the agent that writes them, or the login a CLI needs', (tester) async {
@@ -127,6 +129,36 @@ void main() {
     expect(find.text('Claude Code · 할당량'), findsOneWidget);
     expect(find.text('Codex CLI · 작성'), findsOneWidget);
     expect(find.text('리포트는 Claude Code가 씁니다 · 2.1.304'), findsOneWidget);
+  });
+
+  testWidgets('reports: a quota failure with nowhere to go stays as a card for that period', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    lastRun = {
+      'daily': {
+        'kind': 'daily', 'period': '2026-10-27', 'ok': false, 'at': '2026-10-28T07:00:00Z', 'agent': 'claude',
+        'error': 'Claude Code 할당량 (You have hit your usage limit). 넘길 서비스가 없습니다.',
+        'rail': [
+          {'id': 'claude', 'title': 'Claude Code', 'state': 'quota', 'reason': 'You have hit your usage limit'},
+          {'id': 'codex', 'title': 'Codex CLI', 'state': 'off', 'reason': '설치되지 않음'},
+          {'id': 'openrouter', 'title': 'OpenRouter API', 'state': 'off', 'metered': true, 'reason': '키 없음'},
+        ],
+      },
+    };
+    await tester.pumpWidget(_app(_fakeApi()));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-27'), findsOneWidget);
+    expect(find.text('사용 가능한 서비스 없음'), findsOneWidget);
+    expect(find.text('사용 가능한 서비스가 없었습니다'), findsOneWidget);
+    expect(find.text('Claude Code · 할당량'), findsOneWidget);
+    expect(find.textContaining('넘길 서비스가 없습니다'), findsOneWidget);
+    expect(find.text('2026-10-26'), findsOneWidget);
+
+    await tester.tap(find.text('2026-10-26'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-26 일간 리포트'), findsOneWidget);
+    expect(find.text('사용 가능한 서비스가 없었습니다'), findsNothing);
   });
 
   test('periods: ISO weeks and the "지금 만들기" choices', () {

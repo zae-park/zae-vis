@@ -611,7 +611,7 @@ void main() {
     }
 
     await cmd(LogicalKeyboardKey.digit2);
-    expect(find.text('기록 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'), findsOneWidget, reason: 'memory tab header');
+    expect(find.text('기록 · 하루 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'), findsOneWidget, reason: 'memory tab header');
 
     await cmd(LogicalKeyboardKey.keyK);
     expect(find.text('기록 전체를 뜻과 단어로 찾습니다'), findsOneWidget, reason: 'back on search');
@@ -1143,6 +1143,17 @@ void main() {
     expect(find.text('2026-10-09_회의.txt'), findsOneWidget); // file screen title
     await tester.pageBack();
     await tester.pumpAndSettle();
+
+    await tester.tap(find.text('하루'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026-10-06'), findsOneWidget);
+    expect(find.text('MCP 연결 완료'), findsOneWidget);
+    expect(find.textContaining('내가 쓴 줄만 있습니다'), findsOneWidget);
+    expect(find.text('2026-10-09'), findsOneWidget);
+    expect(find.textContaining('수집한 원본에서 쓴 줄이 그 파일과 같은 하루에 있습니다'), findsOneWidget);
+    expect(find.textContaining('1일은 원본에서 줄로 이어졌습니다'), findsOneWidget);
+    expect(find.text('git 커밋'), findsOneWidget);
+    expect(find.text('GA4 매핑 누락'), findsWidgets);
 
     await tester.tap(find.text('원본'));
     await tester.pumpAndSettle();
