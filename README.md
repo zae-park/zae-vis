@@ -2,6 +2,18 @@
 
 어디서 무슨 작업을 하든 기록을 모아 **개인 작업 기록과 지식 베이스**를 만드는 키트입니다.
 
+## 화면
+
+검색 · 메모리 · 리포트 · 연결. 넓은 창은 왼쪽 사이드바입니다.
+
+<img src="docs/images/search.png" alt="검색: 색인으로 찾은 기록" width="880">
+
+<img src="docs/images/memory.png" alt="메모리: 한 줄 기록과 프로젝트 상태" width="880">
+
+<img src="docs/images/reports.png" alt="리포트: 하루 기록으로 만든 일간 리포트" width="880">
+
+<img src="docs/images/collect.png" alt="연결: 바로 넣기와 데이터소스" width="880">
+
 - **수집 (매일, 자동)**: git 커밋, 에이전트 세션(Claude Code · Codex · Gemini CLI · ChatGPT 내보내기), 셸 명령, 회의 전사본, 직접 만든 커넥터를 `worklog/sources/`에 모읍니다. 매일 18:30(launchd)에 돌고, 언제든 수동으로도 돌릴 수 있습니다. **연결** 탭에서 켜고 끄며, Slack·Notion·Obsidian 같은 **외부 소스**는 AutoRAG가 직접 색인해 검색에 섞습니다.
 - **주입 (실시간)**: 한 줄 기록, 전사본 붙여넣기, 앱 안에서 바로 녹음하거나 녹음 파일 업로드(whisperX 자동 전사)는 넣는 즉시 worklog에 저장됩니다. 메모리 탭에서 줄마다 ⋯ 메뉴로 고치거나 지울 수 있습니다(정리가 쓴 줄은 출처 표시가 남습니다).
 - **색인·검색**: [AutoRAG](https://github.com/Marker-Inc-Korea/AutoRAG) Lite(로컬, 무료). 키워드(BM25)에 더해 **의미 검색**: 앱이 번들된 MinSync로 Qwen3-Embedding-0.6B 모델을 이 맥에서 돌려(`minsync serve`) 뜻이 비슷한 기록도 찾습니다. 외부 서비스·키 없음, 설정에서 끌 수 있음. 처음 켤 때 모델(1.1GB)을 내려받습니다. 키워드 쪽은 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/Kiwi)를 설치하면(첫 실행 마법사가 기본으로 설치, 설정 → 검색에서도 버튼 하나, 약 130MB) `인증서를`·`갱신했다` 같은 활용형도 `인증서`·`갱신`으로 찾습니다. 색인은 매일 수집 직후 + 수동 + (선택) 주입 즉시.
@@ -43,12 +55,23 @@
 | `server/` | 로컬 API 서버 (Node 24, TypeScript). worklog 파일 + AutoRAG MCP를 HTTP로 제공하고, 웹 앱도 서빙 |
 | `app/` | Flutter 앱. 검색·질문 · 메모리(기록·하루·원본·상태) · 리포트 · 연결(데이터소스·외부 소스) · 설정 |
 
-## 설치 (macOS)
+## 설치
 
-1. `zaevis-<버전>-arm64.dmg`를 열고 **zaevis**를 Applications로 끌어다 놓습니다.
-2. Applications에서 zaevis를 엽니다. 서명되지 않은 앱이라 처음 한 번은 경고가 뜹니다:
+앱을 받아서 쓰는 방법과, 저장소를 클론해서 개발하는 방법이 있습니다.
+
+### macOS 앱
+
+1. [Releases](https://github.com/zae-park/zae-vis/releases)에서 `zaevis-<버전>-arm64.dmg`(Apple Silicon) 또는 `-x86_64.dmg`(Intel)를 받습니다. 릴리스가 아직 없으면 아래 **소스에서 실행**으로 띄웁니다.
+2. DMG를 열고 **zaevis**를 Applications로 끌어다 놓습니다.
+3. Applications에서 zaevis를 엽니다. 서명되지 않은 앱이라 처음 한 번은 경고가 뜹니다:
    **시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"** (또는 터미널에서 `xattr -dr com.apple.quarantine /Applications/zaevis.app`).
-3. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다. 마지막 화면이 다음에 할 세 가지를 알려 줍니다: **연결** 탭에서 소스 확인 → **메모리** 탭에서 한 줄 기록 → **리포트** 켜기.
+4. 첫 화면 마법사에서 기록 폴더, 코드 폴더, 데이터소스, 매일 수집 시각을 고르고 **시작**을 누르면 끝입니다. 마지막 화면이 다음에 할 세 가지를 알려 줍니다: **연결** 탭에서 소스 확인 → **메모리** 탭에서 한 줄 기록 → **리포트** 켜기.
+
+### Windows 앱
+
+1. 같은 Releases에서 `zaevis-<버전>-win-x64.zip`을 받아 풀고 `zaevis.exe`를 실행합니다.
+2. SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누릅니다.
+3. 첫 화면 마법사는 macOS와 같습니다. 매일 수집은 작업 스케줄러에 등록되고, 전역 단축키는 Ctrl+Shift+Space입니다.
 
 Node, Python, Homebrew 같은 것은 설치할 필요가 없습니다. 서버·검색 엔진은 앱 안에 들어 있고, 녹음 전사(whisperX)와 한국어 형태소 분석(Kiwi)은 앱 설정에서 버튼 한 번으로 설치합니다(Kiwi는 첫 실행 마법사가 기본으로 넣습니다).
 터미널 명령이 필요하면 앱 설정 → **터미널에서 zaevis 명령 쓰기**를 누르세요.
@@ -84,7 +107,7 @@ Node 24 공식 배포본(체크섬 확인), 서버 의존성, MinSync, 웹·macO
 
 Kiwi(한국어 형태소 분석기, 라이브러리 28MB + 모델 104MB)는 DMG에 넣지 않습니다. 임베딩 모델(1.1GB)처럼 첫 실행 때 내려받는 편이 설치본(약 490MB)을 키우지 않고, 마법사가 기본으로 설치해 주며, 직접 둔 Kiwi가 있는 Mac은 그것을 쓰기 때문입니다. 동봉하려면 `tool/package_macos.sh`가 `ext/kiwi` 레이아웃(`lib/libkiwi.dylib`, `models/cong/base`)을 payload에 넣고 `server/src/kiwi.ts`의 후보 목록에 번들 경로를 더하면 됩니다.
 
-### 개발용으로 소스에서 바로 쓰기
+### 소스에서 실행
 
 ```bash
 brew install node@24 flutter protobuf cmake
@@ -109,15 +132,15 @@ API 서버(`127.0.0.1:4710`)는 필요할 때 백그라운드로 자동 실행�
 바로 쓰는 명령 (전체 목록은 `zaevis help`):
 
 ```bash
-zaevis search GA4 캠페인 매핑
-zaevis ask "GA4 매핑은 왜 미뤘지?"   # 검색 상위 문단을 근거로 답 + 출처 [n] (아래 "질문" 참고)
+zaevis search 검색 색인
+zaevis ask "색인은 왜 미뤘지?"   # 검색 상위 문단을 근거로 답 + 출처 [n] (아래 "질문" 참고)
 zaevis log                # 이번 달 로그 (zaevis log 2026-09)
 zaevis projects
 zaevis summary            # 최근 월간 정리 (= 월간 리포트)
 zaevis report daily       # 일간 리포트 보기 — 없으면 지금 만들어서 보여 줌 (weekly·monthly, 기간 지정 가능)
 zaevis index --refresh    # 검색 색인 갱신 (처음 한 번은 꼭)
 
-zaevis add "#decision [[roas]] 매핑 테이블을 수동으로 채우기로"   # 한 줄 기록
+zaevis add "#decision [[notes]] 색인을 처음부터 다시 만들기로"   # 한 줄 기록
 zaevis ingest 회의.txt 녹음.m4a      # 전사본은 inbox로, 녹음은 whisperX로 바로 전사
 zaevis collect                      # 지금 수집 + 색인 (zaevis collect git: 하나만)
 zaevis sources                      # 데이터소스 상태 (zaevis sources off shell-history)

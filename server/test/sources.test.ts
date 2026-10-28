@@ -16,20 +16,20 @@ test("redact masks common secrets but keeps normal text", () => {
   // 토큰 모양은 실행할 때만 붙인다. 소스에 통째로 있으면 공개 저장소 검사가 가짜 값을 비밀로 본다.
   const openai = ["sk-proj-", "abcdefghijklmnop", "1234"].join("");
   const bearer = ["eyJ", "hbGciOiJIUzI1"].join("");
-  const databricks = ["dapi", "01234567", "89abcdef", "01234567", "89abcdef"].join("");
+  const apiToken = ["dapi", "01234567", "89abcdef", "01234567", "89abcdef"].join("");
   const password = ["hunter", "22"].join("");
   const urlPassword = ["pw", "123"].join("");
   const s = redact(
-    `export OPENAI_API_KEY=${openai} && curl -H 'Authorization: Bearer ${bearer}' https://u:${urlPassword}@host/x --password ${password} ${databricks}`,
+    `export OPENAI_API_KEY=${openai} && curl -H 'Authorization: Bearer ${bearer}' https://u:${urlPassword}@host/x --password ${password} ${apiToken}`,
   );
-  for (const part of [openai.slice(8), bearer, password, urlPassword, databricks.slice(4)]) assert.equal(s.includes(part), false);
+  for (const part of [openai.slice(8), bearer, password, urlPassword, apiToken.slice(4)]) assert.equal(s.includes(part), false);
   assert.match(s, /dapi\*\*\*/);
   assert.match(s, /curl/);
-  assert.equal(redact("GA4 캠페인 매핑 누락"), "GA4 캠페인 매핑 누락");
+  assert.equal(redact("검색 색인 누락"), "검색 색인 누락");
 });
 
 test("parseGitLog reads subject and shortstat", () => {
-  const out = "\x1eabc1234567\x1f2026-10-21T10:15:00+09:00\x1f박재\x1ffeat: 채점 분리\n 3 files changed, 40 insertions(+), 2 deletions(-)\n\x1edef9876543\x1f2026-10-21T11:00:00+09:00\x1fbot\x1fdocs\n";
+  const out = "\x1eabc1234567\x1f2026-10-21T10:15:00+09:00\x1f박재\x1ffeat: 정리 분리\n 3 files changed, 40 insertions(+), 2 deletions(-)\n\x1edef9876543\x1f2026-10-21T11:00:00+09:00\x1fbot\x1fdocs\n";
   const c = parseGitLog("repo", out);
   assert.equal(c[0].author, "박재");
   assert.equal(c.length, 2);
@@ -57,41 +57,41 @@ test("git source collects every author's commits from a real repo, grouped by da
   assert.match(r.note ?? "", /작성자 2명/);
 });
 
-const cc = (o: Record<string, unknown>) => ({ sessionId: "s1234567890", cwd: "/Users/me/jaepark/roas", gitBranch: "main", ...o });
+const cc = (o: Record<string, unknown>) => ({ sessionId: "s1234567890", cwd: "/Users/me/jaepark/notes", gitBranch: "main", ...o });
 
 test("claude-code: summarise prompts, files, commands, last answer; skip noise", () => {
   const lines = [
-    { type: "ai-title", aiTitle: "ROAS 채점 분리" },
-    cc({ type: "user", timestamp: "2026-10-21T01:00:00Z", message: { role: "user", content: "<system-reminder>x</system-reminder>광고와 결제를 분리해서 채점해줘" } }),
-    cc({ type: "assistant", timestamp: "2026-10-21T01:01:00Z", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/Users/me/jaepark/roas/score.py" } }, { type: "tool_use", name: "Bash", input: { command: "pytest -q\necho done" } }] } }),
+    { type: "ai-title", aiTitle: "노트 정리 분리" },
+    cc({ type: "user", timestamp: "2026-10-21T01:00:00Z", message: { role: "user", content: "<system-reminder>x</system-reminder>기록과 수집을 나눠 정리해줘" } }),
+    cc({ type: "assistant", timestamp: "2026-10-21T01:01:00Z", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/Users/me/jaepark/notes/notes.md" } }, { type: "tool_use", name: "Bash", input: { command: "pytest -q\necho done" } }] } }),
     cc({ type: "user", timestamp: "2026-10-21T01:02:00Z", message: { content: [{ type: "tool_result", content: "ok" }] } }),
     cc({ type: "user", timestamp: "2026-10-21T01:03:00Z", message: { content: [{ type: "text", text: "Base directory for this skill: /x" }] } }),
-    cc({ type: "assistant", timestamp: "2026-10-21T01:05:00Z", message: { content: [{ type: "text", text: "분리 채점을 추가했습니다." }] } }),
+    cc({ type: "assistant", timestamp: "2026-10-21T01:05:00Z", message: { content: [{ type: "text", text: "기록 정리를 추가했습니다." }] } }),
     cc({ type: "user", isSidechain: true, timestamp: "2026-10-21T01:06:00Z", message: { content: "subagent prompt" } }),
   ];
   const days = summarize(lines, new Date("2026-10-20T00:00:00Z"), new Date("2026-10-22T00:00:00Z"));
   assert.equal(days.size, 1);
   const s = [...days.values()][0];
-  assert.equal(s.title, "ROAS 채점 분리");
-  assert.deepEqual(s.prompts, ["광고와 결제를 분리해서 채점해줘"]);
-  assert.deepEqual([...s.files], ["/Users/me/jaepark/roas/score.py"]);
+  assert.equal(s.title, "노트 정리 분리");
+  assert.deepEqual(s.prompts, ["기록과 수집을 나눠 정리해줘"]);
+  assert.deepEqual([...s.files], ["/Users/me/jaepark/notes/notes.md"]);
   assert.deepEqual(s.commands, ["pytest -q\necho done"]);
   const md = renderSession(s, "/Users/me");
-  assert.match(md, /폴더: `~\/jaepark\/roas` · 브랜치 `main`/);
-  assert.match(md, /수정한 파일 \(1\): `~\/jaepark\/roas\/score.py`/);
+  assert.match(md, /폴더: `~\/jaepark\/notes` · 브랜치 `main`/);
+  assert.match(md, /수정한 파일 \(1\): `~\/jaepark\/notes\/notes.md`/);
   assert.match(md, /`pytest -q`/);
   assert.match(md, /- 요청과 응답 \(\d+\):\n  - 요청: /);
-  assert.match(md, /    응답: 분리 채점을 추가했습니다\./);
+  assert.match(md, /    응답: 기록 정리를 추가했습니다\./);
   assert.doesNotMatch(md, /마지막 응답/);
   assert.equal(userText({ type: "user", message: { content: [{ type: "tool_result" }] } }), null);
 });
 
 test("claude-code source reads a projects folder", async () => {
   const root = await mkdtemp(join(tmpdir(), "zv-cc-"));
-  await mkdir(join(root, "-Users-me-roas"));
+  await mkdir(join(root, "-Users-me-notes"));
   const now = new Date();
   const line = (o: object) => JSON.stringify(o) + "\n";
-  await writeFile(join(root, "-Users-me-roas", "abc.jsonl"), line(cc({ type: "user", timestamp: now.toISOString(), message: { content: "테스트 요청" } })) + "{broken");
+  await writeFile(join(root, "-Users-me-notes", "abc.jsonl"), line(cc({ type: "user", timestamp: now.toISOString(), message: { content: "테스트 요청" } })) + "{broken");
   const { claudeCodeSource } = await import("../src/sources/claudeCode.ts");
   const r = await claudeCodeSource.collect({ from: new Date(now.getTime() - 3600e3), to: new Date(now.getTime() + 1000), settings: { enabled: true, projectsDir: root }, config: {} as never, log: () => {} });
   assert.equal(Object.keys(r.days).length, 1);

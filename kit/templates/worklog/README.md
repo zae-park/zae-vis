@@ -30,9 +30,9 @@ worklog/
 한 줄 = 날짜 · 프로젝트 링크 · 유형 태그 · 설명. 무엇을 했는지보다 **왜** 했는지를 적는다.
 
 ```
-- 10-06 [[databricks-poc]] #done Claude MCP 연결 완료 — 원인은 토큰 스코프
-- 10-07 [[hiring]] #decision DS JD에 실험설계 역량을 필수로 추가
-- 10-08 [[roas-multihorizon]] #done 광고·결제 분리 채점 — 어느 쪽이 문제인지 가르기 위해 (src: git roas-multihorizon a1b2c3d)
+- 10-06 [[notes]] #done 검색 색인을 처음부터 다시 만듦 — 형태소 분석기를 넣은 뒤라
+- 10-07 [[notes]] #decision 매일 수집은 18:30에 돌리기로
+- 10-08 [[notes]] #done 기록과 수집을 한 화면에서 보게 정리 (src: git notes a1b2c3d)
 ```
 
 - 유형 태그는 `#done`, `#decision`, `#blocked`, `#learned` 네 가지만 쓴다.

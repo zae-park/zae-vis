@@ -124,10 +124,10 @@ test("mutations need the x-zaevis header and a local origin; rebound hosts are r
 });
 
 test("POST /api/logs appends a formatted line and validates input", async () => {
-  const r = await call("POST", "/api/logs", { text: "GA4 매핑\n수동으로 채움", tags: ["decision"], projects: ["roas"], date: "2026-10-23" });
+  const r = await call("POST", "/api/logs", { text: "색인\n처음부터 다시", tags: ["decision"], projects: ["notes"], date: "2026-10-23" });
   assert.equal(r.status, 201);
-  assert.equal(r.body.line, "- 10-23 [[roas]] #decision GA4 매핑 수동으로 채움");
-  assert.match(await readFile(join(root, "log", "2026-10.md"), "utf8"), /^# 2026-10 로그\n\n- 10-23 \[\[roas\]\] #decision GA4 매핑 수동으로 채움\n$/);
+  assert.equal(r.body.line, "- 10-23 [[notes]] #decision 색인 처음부터 다시");
+  assert.match(await readFile(join(root, "log", "2026-10.md"), "utf8"), /^# 2026-10 로그\n\n- 10-23 \[\[notes\]\] #decision 색인 처음부터 다시\n$/);
   assert.equal((await call("POST", "/api/logs", { text: "  " })).status, 400);
   assert.equal((await call("POST", "/api/logs", { text: "x", projects: ["../etc"] })).status, 400);
   assert.ok(!calls.includes("refresh"), "no re-index unless indexOnInject");

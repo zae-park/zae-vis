@@ -76,9 +76,9 @@ test("summaries and projects", async () => {
 
 test("search validates and clamps topK", async () => {
   assert.equal((await get("/api/search")).status, 400);
-  const r = await get("/api/search?q=" + encodeURIComponent("GA4 매핑") + "&topK=999");
+  const r = await get("/api/search?q=" + encodeURIComponent("색인") + "&topK=999");
   assert.equal(r.body.hits.length, 1);
-  assert.ok(calls.includes("search:GA4 매핑:50"));
+  assert.ok(calls.includes("search:색인:50"));
 });
 
 test("index refresh runs once in the background", async () => {
@@ -165,13 +165,13 @@ test("normalizeSearch maps errors and common result fields", () => {
 test("normalizeSearch handles the AutoRAG 2.11 Lite shape (source string + content)", () => {
   const lite = {
     ok: true,
-    query: "GA4",
+    query: "색인",
     stale: false,
     results: [
-      { number: 1, source: "/worklog/processed/transcripts/2026-10-09_회의.txt", method: "bm25", score: 3.2, metadata: {}, content: "GA4 캠페인 매핑이 빠져서 ".repeat(60) },
+      { number: 1, source: "/worklog/processed/transcripts/2026-10-09_회의.txt", method: "bm25", score: 3.2, metadata: {}, content: "색인할 파일이 빠져서 ".repeat(60) },
     ],
   };
-  const r = normalizeSearch("GA4", lite, ["/Users/me/worklog"]);
+  const r = normalizeSearch("색인", lite, ["/Users/me/worklog"]);
   assert.equal(r.hits[0].path, "processed/transcripts/2026-10-09_회의.txt");
   assert.equal(r.hits[0].title, "2026-10-09_회의.txt");
   assert.equal(r.hits[0].score, 3.2);

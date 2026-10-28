@@ -276,7 +276,7 @@ class _AskViewState extends State<AskView> {
             textInputAction: TextInputAction.send,
             onSubmitted: _send,
             decoration: InputDecoration(
-              hintText: continuing ? '이어서 질문… ("그건 왜?"처럼 짧게 이어도 됩니다)' : '기록을 근거로 답합니다 (예: GA4 매핑은 왜 미뤘지?)',
+              hintText: continuing ? '이어서 질문… ("그건 왜?"처럼 짧게 이어도 됩니다)' : '기록을 근거로 답합니다 (예: 색인은 왜 미뤘지?)',
               prefixIcon: const Icon(Icons.question_answer_outlined),
               isDense: true,
             ),

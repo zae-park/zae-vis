@@ -8,7 +8,7 @@ test("classifyPath: sources, log, projects, summaries, inbox", () => {
   assert.deepEqual(classifyPath("sources/claude-code/2026-10-21.md"), local("claude-code", "Claude Code 세션", "2026-10-21"));
   assert.deepEqual(classifyPath("sources/slack/2026-10-21.md"), local("custom", "slack (커넥터)", "2026-10-21"), "a worklog connector named slack is not the AutoRAG datasource");
   assert.deepEqual(classifyPath("log/2026-10.md"), local("log", "한 줄 기록", "2026-10"));
-  assert.deepEqual(classifyPath("projects/roas.md"), local("project", "프로젝트", null));
+  assert.deepEqual(classifyPath("projects/notes.md"), local("project", "프로젝트", null));
   assert.deepEqual(classifyPath("summaries/2026-09.md"), local("summary", "월간 정리", "2026-09"));
   assert.equal(classifyPath("inbox/transcripts/2026-10-06_회의.md").sourceLabel, "회의 전사본");
   assert.equal(classifyPath("README.md").kind, "other");

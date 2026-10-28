@@ -116,7 +116,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         controller: _controller,
                         focusNode: ask ? null : widget.focusNode,
                         autoFocus: true,
-                        hintText: '무엇을 했는지, 왜 그렇게 정했는지 물어보세요 (예: GA4 캠페인 매핑)',
+                        hintText: '무엇을 했는지, 왜 그렇게 정했는지 물어보세요 (예: 검색 색인)',
                         leading: const Icon(Icons.search),
                         onSubmitted: _submit,
                         trailing: [IconButton(onPressed: _submit, icon: const Icon(Icons.arrow_forward), tooltip: '검색')],

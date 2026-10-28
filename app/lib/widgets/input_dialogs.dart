@@ -119,7 +119,7 @@ class _AddLogDialogState extends State<_AddLogDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _project,
-            decoration: const InputDecoration(labelText: '프로젝트 (선택)', hintText: 'roas-multihorizon'),
+            decoration: const InputDecoration(labelText: '프로젝트 (선택)', hintText: 'notes'),
           ),
           if (widget.projects.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -171,7 +171,7 @@ Future<String?> showPasteTranscriptDialog(BuildContext context, WorklogApi api) 
           content: SizedBox(
             width: 640,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: '제목', hintText: '주간 ROAS 회의')),
+              TextField(controller: name, decoration: const InputDecoration(labelText: '제목', hintText: '주간 정리 회의')),
               const SizedBox(height: 12),
               TextField(
                 controller: text,

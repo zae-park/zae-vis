@@ -80,21 +80,21 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({
               'month': '2026-10',
               'entries': [
-                {'date': '10-06', 'projects': ['databricks-poc'], 'tags': ['done'], 'text': 'MCP 연결 완료', 'source': null, 'author': 'me', 'raw': '- 10-06 [[databricks-poc]] #done MCP 연결 완료'},
-                {'date': '10-08', 'projects': ['roas'], 'tags': ['blocked'], 'text': 'GA4 매핑 누락', 'source': '2026-10-09_회의', 'author': 'claude', 'raw': '- 10-08 [[roas]] #blocked GA4 매핑 누락 (src: 2026-10-09_회의)'},
+                {'date': '10-06', 'projects': ['handbook'], 'tags': ['done'], 'text': '색인을 다시 만듦', 'source': null, 'author': 'me', 'raw': '- 10-06 [[handbook]] #done 색인을 다시 만듦'},
+                {'date': '10-08', 'projects': ['notes'], 'tags': ['blocked'], 'text': '색인 누락', 'source': '2026-10-09_회의', 'author': 'claude', 'raw': '- 10-08 [[notes]] #blocked 색인 누락 (src: 2026-10-09_회의)'},
               ],
             });
           case '/api/logs/2026-10' when req.method == 'PUT' || req.method == 'DELETE':
             posted.add(req);
-            return _json(req.method == 'PUT' ? {'line': '- 10-08 [[roas]] #done 고친 줄 (src: 2026-10-09_회의)'} : {'ok': true});
+            return _json(req.method == 'PUT' ? {'line': '- 10-08 [[notes]] #done 고친 줄 (src: 2026-10-09_회의)'} : {'ok': true});
           case '/api/search':
             return _json({
               'ok': true,
               'query': req.url.queryParameters['q'],
               'hits': [
                 {
-                  'number': 1, 'title': 'ROAS 주간회의', 'path': 'sources/git/2026-10-09.md', 'snippet': 'GA4 캠페인 매핑이 빠져서', 'score': 1.0, 'weak': false,
-                  'context': {'kind': 'git', 'sourceLabel': 'git 커밋', 'date': '2026-10-09', 'section': 'roas', 'author': '박재', 'matched': ['ga4', '매핑']},
+                  'number': 1, 'title': '색인 회의', 'path': 'sources/git/2026-10-09.md', 'snippet': '색인할 파일이 빠져서', 'score': 1.0, 'weak': false,
+                  'context': {'kind': 'git', 'sourceLabel': 'git 커밋', 'date': '2026-10-09', 'section': 'notes', 'author': '박재', 'matched': ['색인']},
                 },
                 {'number': 2, 'title': 'x', 'path': 'log/2026-10.md', 'snippet': '무관한 줄', 'score': 0.05, 'weak': true,
                   'context': {'kind': 'log', 'sourceLabel': '한 줄 기록', 'date': '2026-10', 'matched': <Object>[]}},
@@ -130,15 +130,15 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({
               'q': askBody['q'], 'agent': 'claude', 'ms': 12345,
               'conversationId': askBody['conversationId'] ?? '20261027-120000', 'turn': askBody['conversationId'] == null ? 0 : 1,
-              'answer': 'GA4 매핑은 캠페인 매핑이 빠져 막혔다 [1]. 수동으로 채우기로 정했다 [2].',
+              'answer': '색인은 빠뜨린 파일 때문에 막혔다 [1]. 수동으로 채우기로 정했다 [2].',
               if (mockAskRail != null) 'rail': mockAskRail,
               'sources': [
-                {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · roas · 박재', 'passage': 'GA4 캠페인 매핑이 빠져서'},
-                {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '매핑 테이블을 수동으로 채우기로'},
+                {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · notes · 박재', 'passage': '색인할 파일이 빠져서'},
+                {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '색인을 처음부터 다시 만들기로'},
               ],
             });
           case '/api/file':
-            return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## roas\n\n- GA4 캠페인 매핑이 빠져서 — 박재'});
+            return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## notes\n\n- 색인할 파일이 빠져서 — 박재'});
           case '/api/sources' when req.method == 'GET':
             return _json({
               'collecting': false,
@@ -191,7 +191,7 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/origin':
             return _json({'src': req.url.queryParameters['src'], 'paths': ['processed/transcripts/2026-10-09_회의.txt']});
           case '/api/projects':
-            return _json({'projects': [{'slug': 'roas', 'title': 'ROAS', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
+            return _json({'projects': [{'slug': 'notes', 'title': '노트', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
           case '/api/inbox/audio':
             posted.add(req);
             return _json({'file': req.url.queryParameters['name']}, 201);
@@ -208,11 +208,11 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({
               'id': '20261027-100000', 'createdAt': '2026-10-27T01:00:00Z', 'agent': 'claude', 'status': 'pending', 'report': '로그 2줄',
               'logLines': [
-                {'month': '2026-10', 'line': '- 10-26 [[roas]] #done 채점 분리 (src: s1)', 'entry': {'date': '10-26', 'projects': ['roas'], 'tags': ['done'], 'text': '채점 분리', 'source': 's1', 'author': 'claude', 'raw': ''}},
+                {'month': '2026-10', 'line': '- 10-26 [[notes]] #done 정리 분리 (src: s1)', 'entry': {'date': '10-26', 'projects': ['notes'], 'tags': ['done'], 'text': '정리 분리', 'source': 's1', 'author': 'claude', 'raw': ''}},
                 {'month': '2026-10', 'line': '- 10-27 #learned 토큰 상한', 'entry': {'date': '10-27', 'projects': <Object>[], 'tags': ['learned'], 'text': '토큰 상한', 'source': null, 'author': 'claude', 'raw': ''}},
               ],
               'removedLines': <Object>[],
-              'projects': [{'slug': 'roas', 'before': '# ROAS\n\n옛 상태', 'after': '# ROAS\n\n새 상태'}],
+              'projects': [{'slug': 'notes', 'before': '# 노트\n\n옛 상태', 'after': '# 노트\n\n새 상태'}],
               'summaries': <Object>[],
               'processed': [{'from': 'inbox/transcripts/a.txt', 'to': 'processed/transcripts/a.txt'}],
             });
@@ -330,13 +330,13 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.enterText(find.byType(TextField), 'GA4 매핑');
+    await tester.enterText(find.byType(TextField), '색인');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
     expect(find.text('2026-10-09'), findsOneWidget);
     expect(find.text('git 커밋'), findsOneWidget);
-    expect(find.text('roas'), findsOneWidget);
+    expect(find.text('notes'), findsOneWidget);
     expect(find.text('박재'), findsOneWidget);
     expect(find.text('약한 일치'), findsOneWidget);
     expect(find.text('sources/git/2026-10-09.md'), findsOneWidget);
@@ -344,7 +344,7 @@ void main() {
     await tester.tap(find.text('git 커밋'));
     await tester.pumpAndSettle();
     expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
-    expect(find.textContaining('GA4 캠페인 매핑이 빠져서 — 박재'), findsWidgets);
+    expect(find.textContaining('색인할 파일이 빠져서 — 박재'), findsWidgets);
   });
 
   testWidgets('질문 mode is a conversation: bubbles, a follow-up carries the conversation id, [n] opens the source panel and the file', (tester) async {
@@ -360,15 +360,15 @@ void main() {
     expect(find.textContaining('답은 Claude Code가 씁니다'), findsOneWidget);
     expect(find.text('새 대화'), findsWidgets); // header title + button
 
-    await tester.enterText(find.byType(TextField), 'GA4 매핑은 왜 막혔지?');
+    await tester.enterText(find.byType(TextField), '색인은 왜 미뤘지?');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
 
     var asks = posted.where((r) => r.url.path == '/api/ask').toList();
-    expect(jsonDecode(asks.single.body), {'q': 'GA4 매핑은 왜 막혔지?', 'topK': 10});
-    expect(find.text('GA4 매핑은 왜 막혔지?'), findsWidgets); // question bubble (and the header title)
-    expect(find.textContaining('캠페인 매핑이 빠져 막혔다'), findsOneWidget);
-    expect(find.text('2026-10-09 · git 커밋 · roas · 박재'), findsOneWidget); // source chip
+    expect(jsonDecode(asks.single.body), {'q': '색인은 왜 미뤘지?', 'topK': 10});
+    expect(find.text('색인은 왜 미뤘지?'), findsWidgets); // question bubble (and the header title)
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
+    expect(find.text('2026-10-09 · git 커밋 · notes · 박재'), findsOneWidget); // source chip
     expect(find.textContaining('Claude Code · 12.3초'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget, reason: 'the composer stays at the bottom');
 
@@ -386,7 +386,7 @@ void main() {
     await tester.tap(find.widgetWithText(InkWell, '2').first);
     await tester.pumpAndSettle();
     expect(find.text('근거 2 / 2'), findsOneWidget);
-    expect(find.text('매핑 테이블을 수동으로 채우기로'), findsOneWidget);
+    expect(find.text('색인을 처음부터 다시 만들기로'), findsOneWidget);
     await tester.tap(find.byTooltip('이전 근거'));
     await tester.pumpAndSettle();
     expect(find.text('근거 1 / 2'), findsOneWidget);
@@ -403,7 +403,7 @@ void main() {
     asks = posted.where((r) => r.url.path == '/api/ask').toList();
     expect(jsonDecode(asks.last.body), {'q': '그건 왜?', 'topK': 10, 'conversationId': '20261027-120000'});
     expect(find.text('그건 왜?'), findsOneWidget);
-    expect(find.textContaining('캠페인 매핑이 빠져 막혔다'), findsNWidgets(2));
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsNWidgets(2));
 
     // 새 대화 clears the thread; 이전 대화 brings one back
     await tester.tap(find.byIcon(Icons.add_comment_outlined)); // the 새 대화 button (TextButton.icon is not a TextButton)
@@ -429,14 +429,14 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'GA4?');
+    await tester.enterText(find.byType(TextField), '색인?');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(InkWell, '1').first);
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('근거 1 / 2'), findsOneWidget);
-    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsOneWidget);
+    expect(find.text('색인할 파일이 빠져서'), findsOneWidget);
     await tester.tap(find.byTooltip('닫기'));
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsNothing);
@@ -642,12 +642,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('줄 편집'), findsOneWidget);
     expect(find.textContaining('출처(2026-10-09_회의)는 그대로'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextField, 'GA4 매핑 누락'), '고친 줄');
+    await tester.enterText(find.widgetWithText(TextField, '색인 누락'), '고친 줄');
     await tester.tap(find.text('저장'));
     await tester.pumpAndSettle();
     final put = posted.singleWhere((r) => r.method == 'PUT');
     final body = jsonDecode(utf8.decode(put.bodyBytes)) as Map<String, dynamic>;
-    expect(body['raw'], '- 10-08 [[roas]] #blocked GA4 매핑 누락 (src: 2026-10-09_회의)');
+    expect(body['raw'], '- 10-08 [[notes]] #blocked 색인 누락 (src: 2026-10-09_회의)');
     expect(body['text'], '고친 줄');
     expect(body['date'], '10-08');
     expect(find.text('줄을 고쳤습니다'), findsOneWidget);
@@ -660,7 +660,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '지우기'));
     await tester.pumpAndSettle();
     final del = posted.singleWhere((r) => r.method == 'DELETE');
-    expect((jsonDecode(utf8.decode(del.bodyBytes)) as Map<String, dynamic>)['raw'], contains('GA4 매핑 누락'));
+    expect((jsonDecode(utf8.decode(del.bodyBytes)) as Map<String, dynamic>)['raw'], contains('색인 누락'));
   });
 
   testWidgets('log tab lists newest first and filters to my lines', (tester) async {
@@ -672,16 +672,16 @@ void main() {
     await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('GA4 매핑 누락'), findsOneWidget);
-    expect(find.text('MCP 연결 완료'), findsOneWidget);
+    expect(find.text('색인 누락'), findsOneWidget);
+    expect(find.text('색인을 다시 만듦'), findsOneWidget);
     expect(find.textContaining('출처 2026-10-09_회의'), findsOneWidget); // the digest's line links to its origin
     expect(find.text('내 기록'), findsOneWidget);
     expect(find.text('정리'), findsOneWidget);
 
     await tester.tap(find.text('내가 쓴 줄만'));
     await tester.pumpAndSettle();
-    expect(find.text('GA4 매핑 누락'), findsNothing);
-    expect(find.text('MCP 연결 완료'), findsOneWidget);
+    expect(find.text('색인 누락'), findsNothing);
+    expect(find.text('색인을 다시 만듦'), findsOneWidget);
   });
 
   testWidgets('narrow layout uses a bottom navigation bar', (tester) async {
@@ -790,7 +790,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).first, 'README 정리');
     await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('결정')));
-    await tester.tap(find.widgetWithText(ActionChip, 'roas'));
+    await tester.tap(find.widgetWithText(ActionChip, 'notes'));
     await tester.pump();
     await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('저장')));
     await tester.pumpAndSettle();
@@ -799,7 +799,7 @@ void main() {
     final body = jsonDecode(posted.single.body) as Map<String, dynamic>;
     expect(body['text'], 'README 정리');
     expect(body['tags'], ['decision']);
-    expect(body['projects'], ['roas']);
+    expect(body['projects'], ['notes']);
     expect(posted.single.headers['x-zaevis'], '1');
   });
 
@@ -817,7 +817,7 @@ void main() {
     await tester.tap(find.text('검토하기'));
     await tester.pumpAndSettle();
     expect(find.text('정리 결과 검토'), findsOneWidget);
-    expect(find.text('채점 분리'), findsOneWidget);
+    expect(find.text('정리 분리'), findsOneWidget);
     expect(find.text('토큰 상한'), findsOneWidget);
     expect(find.text('로그 줄 (2/2)'), findsOneWidget);
     expect(find.text('새 상태'), findsNothing); // project diff is collapsed until expanded
@@ -845,7 +845,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.enterText(find.byType(TextField), 'GA4 매핑');
+    await tester.enterText(find.byType(TextField), '색인');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
@@ -855,7 +855,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1 / 2건'), findsOneWidget);
     expect(find.text('무관한 줄'), findsOneWidget);
-    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsNothing);
+    expect(find.text('색인할 파일이 빠져서'), findsNothing);
 
     await tester.tap(find.widgetWithText(FilterChip, '한 줄 기록 1')); // kind filter off again
     SearchScreen.clock = () => DateTime(2026, 10, 27);
@@ -864,7 +864,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1 / 2건'), findsOneWidget);
     expect(find.text('무관한 줄'), findsOneWidget);
-    expect(find.text('GA4 캠페인 매핑이 빠져서'), findsNothing);
+    expect(find.text('색인할 파일이 빠져서'), findsNothing);
   });
 
   testWidgets('settings: notification switch saves; the hotkey dialog records ⌘⇧J', (tester) async {
@@ -1136,7 +1136,7 @@ void main() {
     await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
     expect(find.text('프로젝트 상태'), findsOneWidget); // side panel on a wide window
-    expect(find.text('ROAS'), findsOneWidget);
+    expect(find.text('노트'), findsOneWidget);
     expect(find.textContaining('정리 에이전트는 고치지 못하고'), findsOneWidget); // flow strip
 
     // 출처 on the digest's line → its transcript
@@ -1149,13 +1149,13 @@ void main() {
     await tester.tap(find.text('하루'));
     await tester.pumpAndSettle();
     expect(find.text('2026-10-06'), findsOneWidget);
-    expect(find.text('MCP 연결 완료'), findsOneWidget);
+    expect(find.text('색인을 다시 만듦'), findsOneWidget);
     expect(find.textContaining('내가 쓴 줄만 있습니다'), findsOneWidget);
     expect(find.text('2026-10-09'), findsOneWidget);
     expect(find.textContaining('수집한 원본에서 쓴 줄이 그 파일과 같은 하루에 있습니다'), findsOneWidget);
     expect(find.textContaining('1일은 원본에서 줄로 이어졌습니다'), findsOneWidget);
     expect(find.text('git 커밋'), findsOneWidget);
-    expect(find.text('GA4 매핑 누락'), findsWidgets);
+    expect(find.text('색인 누락'), findsWidgets);
 
     await tester.tap(find.text('원본'));
     await tester.pumpAndSettle();

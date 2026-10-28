@@ -183,7 +183,7 @@ export function formatIndex(s: J): string {
   return out.join("\n");
 }
 
-/** `#decision [[roas]] 매핑을 수동으로` → { tags, projects, text } */
+/** `#decision [[notes]] 매핑을 수동으로` → { tags, projects, text } */
 export function parseAdd(args: string[]): { text: string; tags: string[]; projects: string[] } {
   const tags: string[] = [];
   const projects: string[] = [];
@@ -285,7 +285,7 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
     case "ask":
     case "a": {
       const q = args.join(" ").trim();
-      if (!q) throw new CliError('질문을 입력하세요: zaevis ask "GA4 매핑은 왜 미뤘지?"');
+      if (!q) throw new CliError('질문을 입력하세요: zaevis ask "색인은 왜 미뤘지?"');
       const st = await api.get("/ask");
       if (!st.chosen) throw new CliError("답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.");
       const title = ((st.agents as J[]) ?? []).find((a) => a.id === st.chosen)?.title ?? st.chosen;

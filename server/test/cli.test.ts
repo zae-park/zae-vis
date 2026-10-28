@@ -12,8 +12,8 @@ import { Worklog } from "../src/worklog.ts";
 // stdout is not a TTY under the test runner, so output has no colour codes.
 
 test("formatHits: results, empty, index-not-ready", () => {
-  const out = formatHits({ ok: true, query: "q", hits: [{ number: 1, title: "회의", path: "processed/a.txt", snippet: "GA4\n매핑" }] });
-  assert.equal(out, "[1] 회의  processed/a.txt\n    GA4 매핑");
+  const out = formatHits({ ok: true, query: "q", hits: [{ number: 1, title: "회의", path: "processed/a.txt", snippet: "검색\n색인" }] });
+  assert.equal(out, "[1] 회의  processed/a.txt\n    검색 색인");
   assert.match(formatHits({ ok: true, query: "x", hits: [] }), /결과가 없습니다/);
   assert.match(formatHits({ ok: false, error: { code: "index-not-ready" } }), /zaevis index --refresh/);
 });

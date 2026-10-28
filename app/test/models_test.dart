@@ -32,15 +32,15 @@ void main() {
   test('LogEntry.fromJson', () {
     final e = LogEntry.fromJson({
       'date': '10-08',
-      'projects': ['roas'],
+      'projects': ['notes'],
       'tags': ['done'],
-      'text': '분리 채점',
-      'source': 'git roas a1b2c3d',
+      'text': '기록 정리',
+      'source': 'git notes a1b2c3d',
       'author': 'claude',
     });
     expect(e.byClaude, isTrue);
-    expect(e.projects, ['roas']);
-    expect(e.source, 'git roas a1b2c3d');
+    expect(e.projects, ['notes']);
+    expect(e.source, 'git notes a1b2c3d');
   });
 
   test('SearchResult error and hits', () {
@@ -124,10 +124,10 @@ void main() {
   });
 
   test('parseInline finds bold, italic, code, math, links and tags', () {
-    final spans = parseInline('**굵게** *기울임* `x` \$E = mc^2\$ [[roas-multihorizon]] #done 끝');
+    final spans = parseInline('**굵게** *기울임* `x` \$E = mc^2\$ [[notes]] #done 끝');
     expect(spans.where((s) => s.kind != InlineKind.text).map((s) => s.kind).toList(),
         [InlineKind.bold, InlineKind.italic, InlineKind.code, InlineKind.math, InlineKind.link, InlineKind.tag]);
-    expect(spans.firstWhere((s) => s.kind == InlineKind.link).text, 'roas-multihorizon');
+    expect(spans.firstWhere((s) => s.kind == InlineKind.link).text, 'notes');
     expect(spans.firstWhere((s) => s.kind == InlineKind.math).text, 'E = mc^2');
     // a lone asterisk inside a word is not italic, and a price is not math
     expect(parseInline('a*b and 5*3').every((s) => s.kind == InlineKind.text), isTrue);

@@ -6,25 +6,25 @@ import { join } from "node:path";
 import { parseFrontMatter, parseLog, parseLogLine, parseProject, Worklog } from "../src/worklog.ts";
 
 test("parseLogLine: user-written line", () => {
-  const e = parseLogLine("- 10-07 [[hiring]] #decision DS JD에 실험설계 역량을 필수로 추가");
+  const e = parseLogLine("- 10-07 [[notes]] #decision 매일 수집은 18:30에 돌리기로");
   assert.deepEqual(e, {
     date: "10-07",
-    projects: ["hiring"],
+    projects: ["notes"],
     tags: ["decision"],
-    text: "DS JD에 실험설계 역량을 필수로 추가",
+    text: "매일 수집은 18:30에 돌리기로",
     source: null,
     author: "me",
-    raw: "- 10-07 [[hiring]] #decision DS JD에 실험설계 역량을 필수로 추가",
+    raw: "- 10-07 [[notes]] #decision 매일 수집은 18:30에 돌리기로",
   });
 });
 
 test("parseLogLine: Claude-written line keeps source and multiple links", () => {
-  const e = parseLogLine("- 10-08 [[roas-multihorizon]] [[ltv]] #done 광고·결제 분리 채점 (src: git roas-multihorizon a1b2c3d)");
+  const e = parseLogLine("- 10-08 [[notes]] [[inbox]] #done 기록과 수집을 나눠 정리 (src: git notes a1b2c3d)");
   assert.ok(e);
-  assert.deepEqual(e.projects, ["roas-multihorizon", "ltv"]);
-  assert.equal(e.source, "git roas-multihorizon a1b2c3d");
+  assert.deepEqual(e.projects, ["notes", "inbox"]);
+  assert.equal(e.source, "git notes a1b2c3d");
   assert.equal(e.author, "claude");
-  assert.equal(e.text, "광고·결제 분리 채점");
+  assert.equal(e.text, "기록과 수집을 나눠 정리");
 });
 
 test("parseLogLine: ignores headings, blank lines and C# in text is not split oddly", () => {

@@ -25,9 +25,9 @@ async function worklog(): Promise<string> {
   await writeFile(join(w, "README.md"), "# worklog\n");
   await writeFile(join(w, ".state.md"), "last_weekly: 2026-10-19\n");
   await writeFile(join(w, "sources", "git", "2026-10-18.md"), "# git · 2026-10-18\n\n## old\n\n- 10:00 `aaaaaaa` old commit — me\n");
-  await writeFile(join(w, "sources", "git", "2026-10-25.md"), "# git · 2026-10-25\n\n## roas\n\n- 10:00 `bbbbbbb` feat: 채점 분리 — me\n");
-  await writeFile(join(w, "inbox", "transcripts", "2026-10-24_회의.txt"), "GA4 매핑은 10월 안에 끝내기로 함\n");
-  await writeFile(join(w, "projects", "roas.md"), "---\nrepos: [roas]\nstatus: 진행 중\n---\n# ROAS\n\n## 현재 상태\n\n예전 상태\n\n## 주요 결정\n\n## 열린 문제\n\n## 링크\n");
+  await writeFile(join(w, "sources", "git", "2026-10-25.md"), "# git · 2026-10-25\n\n## notes\n\n- 10:00 `bbbbbbb` feat: 정리 분리 — me\n");
+  await writeFile(join(w, "inbox", "transcripts", "2026-10-24_회의.txt"), "색인은 10월 안에 끝내기로 함\n");
+  await writeFile(join(w, "projects", "notes.md"), "---\nrepos: [notes]\nstatus: 진행 중\n---\n# 노트\n\n## 현재 상태\n\n예전 상태\n\n## 주요 결정\n\n## 열린 문제\n\n## 링크\n");
   return w;
 }
 
@@ -107,14 +107,14 @@ test("digest: prompt, CLI args, due dates", async () => {
 test("digest: a CLI agent runs in the worklog folder and its report is recorded", async () => {
   const w = await worklog();
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
-  const bin = await stubCli(bins, "claude", 'echo "cwd=$(pwd)"; echo "- 10-25 [[roas]] #done 채점 분리 (src: git roas bbbbbbb)" >> log/2026-10.md; echo "로그 1줄 추가"');
+  const bin = await stubCli(bins, "claude", 'echo "cwd=$(pwd)"; echo "- 10-25 [[notes]] #done 정리 분리 (src: git notes bbbbbbb)" >> log/2026-10.md; echo "로그 1줄 추가"');
   const runner = new DigestRunner({ env: { PATH: bins, HOME: bins } });
   const cfg = { worklogDir: w, reposRoot: "/r" } as never;
   const r = await runner.run(cfg, { agent: "claude", model: "", weekly: true }, { id: "claude", title: "Claude Code", available: true, detail: "x", bin });
   assert.equal(r.ok, true);
   assert.match(r.report, /cwd=\/.*zv-digest-wl/);
   assert.match(r.report, /로그 1줄 추가/);
-  assert.match(await readFile(join(w, "log", "2026-10.md"), "utf8"), /채점 분리/);
+  assert.match(await readFile(join(w, "log", "2026-10.md"), "utf8"), /정리 분리/);
   assert.equal(runner.status({ agent: "auto", model: "", weekly: true }, w).last?.agent, "claude");
   assert.equal(runner.status({ agent: "auto", model: "", weekly: false }, w).nextWeekly, null);
   const failing = await stubCli(bins, "gemini", "echo boom >&2; exit 2");
@@ -135,11 +135,11 @@ test("digest: OpenRouter path gathers inputs since the last run and applies the 
     seen = body.model + "|" + body.messages[1].content;
     const plan = {
       logLines: [
-        { date: "2026-10-25", projects: ["roas"], tags: ["done"], text: "채점을 광고·결제로 분리", src: "git roas bbbbbbb" },
-        { date: "2026-10-24", projects: ["roas"], tags: ["decision"], text: "GA4 매핑 10월 내 완료", src: "2026-10-24_회의" },
+        { date: "2026-10-25", projects: ["notes"], tags: ["done"], text: "기록과 수집을 나눠 정리", src: "git notes bbbbbbb" },
+        { date: "2026-10-24", projects: ["notes"], tags: ["decision"], text: "색인 10월 내 완료", src: "2026-10-24_회의" },
       ],
       projects: [
-        { slug: "roas", currentState: "채점 분리 완료, GA4 매핑 진행", decisions: ["GA4 매핑 10월 내"], openIssues: ["누락 캠페인"] },
+        { slug: "notes", currentState: "정리 분리 완료, 색인 진행", decisions: ["색인 10월 내"], openIssues: ["빠뜨린 파일"] },
         { slug: "new-thing", title: "새 프로젝트", currentState: "시작" },
       ],
       processed: ["inbox/transcripts/2026-10-24_회의.txt", "inbox/transcripts/../../README.md"],
@@ -149,13 +149,13 @@ test("digest: OpenRouter path gathers inputs since the last run and applies the 
   }) as typeof fetch;
   const r = await runOpenRouter({ worklogDir: w }, "test/model", { fetchImpl: fakeFetch, today: new Date("2026-10-26T10:00:00") });
   assert.equal(r.ok, true, r.output);
-  assert.match(r.output, /로그 2줄 추가 · 프로젝트 2개 갱신\(roas, new-thing\) · inbox 1개 처리/);
+  assert.match(r.output, /로그 2줄 추가 · 프로젝트 2개 갱신\(notes, new-thing\) · inbox 1개 처리/);
   assert.match(seen, /^test\/model\|/);
-  assert.match(seen, /채점 분리/, "the source text reached the model");
+  assert.match(seen, /정리 분리/, "the source text reached the model");
   const log = await readFile(join(w, "log", "2026-10.md"), "utf8");
-  assert.match(log, /- 10-25 \[\[roas\]\] #done 채점을 광고·결제로 분리 \(src: git roas bbbbbbb\)/);
-  const roas = await readFile(join(w, "projects", "roas.md"), "utf8");
-  assert.match(roas, /## 현재 상태\n\n채점 분리 완료, GA4 매핑 진행\n\n## 주요 결정\n\n- GA4 매핑 10월 내\n\n## 열린 문제\n\n- 누락 캠페인\n\n## 링크/);
+  assert.match(log, /- 10-25 \[\[notes\]\] #done 기록과 수집을 나눠 정리 \(src: git notes bbbbbbb\)/);
+  const notes = await readFile(join(w, "projects", "notes.md"), "utf8");
+  assert.match(notes, /## 현재 상태\n\n정리 분리 완료, 색인 진행\n\n## 주요 결정\n\n- 색인 10월 내\n\n## 열린 문제\n\n- 빠뜨린 파일\n\n## 링크/);
   assert.match(await readFile(join(w, "projects", "new-thing.md"), "utf8"), /# 새 프로젝트/);
   assert.equal(existsSync(join(w, "inbox", "transcripts", "2026-10-24_회의.txt")), false);
   assert.equal(existsSync(join(w, "processed", "transcripts", "2026-10-24_회의.txt")), true);
@@ -168,7 +168,7 @@ test("digest: OpenRouter path gathers inputs since the last run and applies the 
 test("digest: auto skips a quota failure that wrote nothing, and stops once the worklog changed", async () => {
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
   const claudeBin = await stubCli(bins, "claude", 'echo "You have hit your usage limit" >&2; exit 1');
-  const codexBin = await stubCli(bins, "codex", 'echo "- 10-25 [[roas]] #done 다음 서비스 (src: git roas ccccccc)" >> log/2026-10.md; echo "로그 1줄"');
+  const codexBin = await stubCli(bins, "codex", 'echo "- 10-25 [[notes]] #done 다음 서비스 (src: git notes ccccccc)" >> log/2026-10.md; echo "로그 1줄"');
   const claude = { id: "claude" as const, title: "Claude Code", available: true, detail: "x", bin: claudeBin, loggedIn: true };
   const codex = { id: "codex" as const, title: "Codex CLI", available: true, detail: "x", bin: codexBin, loggedIn: true };
   const env = { PATH: bins, HOME: bins };
@@ -188,7 +188,7 @@ test("digest: auto skips a quota failure that wrote nothing, and stops once the 
   assert.equal(existsSync(join(wPinned, "log", "2026-10.md")), false);
 
   const wrote = await mkdtemp(join(tmpdir(), "zv-bins-"));
-  const claudeWrote = await stubCli(wrote, "claude", 'echo "- 10-25 [[roas]] #done 쓴 뒤 할당량 (src: git roas ddddddd)" >> log/2026-10.md; echo "You have hit your usage limit" >&2; exit 1');
+  const claudeWrote = await stubCli(wrote, "claude", 'echo "- 10-25 [[notes]] #done 쓴 뒤 할당량 (src: git notes ddddddd)" >> log/2026-10.md; echo "You have hit your usage limit" >&2; exit 1');
   const codexNo = await stubCli(wrote, "codex", 'echo SHOULD-NOT >> log/2026-10.md; echo no');
   const w2 = await worklog();
   const stopped = await new DigestRunner({ env: { PATH: wrote, HOME: wrote } }).run(
