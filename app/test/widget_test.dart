@@ -13,6 +13,7 @@ import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
 import 'package:zaevis/screens/search_screen.dart';
+import 'package:zaevis/shortcuts.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -600,13 +601,14 @@ void main() {
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.pumpAndSettle();
-    // Flutter test on macOS maps ⌘ to the meta key
+    // In-app chords are ⌘ on macOS and Ctrl elsewhere (AppShortcuts.mod).
+    final mod = AppShortcuts.nativeMenu ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
     Future<void> cmd(LogicalKeyboardKey key, {bool shift = false}) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(mod);
       if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(key);
       if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyUpEvent(mod);
       await tester.pumpAndSettle();
     }
 
@@ -893,7 +895,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyJ);
     await tester.pump();
-    expect(find.text('⌘⇧J'), findsOneWidget);
+    expect(find.text(HotkeySpec.label('meta+shift+j')), findsOneWidget);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyJ);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -901,7 +903,7 @@ void main() {
     await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('저장')));
     await tester.pumpAndSettle();
     expect(jsonDecode(posted.last.body), {'hotkey': 'meta+shift+j'});
-    expect(find.text('⌘⇧J'), findsOneWidget); // now listed under 단축키
+    expect(find.text(HotkeySpec.label('meta+shift+j')), findsOneWidget); // now listed under 단축키
   });
 
   testWidgets('index sheet shows the phase and file counts while refreshing, then completion', (tester) async {

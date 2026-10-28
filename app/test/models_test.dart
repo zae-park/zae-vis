@@ -164,7 +164,7 @@ void main() {
     expect(HotkeySpec.isValid('meta+meta+k'), isFalse);
     expect(HotkeySpec.isValid('meta+emoji'), isFalse);
     expect(HotkeySpec.parse('meta+shift+space')!.modifiers.length, 2);
-    expect(HotkeySpec.label('meta+shift+space'), '⌘⇧Space'); // tests run on macOS
+    expect(HotkeySpec.label('meta+shift+space'), AppShortcuts.nativeMenu ? '⌘⇧Space' : 'Win+Shift+Space');
     expect(HotkeySpec.label(''), HotkeySpec.label(HotkeySpec.platformDefault));
   });
 

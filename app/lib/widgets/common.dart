@@ -154,14 +154,19 @@ class Panel extends StatelessWidget {
       if (i > 0 && divided) rows.add(Divider(color: scheme.outlineVariant));
       rows.add(children[i]);
     }
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest,
+    // Material, not a coloured Container: ListTile paints its ink on the nearest Material,
+    // and a DecoratedBox between them hides that (newer Flutter asserts in tests).
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
-      padding: padding,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: padding,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      ),
     );
   }
 }
