@@ -13,8 +13,17 @@ import { splitByDate } from "../src/sources/command.ts";
 import { isStale, labelFor, parseTime, renderPlist } from "../src/schedule.ts";
 
 test("redact masks common secrets but keeps normal text", () => {
-  const s = redact("export OPENAI_API_KEY=sk-proj-abcdefghijklmnop1234 && curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1' https://u:pw123@host/x --password hunter22 dapi-example");
-  assert.doesNotMatch(s, /abcdefghijklmnop1234|eyJhbGciOiJIUzI1|hunter22|pw123|dapi0123456789abcdef/);
+  // 토큰 모양은 실행할 때만 붙인다. 소스에 통째로 있으면 공개 저장소 검사가 가짜 값을 비밀로 본다.
+  const openai = ["sk-proj-", "abcdefghijklmnop", "1234"].join("");
+  const bearer = ["eyJ", "hbGciOiJIUzI1"].join("");
+  const databricks = ["dapi", "01234567", "89abcdef", "01234567", "89abcdef"].join("");
+  const password = ["hunter", "22"].join("");
+  const urlPassword = ["pw", "123"].join("");
+  const s = redact(
+    `export OPENAI_API_KEY=${openai} && curl -H 'Authorization: Bearer ${bearer}' https://u:${urlPassword}@host/x --password ${password} ${databricks}`,
+  );
+  for (const part of [openai.slice(8), bearer, password, urlPassword, databricks.slice(4)]) assert.equal(s.includes(part), false);
+  assert.match(s, /dapi\*\*\*/);
   assert.match(s, /curl/);
   assert.equal(redact("GA4 캠페인 매핑 누락"), "GA4 캠페인 매핑 누락");
 });
