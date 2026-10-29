@@ -1,10 +1,11 @@
 // "정리" (digest): turns what was collected — sources/*, inbox transcripts and session notes — into log
 // lines, project updates and (monthly) a summary, following the worklog README. The work is done by
 // whatever the user already has: an installed agent CLI running on their own subscription
-// (Claude Code, Codex, Gemini CLI), or, with a saved OpenRouter key, a plain chat model driven by
-// this module. Nothing here needs a new account.
+// (Claude Code, Codex, Cursor, Gemini CLI), or, with a saved OpenRouter key, a plain chat model driven by
+// this module. Nothing here needs a new account. Auto tries them in digest.order (default Claude →
+// Codex → Cursor → Gemini → OpenRouter) and moves on only when the current one is out of quota.
 //
-//   setting  config.json → digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter", model, weekly }
+//   setting  config.json → digest: { agent, order, skip, model, weekly, review }
 //   state    state.json  → digest: { lastRun, agent, ok, report }
 //   log      $ZAEVIS_HOME/digest.log
 
@@ -15,14 +16,23 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
 import { spawnBin } from "./spawnbin.ts";
-import { fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
+import { agentsInOrder, fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
 import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
 import { Worklog } from "./worklog.ts";
 
-export type AgentId = "claude" | "codex" | "gemini" | "openrouter";
+export type AgentId = "claude" | "codex" | "cursor" | "gemini" | "openrouter";
 /** `review`: lift the run's changes into a proposal the user approves in the app (default), or apply directly. */
-export type DigestSetting = { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean };
+export type DigestSetting = {
+  agent: "auto" | AgentId;
+  model: string;
+  weekly: boolean;
+  review: boolean;
+  /** Fallback order. Missing ids are appended in the default order. */
+  order?: AgentId[];
+  /** Ids left in `order` but not tried. */
+  skip?: AgentId[];
+};
 
 export type AgentInfo = {
   id: AgentId;
@@ -58,6 +68,7 @@ const RUN_TIMEOUT_MS = 30 * 60_000;
 const CLI: Record<Exclude<AgentId, "openrouter">, { title: string; versionArgs: string[]; loginHint: string }> = {
   claude: { title: "Claude Code", versionArgs: ["--version"], loginHint: "터미널에서 claude login" },
   codex: { title: "Codex CLI", versionArgs: ["--version"], loginHint: "터미널에서 codex login" },
+  cursor: { title: "Cursor", versionArgs: ["--version"], loginHint: "터미널에서 agent login" },
   gemini: { title: "Gemini CLI", versionArgs: ["--version"], loginHint: "터미널에서 gemini를 실행해 로그인하거나 GEMINI_API_KEY 설정" },
 };
 
@@ -107,12 +118,21 @@ const firstLine = (out: string): string => out.trim().split("\n")[0]?.slice(0, 6
  *           `claude -p ok --max-turns 1` and are judged by the "Not logged in" text
  *   codex   ~/.codex/auth.json (or $CODEX_HOME), or OPENAI_API_KEY
  *   gemini  ~/.gemini/oauth_creds.json, or GEMINI_API_KEY / GOOGLE_API_KEY
+ *   cursor  `agent status --format json` (`isAuthenticated`), or CURSOR_API_KEY
  * `null` when it could not be told (timeout, unexpected output).
  */
 export async function checkLogin(id: Exclude<AgentId, "openrouter">, bin: string, env: NodeJS.ProcessEnv = process.env, exec = probeCli): Promise<boolean | null> {
   const h = env.HOME ?? homedir();
   if (id === "codex") return existsSync(join(env.CODEX_HOME || join(h, ".codex"), "auth.json")) || !!env.OPENAI_API_KEY;
   if (id === "gemini") return existsSync(join(h, ".gemini", "oauth_creds.json")) || !!env.GEMINI_API_KEY || !!env.GOOGLE_API_KEY;
+  if (id === "cursor") {
+    if (env.CURSOR_API_KEY) return true;
+    const st = await exec(bin, ["status", "--format", "json"], LOGIN_TIMEOUT_MS);
+    const auth = parseCursorAuth(st.out);
+    if (auth !== null) return auth;
+    if (/not logged in|unauthenticated|login required/i.test(st.out)) return false;
+    return null;
+  }
   const st = await exec(bin, ["auth", "status"], LOGIN_TIMEOUT_MS);
   const parsed = parseLoggedIn(st.out);
   if (parsed !== null) return parsed;
@@ -125,6 +145,22 @@ export async function checkLogin(id: Exclude<AgentId, "openrouter">, bin: string
 }
 
 /** `loggedIn` from the JSON of `claude auth status`, tolerating text before or after it. */
+/** `isAuthenticated` from `agent status --format json`. */
+export function parseCursorAuth(out: string): boolean | null {
+  const i = out.indexOf("{");
+  const j = out.lastIndexOf("}");
+  if (i < 0 || j <= i) return null;
+  try {
+    const v = JSON.parse(out.slice(i, j + 1)) as { isAuthenticated?: unknown; status?: unknown };
+    if (typeof v.isAuthenticated === "boolean") return v.isAuthenticated;
+    if (v.status === "authenticated") return true;
+    if (v.status === "unauthenticated") return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseLoggedIn(out: string): boolean | null {
   const i = out.indexOf("{");
   const j = out.lastIndexOf("}");
@@ -142,8 +178,9 @@ export async function detectAgents(env: NodeJS.ProcessEnv = process.env, hasOpen
   const cache = opts.cache ?? agentCache;
   const now = opts.now ?? Date.now;
   const out: AgentInfo[] = [];
-  for (const id of ["claude", "codex", "gemini"] as const) {
-    const bin = findBin(id, env, dirs);
+  for (const id of ["claude", "codex", "cursor", "gemini"] as const) {
+    // `cursor-agent` is the Cursor CLI. `agent` is the same binary's other name, used when that one is absent.
+    const bin = id === "cursor" ? findBin("cursor-agent", env, dirs) ?? findBin("agent", env, dirs) : findBin(id, env, dirs);
     if (!bin) {
       out.push({ id, title: CLI[id].title, available: false, detail: "설치되지 않음", loggedIn: null });
       continue;
@@ -165,15 +202,14 @@ export const usable = (a: AgentInfo): boolean => a.available && a.loggedIn !== f
 
 /** Why nothing can run right now — names a CLI that only needs a login, when there is one. */
 export function noAgentReason(agents: AgentInfo[] = []): string {
-  const base = "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.";
+  const base = "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Cursor·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.";
   const out = agents.filter((a) => a.available && a.loggedIn === false).map((a) => `${a.title}는 설치돼 있지만 로그인되지 않았습니다 (${a.loginHint ?? "로그인 필요"}).`);
   return out.length ? `${out.join(" ")} ${base}` : base;
 }
 
-/** "auto" = the first usable in the order above (a subscription CLI before a pay-per-use API); a signed-out CLI is skipped. */
+/** "auto" = the first usable in the user's order; a signed-out or skipped CLI is not used. A pinned agent does not fall through. */
 export function pickAgent(setting: DigestSetting, agents: AgentInfo[]): AgentInfo | null {
-  if (setting.agent !== "auto") return agents.find((a) => a.id === setting.agent && usable(a)) ?? null;
-  return agents.find(usable) ?? null;
+  return fallbackCandidates(setting, agentsInOrder(setting, agents))[0] ?? null;
 }
 
 // ── the task ───────────────────────────────────────────────────────────────────
@@ -226,6 +262,8 @@ export function cliArgs(agent: Exclude<AgentId, "openrouter">, prompt: string): 
         "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", "Bash(git log:*)", "Bash(mv:*)", "Bash(mkdir:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(date:*)"];
     case "codex":
       return ["exec", "--full-auto", prompt];
+    case "cursor":
+      return ["-p", "--force", "--trust", "--output-format", "text", prompt];
     case "gemini":
       return ["-p", prompt, "--yolo"];
   }

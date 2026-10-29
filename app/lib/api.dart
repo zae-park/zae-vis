@@ -291,12 +291,14 @@ class WorklogApi {
   // ── weekly digest ────────────────────────────────────────────────────────
   Future<DigestStatus> digest() async => DigestStatus.fromJson(await _get('/digest'));
 
-  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly, bool? review}) async => DigestStatus.fromJson(
+  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly, bool? review, List<String>? order, List<String>? skip}) async => DigestStatus.fromJson(
         await _send('PUT', '/digest', {
           if (agent != null) 'agent': agent,
           if (model != null) 'model': model,
           if (weekly != null) 'weekly': weekly,
           if (review != null) 'review': review,
+          if (order != null) 'order': order,
+          if (skip != null) 'skip': skip,
         }),
       );
 
@@ -368,7 +370,7 @@ class WorklogApi {
 
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
-  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async =>
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey, List<String>? memoryPaths}) async =>
       AppSettings.fromJson(
         await _send('PUT', '/settings', {
           if (dailyAt != null) 'dailyAt': dailyAt,
@@ -376,6 +378,7 @@ class WorklogApi {
           if (localEmbedding != null) 'localEmbedding': localEmbedding,
           if (notifications != null) 'notifications': notifications,
           if (hotkey != null) 'hotkey': hotkey,
+          if (memoryPaths != null) 'memoryPaths': memoryPaths,
         }),
       );
 }

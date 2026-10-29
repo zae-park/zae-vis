@@ -158,6 +158,8 @@ export function askCliArgs(agent: Exclude<AgentId, "openrouter">, prompt: string
       return ["-p", prompt, "--output-format", "text", "--tools", "", "--max-turns", "1"];
     case "codex":
       return ["exec", "--sandbox", "read-only", "--skip-git-repo-check", ...(extra.outFile ? ["-o", extra.outFile] : []), prompt];
+    case "cursor":
+      return ["-p", "--mode", "ask", "--trust", "--output-format", "text", prompt];
     case "gemini":
       return ["-p", prompt];
   }

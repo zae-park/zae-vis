@@ -29,13 +29,13 @@ export type AppOptions = {
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
-    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string }): Promise<Record<string, unknown>>;
+    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string; memoryPaths?: string[] }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
   /** Weekly digest: agents found on this machine and the run itself. */
   digest?: {
     status(): Promise<Record<string, unknown>>;
-    update(patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean }): Promise<Record<string, unknown>>;
+    update(patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean; order?: string[]; skip?: string[] }): Promise<Record<string, unknown>>;
     /** Starts a run in the background; `started: false` with a reason when nothing can run. */
     run(): Promise<{ started: boolean; reason?: string }>;
     /** Review flow: proposals a run left for the user to approve. */
@@ -76,6 +76,8 @@ export type AppOptions = {
     enqueue(file: string): void;
     jobs(): unknown[];
   };
+  /** A .md/.txt under an extra indexed folder (absolute path). Worklog-relative paths stay on `worklog`. */
+  indexedFile?: (path: string) => { path: string; markdown: string } | null;
   /** External AutoRAG datasources (Slack, Obsidian, GitHub …) — see datasources.ts. */
   datasources?: {
     /** Every template with its probe + config + what AutoRAG has loaded. */
@@ -311,7 +313,8 @@ export function createApp(opts: AppOptions): Server {
           const rel = (url.searchParams.get("path") ?? "").trim();
           if (!rel) return send(res, 400, { error: "missing_path" });
           // "/obsidian/default/노트.md" is an external datasource source, not a worklog file
-          const f = rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel);
+          const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
+          const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
           return f ? send(res, 200, f) : notFound(res);
         }
 
@@ -586,11 +589,13 @@ export function createApp(opts: AppOptions): Server {
         case "PUT /digest": {
           if (!opts.digest) return notFound(res);
           const b = await readJson(req);
-          const patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean } = {};
+          const patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean; order?: string[]; skip?: string[] } = {};
           if (typeof b.agent === "string") patch.agent = b.agent;
           if (typeof b.model === "string") patch.model = b.model.trim();
           if (typeof b.weekly === "boolean") patch.weekly = b.weekly;
           if (typeof b.review === "boolean") patch.review = b.review;
+          if (Array.isArray(b.order)) patch.order = b.order.filter((x): x is string => typeof x === "string");
+          if (Array.isArray(b.skip)) patch.skip = b.skip.filter((x): x is string => typeof x === "string");
           return send(res, 200, await opts.digest.update(patch));
         }
 
@@ -630,12 +635,13 @@ export function createApp(opts: AppOptions): Server {
           if (arg) return notFound(res);
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
-          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string } = {};
+          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string; memoryPaths?: string[] } = {};
           if (typeof b.dailyAt === "string") patch.dailyAt = b.dailyAt;
           if (typeof b.indexOnInject === "boolean") patch.indexOnInject = b.indexOnInject;
           if (typeof b.localEmbedding === "boolean") patch.localEmbedding = b.localEmbedding;
           if (typeof b.notifications === "boolean") patch.notifications = b.notifications;
           if (typeof b.hotkey === "string" && /^[a-z0-9+]{0,60}$/i.test(b.hotkey)) patch.hotkey = b.hotkey; // "meta+shift+space", "" = default
+          if (Array.isArray(b.memoryPaths)) patch.memoryPaths = b.memoryPaths.filter((x): x is string => typeof x === "string");
           try {
             const out = await opts.settings.update(patch);
             if (patch.localEmbedding !== undefined && opts.embedding) {

@@ -4,7 +4,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { sourcePrefixes } from "./indexpaths.ts";
 import { fileURLToPath } from "node:url";
 import { describeHit, type HitContext } from "./context.ts";
 
@@ -63,11 +64,23 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** Strip AutoRAG's virtual root ("/worklog/…" for a search path named worklog) and absolute roots. */
+/**
+ * A hit path the app can open. The first root (the worklog) stays relative (`log/2026-10.md`).
+ * A memory folder stays absolute, so two folders both named worklog do not open each other's files.
+ * AutoRAG's virtual names (`/worklog`, `/worklog-2`) follow the same sorted-path rule as the indexer.
+ */
 export function displayPath(raw: string, roots: string[]): string {
+  const primary = roots[0] ? resolve(roots[0]) : "";
+  const shorten = (root: string, rel: string): string => (resolve(root) === primary ? rel : join(root, rel));
   for (const r of roots) {
-    if (raw.startsWith(r + "/")) return raw.slice(r.length + 1);
-    if (raw.startsWith("/private" + r + "/")) return raw.slice("/private".length + r.length + 1); // macOS /tmp realpath
+    const root = resolve(r);
+    if (raw.startsWith(root + "/")) return shorten(root, raw.slice(root.length + 1));
+    if (raw.startsWith("/private" + root + "/")) return shorten(root, raw.slice("/private".length + root.length + 1));
+  }
+  for (const { root, prefix } of sourcePrefixes(roots)) {
+    if (raw !== prefix && !raw.startsWith(prefix + "/")) continue;
+    const rel = raw === prefix ? "" : raw.slice(prefix.length + 1);
+    return shorten(root, rel);
   }
   return raw.replace(/^\/[^/]+\//, "");
 }
@@ -127,7 +140,7 @@ export class AutoRAGMcp implements SearchBackend {
   private client: Client | null = null;
   private connecting: Promise<Client> | null = null;
   private readonly configPath: string;
-  private readonly roots: string[];
+  private roots: string[];
   private readonly bin: string;
   private readonly extraEnv: () => Record<string, string>;
 
@@ -136,6 +149,11 @@ export class AutoRAGMcp implements SearchBackend {
     this.roots = opts.roots;
     this.bin = opts.bin ?? defaultMcpBin();
     this.extraEnv = opts.env ?? (() => ({}));
+  }
+
+  /** Search-hit paths are shortened against these folders. The first one is the worklog. */
+  setRoots(roots: string[]): void {
+    this.roots = roots;
   }
 
   /** Drops the child so the next call starts a fresh one (new config file contents, new env). */

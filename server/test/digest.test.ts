@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-digest-state-"));
-const { DigestRunner, buildPrompt, checkLogin, cliArgs, detectAgents, findBin, gatherInputs, isFirstMonday, noAgentReason, parseLoggedIn, pickAgent, runOpenRouter, setSection, weeklyDue } = await import("../src/digest.ts");
+const { DigestRunner, buildPrompt, checkLogin, cliArgs, detectAgents, findBin, gatherInputs, isFirstMonday, noAgentReason, parseCursorAuth, parseLoggedIn, pickAgent, runOpenRouter, setSection, weeklyDue } = await import("../src/digest.ts");
 
 // Test doubles for agent CLIs: tiny shell scripts that print a version or append one log line.
 async function stubCli(dir: string, name: string, body: string): Promise<string> {
@@ -40,7 +40,7 @@ test("digest: detects CLIs on PATH and OpenRouter by key; auto picks the first a
   assert.equal(findBin("codex", env, [bins]), join(bins, "codex"));
   assert.equal(findBin("gemini", env, [bins]), null);
   const agents = await detectAgents(env, false, [bins]); // only the stub folder, not this Mac's real CLIs
-  assert.deepEqual(agents.map((a) => [a.id, a.available, a.loggedIn]), [["claude", false, null], ["codex", true, true], ["gemini", false, null], ["openrouter", false, null]]);
+  assert.deepEqual(agents.map((a) => [a.id, a.available, a.loggedIn]), [["claude", false, null], ["codex", true, true], ["cursor", false, null], ["gemini", false, null], ["openrouter", false, null]]);
   assert.equal(agents[1].detail, "codex-cli 0.9.0");
   assert.equal(pickAgent({ agent: "auto", model: "", weekly: true }, agents)?.id, "codex");
   assert.equal(pickAgent({ agent: "claude", model: "", weekly: true }, agents), null, "a chosen but missing agent is not substituted");
@@ -59,7 +59,7 @@ test("digest: login detection — claude by `auth status`, codex/gemini by files
   };
   const cache = new Map();
   const agents = await detectAgents(env, false, [bins], { exec, cache });
-  assert.deepEqual(agents.map((a) => [a.id, a.available, a.loggedIn]), [["claude", true, false], ["codex", true, false], ["gemini", true, false], ["openrouter", false, null]]);
+  assert.deepEqual(agents.map((a) => [a.id, a.available, a.loggedIn]), [["claude", true, false], ["codex", true, false], ["cursor", false, null], ["gemini", true, false], ["openrouter", false, null]]);
   assert.equal(agents[0].loginHint, "터미널에서 claude login");
   assert.equal(pickAgent({ agent: "auto", model: "", weekly: true, review: true }, agents), null, "all three installed, none signed in");
   assert.equal(pickAgent({ agent: "claude", model: "", weekly: true, review: true }, agents), null, "an explicitly chosen but signed-out CLI is not used");
@@ -73,7 +73,7 @@ test("digest: login detection — claude by `auth status`, codex/gemini by files
   // expired: runs again, and gemini now has a key in env
   const later = () => Date.now() + 11 * 60_000;
   const again = await detectAgents({ ...env, GEMINI_API_KEY: "k" }, false, [bins], { exec: async (_b, args) => ({ code: 0, out: args[0] === "auth" ? '{"loggedIn":true}' : "1.0.1" }), cache, now: later });
-  assert.deepEqual(again.map((a) => [a.id, a.loggedIn]), [["claude", true], ["codex", false], ["gemini", true], ["openrouter", null]]);
+  assert.deepEqual(again.map((a) => [a.id, a.loggedIn]), [["claude", true], ["codex", false], ["cursor", null], ["gemini", true], ["openrouter", null]]);
   assert.equal(again[0].detail, "1.0.1");
   assert.equal(pickAgent({ agent: "auto", model: "", weekly: true, review: true }, again)?.id, "claude");
 
@@ -95,6 +95,9 @@ test("digest: prompt, CLI args, due dates", async () => {
   assert.ok(cliArgs("claude", "x").includes("acceptEdits") && cliArgs("claude", "x").includes("Bash(mv:*)"));
   assert.deepEqual(cliArgs("codex", "x").slice(0, 2), ["exec", "--full-auto"]);
   assert.deepEqual(cliArgs("gemini", "x"), ["-p", "x", "--yolo"]);
+  assert.deepEqual(cliArgs("cursor", "x"), ["-p", "--force", "--trust", "--output-format", "text", "x"]);
+  assert.equal(parseCursorAuth('{"isAuthenticated":true,"status":"authenticated"}'), true);
+  assert.equal(parseCursorAuth('{"isAuthenticated":false}'), false);
   assert.equal(isFirstMonday(new Date("2026-11-02T10:00:00")), true);
   assert.equal(isFirstMonday(new Date("2026-11-09T10:00:00")), false);
   const w = await worklog();
@@ -102,6 +105,13 @@ test("digest: prompt, CLI args, due dates", async () => {
   assert.equal(weeklyDue(s, w, new Date("2026-10-27T18:30:00")), false, "Tuesday");
   assert.equal(weeklyDue(s, w, new Date("2026-10-26T18:30:00")), true, "Monday, last run 7 days ago");
   assert.equal(weeklyDue({ ...s, weekly: false }, w, new Date("2026-10-26T18:30:00")), false);
+});
+
+test("digest: fallback follows the saved order and leaves out a skipped block", () => {
+  const agents = (["claude", "codex", "cursor", "gemini"] as const).map((id) => ({ id, title: id, available: true, detail: "", loggedIn: true as boolean | null }));
+  const setting = { agent: "auto" as const, model: "", weekly: true, review: true, order: ["cursor", "claude", "codex", "gemini"] as const, skip: ["cursor" as const] };
+  assert.equal(pickAgent({ ...setting, order: [...setting.order], skip: [...setting.skip] }, agents)?.id, "claude");
+  assert.equal(pickAgent({ agent: "auto", model: "", weekly: true, review: true, order: ["gemini", "cursor", "claude", "codex"], skip: [] }, agents)?.id, "gemini");
 });
 
 test("digest: a CLI agent runs in the worklog folder and its report is recorded", async () => {

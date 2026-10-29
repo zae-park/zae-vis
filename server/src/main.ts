@@ -5,14 +5,16 @@
 // Env overrides: ZAEVIS_HOME, WORKLOG_DIR, AUTORAG_CONFIG, ZAEVIS_PORT, ZAEVIS_WEB_DIR.
 
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { AskRunner } from "./ask.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
-import { addCustomSource, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
+import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
 import * as datasources from "./datasources.ts";
 import { DigestRunner, detectAgents, noAgentReason, pickAgent } from "./digest.ts";
-import { plannedRail } from "./rail.ts";
+import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
+import { agentsInOrder, normalizeAgentOrder, normalizeAgentSkip, plannedRail, DEFAULT_AGENT_ORDER } from "./rail.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
@@ -30,12 +32,13 @@ if (!existsSync(cfg.worklogDir)) {
   console.error(`worklog folder not found: ${cfg.worklogDir}\nRun 'zaevis setup' first or set WORKLOG_DIR.`);
   process.exit(1);
 }
+syncSearchPaths(cfg);
 
 // The search child only sees the OpenRouter key while re-ranking is turned on.
 // the search child spawns connector CLIs (slacrawl, rclone …) and reads their tokens from env: give it
 // the stored secrets and a PATH that covers Homebrew, npm and zaevis's own ext folder
 // the Korean tokenizer (Kiwi) lives outside PATH too: the gate hands its paths over and restarts the child when it appears
-const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: [cfg.worklogDir], env: () => ({ ...datasources.secretsEnv(), ...rerank.childEnv(cfg.rerank), ...tokenizer.env(), PATH: datasources.cliPath() }) });
+const search = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: indexRoots(cfg), env: () => ({ ...datasources.secretsEnv(), ...rerank.childEnv(cfg.rerank), ...tokenizer.env(), PATH: datasources.cliPath() }) });
 const tokenizer = new TokenizerGate({ autoragConfig: cfg.autoragConfig, restart: () => search.restart() });
 // Keep AutoRAG's config in step with the setting (also clears the lite-init defaults on first start).
 rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== null);
@@ -51,6 +54,7 @@ const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true
 const server = createApp({
   worklog: new Worklog(cfg.worklogDir),
   search,
+  indexedFile: (path) => readIndexedFile(path, indexRoots(cfg)),
   webDir: cfg.webDir,
   sources: {
     list: () => listSources(cfg),
@@ -72,6 +76,7 @@ const server = createApp({
         dailyAt: cfg.dailyAt,
         indexOnInject: cfg.indexOnInject,
         worklogDir: cfg.worklogDir,
+        memoryPaths: cfg.memoryPaths,
         schedule: await scheduleStatus(cfg.dailyAt),
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
@@ -83,8 +88,19 @@ const server = createApp({
       };
     },
     async update(patch) {
+      if (patch.memoryPaths) {
+        const home = homedir();
+        patch.memoryPaths = patch.memoryPaths.map((p) => acceptMemoryPath(expandHome(p), cfg.worklogDir, home));
+      }
+      const before = cfg.memoryPaths.join("\0");
       saveAppSettings(patch);
       cfg = loadConfig();
+      if (cfg.memoryPaths.join("\0") !== before) {
+        syncSearchPaths(cfg);
+        search.setRoots(indexRoots(cfg));
+        await search.restart();
+        void search.refresh(true).catch(() => {});
+      }
       if (patch.dailyAt !== undefined) {
         const st = await scheduleStatus();
         if (st.supported) await installSchedule(cfg.dailyAt);
@@ -95,14 +111,17 @@ const server = createApp({
   },
   digest: {
     async status() {
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const chosen = pickAgent(cfg.digest, agents);
       const st = digest.status(cfg.digest, cfg.worklogDir);
       return { ...st, setting: cfg.digest, agents, chosen: chosen?.id ?? null, rail: st.running && st.rail.length ? st.rail : plannedRail(cfg.digest, agents) };
     },
     async update(patch) {
-      const agent = (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === patch.agent) ?? cfg.digest.agent;
-      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly, review: patch.review ?? cfg.digest.review } });
+      const names = ["auto", ...DEFAULT_AGENT_ORDER] as const;
+      const agent = names.find((a) => a === patch.agent) ?? cfg.digest.agent;
+      const order = patch.order ? normalizeAgentOrder(patch.order) : cfg.digest.order;
+      const skip = patch.skip ? normalizeAgentSkip(patch.skip) : cfg.digest.skip;
+      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly, review: patch.review ?? cfg.digest.review, order, skip } });
       cfg = loadConfig();
       return this.status();
     },
@@ -132,7 +151,7 @@ const server = createApp({
       return { ok: true, status: p.status, applied };
     },
     async run() {
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const chosen = pickAgent(cfg.digest, agents);
       if (!chosen) return { started: false, reason: noAgentReason(agents) };
       if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
@@ -142,13 +161,13 @@ const server = createApp({
   },
   ask: {
     async status() {
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const chosen = pickAgent(cfg.digest, agents);
       const st = ask.status();
       return { ...st, agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model }, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
     },
     async run(q, topK, conversationId) {
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const agent = pickAgent(cfg.digest, agents);
       return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId });
     },
@@ -157,7 +176,7 @@ const server = createApp({
   },
   reports: {
     async status() {
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const st = await reports.status(cfg);
       return { ...st, agents, chosen: pickAgent(cfg.digest, agents)?.id ?? null, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
     },
@@ -171,7 +190,7 @@ const server = createApp({
       if (!isKind(kind)) return { started: false, status: 400, error: "bad_kind", reason: "종류는 daily·weekly·monthly 중 하나입니다." };
       const p = period ?? defaultPeriod(kind);
       if (!isValidPeriod(kind, p)) return { started: false, status: 400, error: "bad_period", reason: `기간 형식이 올바르지 않습니다: ${p} (${kind === "daily" ? "YYYY-MM-DD" : kind === "weekly" ? "YYYY-Www" : "YYYY-MM"})` };
-      const agents = await detectAgents();
+      const agents = agentsInOrder(cfg.digest, await detectAgents());
       const chosen = pickAgent(cfg.digest, agents);
       if (!chosen) return { started: false, status: 409, error: "no_agent", reason: noAgentReason(agents) };
       const cur = reports.current;

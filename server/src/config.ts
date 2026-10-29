@@ -5,7 +5,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeAgentOrder, normalizeAgentSkip, DEFAULT_AGENT_ORDER } from "./rail.ts";
 import { normalizeReportsSetting, type ReportsSetting, type ReportsState } from "./reports.ts";
+import type { AgentId } from "./digest.ts";
 
 export const stateDir = (): string => process.env.ZAEVIS_HOME ?? join(homedir(), ".zaevis");
 
@@ -32,8 +34,10 @@ export type AppConfig = {
   notifications: boolean; // OS notifications for digest / collect / transcription results (default on)
   hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
-  digest: { agent: "auto" | "claude" | "codex" | "gemini" | "openrouter"; model: string; weekly: boolean; review: boolean }; // weekly digest runner
+  digest: { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean; order: AgentId[]; skip: AgentId[] };
   reports: ReportsSetting; // daily / weekly / monthly reports written by the same agent (reports.ts)
+  /** Folders indexed in addition to the worklog (a notebook that lives somewhere else). */
+  memoryPaths: string[];
   worklogDir: string;
   reposRoot: string;
   autoragConfig: string;
@@ -43,9 +47,37 @@ export type AppConfig = {
 
 type FileConfig = Partial<Omit<AppConfig, "webDir">>;
 
+function normalizeDigest(raw: AppConfig["digest"] | undefined): AppConfig["digest"] {
+  const names = ["auto", ...DEFAULT_AGENT_ORDER] as const;
+  return {
+    agent: names.find((a) => a === raw?.agent) ?? "auto",
+    model: typeof raw?.model === "string" ? raw.model : "",
+    weekly: raw?.weekly !== false,
+    review: raw?.review !== false,
+    order: normalizeAgentOrder(raw?.order),
+    skip: normalizeAgentSkip(raw?.skip),
+  };
+}
+
+/** Drops the worklog itself, the home folder, and duplicates. Missing folders stay until the next save. */
+function normalizeMemoryPaths(raw: unknown, worklogDir: string): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>([resolve(worklogDir), resolve(homedir()), "/"]);
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string" || !item.trim()) continue;
+    const abs = resolve(expandHome(item.trim()));
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out.slice(0, 12);
+}
+
 export function loadConfig(): AppConfig {
   const fc = readJson<FileConfig>(join(stateDir(), "config.json"), {});
   const here = dirname(fileURLToPath(import.meta.url));
+  const worklogDir = resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog"));
   return {
     dailyAt: /^\d{2}:\d{2}$/.test(String(fc.dailyAt)) ? String(fc.dailyAt) : "18:30",
     indexOnInject: fc.indexOnInject === true,
@@ -53,14 +85,10 @@ export function loadConfig(): AppConfig {
     notifications: fc.notifications !== false,
     hotkey: typeof fc.hotkey === "string" ? fc.hotkey : "",
     rerank: { enabled: fc.rerank?.enabled === true, model: typeof fc.rerank?.model === "string" && fc.rerank.model ? fc.rerank.model : "voyageai/rerank-3-lite" },
-    digest: {
-      agent: (["auto", "claude", "codex", "gemini", "openrouter"] as const).find((a) => a === fc.digest?.agent) ?? "auto",
-      model: typeof fc.digest?.model === "string" ? fc.digest.model : "",
-      weekly: fc.digest?.weekly !== false,
-      review: fc.digest?.review !== false,
-    },
+    digest: normalizeDigest(fc.digest),
     reports: normalizeReportsSetting(fc.reports),
-    worklogDir: resolve(expandHome(process.env.WORKLOG_DIR ?? fc.worklogDir ?? "~/worklog")),
+    memoryPaths: normalizeMemoryPaths(fc.memoryPaths, worklogDir),
+    worklogDir,
     reposRoot: resolve(expandHome(fc.reposRoot ?? "~")),
     autoragConfig: expandHome(process.env.AUTORAG_CONFIG ?? fc.autoragConfig ?? join(stateDir(), "autorag", "config.json")),
     port: Number(process.env.ZAEVIS_PORT ?? fc.port ?? 4710),
@@ -137,7 +165,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest" | "reports">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest" | "reports" | "memoryPaths">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }

@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
+import { indexRoots, syncSearchPaths } from "./indexpaths.ts";
 import { kiwiEnv } from "./kiwi.ts";
 import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
@@ -14,9 +15,10 @@ import { KIND_LABEL, ReportRunner, dueReports } from "./reports.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
 
-async function refreshIndex(autoragConfig: string, worklogDir: string, localEmbedding: boolean): Promise<string> {
-  if (!existsSync(autoragConfig)) return "건너뜀 (AutoRAG 미설정)";
-  if (localEmbedding) {
+async function refreshIndex(cfg: { autoragConfig: string; worklogDir: string; memoryPaths: string[]; localEmbedding: boolean }): Promise<string> {
+  if (!existsSync(cfg.autoragConfig)) return "건너뜀 (AutoRAG 미설정)";
+  syncSearchPaths(cfg);
+  if (cfg.localEmbedding) {
     // The app's server keeps a daemon while it runs; when it is closed, start one that exits after a
     // few idle minutes so the nightly refresh still gets vectors. AutoRAG adopts whichever is running.
     const d = new EmbeddingDaemon({ idleTimeout: 300, detached: true, log: (m) => console.log(`  ${m}`) });
@@ -24,7 +26,7 @@ async function refreshIndex(autoragConfig: string, worklogDir: string, localEmbe
     if (s.state !== "ready") console.log(`  · 임베딩 데몬 없음 — 키워드 색인만: ${s.error ?? s.state}`);
   }
   // the Korean tokenizer (Kiwi) lives outside PATH: hand its paths to MinSync like the server does
-  const rag = new AutoRAGMcp({ configPath: autoragConfig, roots: [worklogDir], env: () => kiwiEnv() });
+  const rag = new AutoRAGMcp({ configPath: cfg.autoragConfig, roots: indexRoots(cfg), env: () => kiwiEnv() });
   try {
     await rag.refresh(false);
     return "완료";
@@ -65,7 +67,7 @@ async function main(): Promise<void> {
   if (!argv.includes("--no-index")) {
     console.log(`[${ts()}] 색인 갱신`);
     try {
-      index = await refreshIndex(cfg.autoragConfig, cfg.worklogDir, cfg.localEmbedding);
+      index = await refreshIndex(cfg);
     } catch (err) {
       index = `실패: ${(err as Error).message}`;
       process.exitCode = 1;

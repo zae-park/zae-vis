@@ -573,6 +573,7 @@ class AppSettings {
     required this.dailyAt,
     required this.indexOnInject,
     required this.worklogDir,
+    this.memoryPaths = const [],
     required this.scheduleSupported,
     required this.scheduleInstalled,
     required this.scheduleLoaded,
@@ -593,6 +594,7 @@ class AppSettings {
       dailyAt: _str(j['dailyAt']).isEmpty ? '18:30' : _str(j['dailyAt']),
       indexOnInject: j['indexOnInject'] == true,
       worklogDir: _str(j['worklogDir']),
+      memoryPaths: j['memoryPaths'] is List ? (j['memoryPaths'] as List).whereType<String>().toList() : const [],
       scheduleSupported: s['supported'] == true,
       scheduleInstalled: s['installed'] == true,
       scheduleLoaded: s['loaded'] == true,
@@ -621,6 +623,9 @@ class AppSettings {
   /// Korean morphological tokenizer (Kiwi); null when the server does not report it.
   final TokenizerStatus? tokenizer;
   final String worklogDir;
+
+  /// Folders indexed besides the worklog.
+  final List<String> memoryPaths;
   final bool scheduleSupported;
   final bool scheduleInstalled;
   final bool scheduleLoaded;
@@ -741,6 +746,7 @@ class DigestStatus {
     this.last,
     this.nextWeekly,
     this.rail = const [],
+    this.skip = const [],
   });
 
   factory DigestStatus.fromJson(Json j) {
@@ -753,6 +759,7 @@ class DigestStatus {
       weekly: s['weekly'] != false,
       review: s['review'] != false,
       agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
+      skip: s['skip'] is List ? (s['skip'] as List).whereType<String>().toList() : const [],
       chosen: _strOrNull(j['chosen']),
       last: j['last'] is Json ? DigestRun.fromJson(j['last'] as Json) : null,
       nextWeekly: _strOrNull(j['nextWeekly']),
@@ -766,6 +773,9 @@ class DigestStatus {
   final String model;
   final bool weekly;
   final List<AgentInfo> agents;
+
+  /// Ids left in the fallback order but not tried.
+  final List<String> skip;
 
   /// The agent "auto" (or the explicit choice) resolves to right now; null when nothing can run.
   final String? chosen;

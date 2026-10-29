@@ -63,6 +63,8 @@ test("ask: CLIs are invoked read-only", () => {
   const c = askCliArgs("codex", "p", { outFile: "/t/a.md" });
   assert.deepEqual(c, ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-o", "/t/a.md", "p"]);
   assert.deepEqual(askCliArgs("gemini", "p"), ["-p", "p"]);
+  assert.ok(askCliArgs("cursor", "p").includes("--mode") && askCliArgs("cursor", "p").includes("ask"));
+  assert.deepEqual(askCliArgs("cursor", "p"), ["-p", "--mode", "ask", "--trust", "--output-format", "text", "p"]);
   assert.equal(cleanAnswer("Loaded cached credentials.\n답입니다 [1]\n"), "답입니다 [1]");
 });
 

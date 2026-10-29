@@ -74,15 +74,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey}) async {
+  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey, List<String>? memoryPaths}) async {
     try {
-      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, hotkey: hotkey);
+      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, hotkey: hotkey, memoryPaths: memoryPaths);
       if (hotkey != null) await GlobalHotkey.update(hotkey);
-      if (mounted) toast(context, '저장했습니다');
+      if (mounted) toast(context, memoryPaths != null ? '폴더를 색인에 넣었습니다. 처음부터 다시 색인합니다.' : '저장했습니다');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
     }
     if (mounted) _reload();
+  }
+
+  Future<void> _addMemory(AppSettings s) async {
+    final path = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final c = TextEditingController();
+        return AlertDialog(
+          title: const Text('색인할 폴더'),
+          content: TextField(
+            controller: c,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: '폴더 경로', hintText: '/Users/…/worklog'),
+            onSubmitted: (v) => Navigator.pop(context, v.trim()),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+            FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('추가')),
+          ],
+        );
+      },
+    );
+    if (path == null || path.isEmpty) return;
+    await _update(memoryPaths: [...s.memoryPaths, path]);
   }
 
   @override
@@ -92,11 +116,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
       body: Readable(
-        maxWidth: 900,
-        child: ListView(padding: const EdgeInsets.all(16), children: [
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 24, 32), children: [
           Text('서버', style: t.titleMedium),
           const SizedBox(height: 8),
-          Row(children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: Row(children: [
             Expanded(child: TextField(controller: _server, decoration: const InputDecoration(labelText: '서버 주소', hintText: defaultDesktopBase))),
             const SizedBox(width: 8),
             FilledButton.tonal(
@@ -108,6 +135,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('적용'),
             ),
           ]),
+            ),
+          ),
           const SizedBox(height: 24),
           FutureBuilder<AppSettings>(
             future: _future,
@@ -122,7 +151,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : s.scheduleLoaded
                           ? '매일 ${s.dailyAt} 실행 중 (맥이 잠자기였으면 깨어날 때 실행)'
                           : '등록됐지만 아직 로드되지 않음';
-              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              final wide = MediaQuery.sizeOf(context).width >= 1100;
+              final collect = <Widget>[
                 Text('매일 수집 · 색인', style: t.titleMedium),
                 const SizedBox(height: 8),
                 ListTile(
@@ -167,10 +197,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 if (s.tokenizer != null) _KiwiTile(status: s.tokenizer!, managed: _managed, onInstall: _installKiwi),
                 if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
-                const SizedBox(height: 16),
-                Text('정리 (지식화)', style: t.titleMedium),
-                _DigestSection(api: widget.api),
-                const SizedBox(height: 16),
+              ];
+              final side = <Widget>[
                 Text('알림', style: t.titleMedium),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -253,8 +281,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ]),
                   ),
                 const SizedBox(height: 16),
-                Text('worklog 폴더', style: t.titleMedium),
+                Text('색인 폴더', style: t.titleMedium),
+                const SizedBox(height: 4),
+                Text('기록 폴더는 항상 색인됩니다. 노트가 다른 폴더에 있으면 추가하세요. 추가하거나 빼면 처음부터 다시 색인합니다.', style: t.bodySmall),
+                const SizedBox(height: 6),
                 SelectableText(s.worklogDir, style: ZaevisTheme.mono),
+                for (final p in s.memoryPaths)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.folder_outlined),
+                    title: Text(p, style: ZaevisTheme.mono, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: IconButton(
+                      tooltip: '색인에서 빼기',
+                      icon: const Icon(Icons.close),
+                      onPressed: () => _update(memoryPaths: [for (final x in s.memoryPaths) if (x != p) x]),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(onPressed: () => _addMemory(s), icon: const Icon(Icons.create_new_folder_outlined), label: const Text('폴더 추가')),
+                ),
+              ];
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('정리 (지식화)', style: t.titleMedium),
+                _DigestSection(api: widget.api),
+                const SizedBox(height: 20),
+                if (wide)
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: collect)),
+                    const SizedBox(width: 36),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: side)),
+                  ])
+                else ...[
+                  ...collect,
+                  const SizedBox(height: 16),
+                  ...side,
+                ],
               ]);
             },
           ),
@@ -444,9 +507,9 @@ class _DigestSectionState extends State<_DigestSection> {
     if (s.running) _poll = Timer(const Duration(seconds: 4), _reload);
   }
 
-  Future<void> _update({String? agent, String? model, bool? weekly, bool? review}) async {
+  Future<void> _update({String? agent, String? model, bool? weekly, bool? review, List<String>? order, List<String>? skip}) async {
     try {
-      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly, review: review);
+      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly, review: review, order: order, skip: skip);
       if (mounted) toast(context, '저장했습니다');
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
@@ -464,7 +527,7 @@ class _DigestSectionState extends State<_DigestSection> {
     _reload();
   }
 
-  static const _labels = {'auto': '자동 (할당량이면 다음 서비스)', 'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter API'};
+  static const _labels = {'auto': '자동 (할당량이면 다음 서비스)', 'claude': 'Claude Code', 'codex': 'Codex CLI', 'cursor': 'Cursor', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter API'};
 
   String _quotaNote(List<RailStop> rail) {
     final names = rail.where((s) => s.state == 'quota').map((s) => s.title).toList();
@@ -486,43 +549,31 @@ class _DigestSectionState extends State<_DigestSection> {
         final chosen = s.agents.where((a) => a.id == s.chosen).firstOrNull;
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. '
-              '이 맥에 설치된 에이전트(본인 구독)나 저장된 OpenRouter 키 중 쓸 수 있는 것으로 돌립니다. '
-              '자동이면 할당량으로 막히고 아직 파일을 쓰지 않았을 때만 다음 서비스로 넘깁니다.', style: t.bodySmall),
+              '블록을 왼쪽부터 시도하고, 할당량으로 막히면 다음 블록으로 넘깁니다. 끌어다 놓아 순서를 바꿉니다.', style: t.bodySmall),
           const SizedBox(height: 8),
           if (s.rail.isNotEmpty) AgentRail(stops: s.rail),
-          for (final a in s.agents)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                a.needsLogin ? Icons.warning_amber_outlined : a.available ? Icons.check_circle_outline : Icons.radio_button_unchecked,
-                color: a.needsLogin ? scheme.error : a.available ? scheme.primary : scheme.outline,
-              ),
-              title: Text(a.title),
-              subtitle: Text(a.needsLogin ? '${a.detail} · ${a.loginNote}' : a.detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: a.needsLogin ? TextStyle(color: scheme.error) : null),
-              trailing: s.chosen == a.id ? const Chip(label: Text('사용'), visualDensity: VisualDensity.compact) : null,
-            ),
-          Row(children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: s.agent,
-                decoration: const InputDecoration(labelText: '정리 에이전트'),
-                items: [for (final e in _labels.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-                onChanged: s.running ? null : (v) => v == null ? null : _update(agent: v),
-              ),
-            ),
-            if (s.agent == 'openrouter' || s.chosen == 'openrouter') ...[
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 220,
+          _AgentOrder(
+            agents: s.agents,
+            skip: s.skip,
+            chosen: s.chosen,
+            enabled: !s.running,
+            onReorder: (order) => _update(agent: 'auto', order: order, skip: s.skip),
+            onSkip: (skip) => _update(agent: 'auto', order: [for (final a in s.agents) a.id], skip: skip),
+          ),
+          if (!s.skip.contains('openrouter') && (s.chosen == 'openrouter' || s.agents.any((a) => a.id == 'openrouter' && a.available))) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
                 child: TextField(
                   controller: _model,
                   decoration: const InputDecoration(labelText: 'OpenRouter 모델', hintText: 'anthropic/claude-sonnet-4.5'),
                   onSubmitted: (v) => _update(model: v.trim()),
                 ),
               ),
-            ],
-          ]),
+            ),
+          ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             secondary: const Icon(Icons.rule),
@@ -584,6 +635,118 @@ class _DigestSectionState extends State<_DigestSection> {
           ],
         ]);
       },
+    );
+  }
+}
+
+/// Fallback order as blocks. Drag to reorder. The switch keeps a service in the line without a checkbox list.
+class _AgentOrder extends StatelessWidget {
+  const _AgentOrder({required this.agents, required this.skip, required this.chosen, required this.enabled, required this.onReorder, required this.onSkip});
+  final List<AgentInfo> agents;
+  final List<String> skip;
+  final String? chosen;
+  final bool enabled;
+  final ValueChanged<List<String>> onReorder;
+  final ValueChanged<List<String>> onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    if (agents.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 168,
+      child: ReorderableListView(
+        scrollDirection: Axis.horizontal,
+        buildDefaultDragHandles: false,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        onReorder: (oldIndex, newIndex) {
+          if (!enabled) return;
+          if (newIndex > oldIndex) newIndex -= 1;
+          final ids = [for (final a in agents) a.id];
+          final moved = ids.removeAt(oldIndex);
+          ids.insert(newIndex, moved);
+          onReorder(ids);
+        },
+        children: [
+          for (var i = 0; i < agents.length; i++)
+            _AgentBlock(
+              key: ValueKey(agents[i].id),
+              agent: agents[i],
+              index: i + 1,
+              dragIndex: i,
+              included: !skip.contains(agents[i].id),
+              chosen: chosen == agents[i].id,
+              enabled: enabled,
+              onIncluded: (v) {
+                final next = [for (final id in skip) id];
+                if (v) {
+                  next.remove(agents[i].id);
+                } else if (!next.contains(agents[i].id)) {
+                  next.add(agents[i].id);
+                }
+                onSkip(next);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AgentBlock extends StatelessWidget {
+  const _AgentBlock({super.key, required this.agent, required this.index, required this.dragIndex, required this.included, required this.chosen, required this.enabled, required this.onIncluded});
+  final AgentInfo agent;
+  final int index;
+  final int dragIndex;
+  final bool included;
+  final bool chosen;
+  final bool enabled;
+  final ValueChanged<bool> onIncluded;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final note = agent.needsLogin ? agent.loginNote : agent.detail;
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: SizedBox(
+        width: 210,
+        child: Material(
+          color: included ? scheme.surfaceContainerLow : scheme.surfaceContainerHighest,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: chosen ? scheme.primary : scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                ReorderableDragStartListener(
+                  index: dragIndex,
+                  enabled: enabled,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('$index', style: t.labelLarge?.copyWith(color: scheme.primary)),
+                    const SizedBox(width: 6),
+                    Icon(Icons.drag_indicator, size: 16, color: scheme.outline),
+                  ]),
+                ),
+                const Spacer(),
+                if (chosen) const Chip(label: Text('사용'), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              ]),
+              const SizedBox(height: 6),
+              Text(agent.title, style: t.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 2),
+              Text(note, style: t.bodySmall?.copyWith(color: agent.needsLogin ? scheme.error : scheme.onSurfaceVariant), maxLines: 2, overflow: TextOverflow.ellipsis),
+              const Spacer(),
+              Row(children: [
+                Text(included ? '순서에 포함' : '건너뜀', style: t.labelSmall),
+                const Spacer(),
+                Switch(value: included, onChanged: enabled ? onIncluded : null),
+              ]),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
