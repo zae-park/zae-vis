@@ -33,6 +33,16 @@ class IoBackend implements Backend {
   bool get managed => payload != null;
 
   @override
+  String? get buildVersion {
+    final p = payload;
+    if (p == null) return null;
+    final f = File('$p${Platform.pathSeparator}VERSION');
+    if (!f.existsSync()) return null;
+    final text = f.readAsStringSync().trim();
+    return text.isEmpty ? null : text;
+  }
+
+  @override
   String get home => Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '';
 
   String get _stateDir => Platform.environment['ZAEVIS_HOME'] ?? '$home${Platform.pathSeparator}.zaevis';

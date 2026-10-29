@@ -49,6 +49,8 @@ class _FakeBackend implements Backend {
   @override
   bool get managed => true;
   @override
+  String? get buildVersion => null;
+  @override
   String? get problem => null;
   @override
   String get home => '/Users/me';

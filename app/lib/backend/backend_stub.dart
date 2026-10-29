@@ -4,6 +4,8 @@ class _WebBackend implements Backend {
   @override
   bool get managed => false;
   @override
+  String? get buildVersion => null;
+  @override
   String? get problem => null;
   @override
   String get home => '';

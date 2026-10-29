@@ -28,6 +28,9 @@ abstract class Backend {
   /// True when running from zaevis.app with the bundled server.
   bool get managed;
 
+  /// Bundled `VERSION` (`0.1.0+20261029120000`), or null when this is not an installed build.
+  String? get buildVersion;
+
   /// Something that blocks running (e.g. app not moved to Applications), or null.
   String? get problem;
 

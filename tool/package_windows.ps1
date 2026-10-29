@@ -67,7 +67,8 @@ if (-not $SkipMinsync) {
 Copy-Item "$Root\bin\zaevis.cmd" "$Payload\bin\zaevis.cmd"
 Copy-Item "$Root\bin\zaevis" "$Payload\bin\zaevis"
 Copy-Item -Recurse "$Root\kit" "$Payload\kit"
-"$Version+$(Get-Date -Format yyyyMMddHHmmss)" | Set-Content -NoNewline "$Payload\VERSION"
+$BuildId = if ($env:ZAEVIS_BUILD) { $env:ZAEVIS_BUILD } else { [DateTime]::UtcNow.ToString('yyyyMMddHHmmss') }
+"$Version+$BuildId" | Set-Content -NoNewline "$Payload\VERSION"
 
 # -- 5) Flutter: web (served by the bundled server) + Windows app ----------------------------------
 Say "Flutter 빌드"

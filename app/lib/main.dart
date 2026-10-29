@@ -12,6 +12,7 @@ import 'screens/settings_screen.dart';
 import 'screens/reports_screen.dart';
 import 'shortcuts.dart';
 import 'theme.dart';
+import 'update.dart';
 import 'recording/recorder.dart';
 import 'widgets/input_dialogs.dart';
 import 'widgets/record_dialog.dart';
@@ -147,6 +148,18 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     if (_native) _registerHotkey();
+    final local = widget.backend?.buildVersion;
+    if (local != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate(local));
+    }
+  }
+
+  Future<void> _checkUpdate(String local) async {
+    final offer = await lookForUpdate(local);
+    if (!mounted || offer == null) return;
+    final download = await showUpdateDialog(context, offer);
+    final url = offer.downloadUrl;
+    if (download && url != null && mounted) await widget.backend?.open(url);
   }
 
   /// The stored spec when the server answers, the platform default otherwise.
