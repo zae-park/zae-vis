@@ -99,18 +99,34 @@ Future<UpdateOffer?> lookForUpdate(String localVersion, {http.Client? client}) a
   }
 }
 
-/// Corner card for a newer release. Stays until the user dismisses it or opens the installer.
+/// Idle, receiving the installer, or replacing the app.
+enum UpdatePhase { idle, downloading, installing }
+
+/// Corner card for a newer release. The update button downloads and installs it.
 class UpdateNotice extends StatelessWidget {
-  const UpdateNotice({super.key, required this.offer, required this.onLater, required this.onOpen});
+  const UpdateNotice({
+    super.key,
+    required this.offer,
+    required this.onLater,
+    required this.onUpdate,
+    this.phase = UpdatePhase.idle,
+    this.progress,
+    this.error,
+  });
   final UpdateOffer offer;
   final VoidCallback onLater;
-  final VoidCallback onOpen;
+  final VoidCallback onUpdate;
+  final UpdatePhase phase;
+  /// 0..1 while [phase] is [UpdatePhase.downloading].
+  final double? progress;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final download = offer.downloadUrl != null;
+    final busy = phase != UpdatePhase.idle;
     return Material(
       color: scheme.surfaceContainerLowest,
       elevation: 3,
@@ -132,20 +148,33 @@ class UpdateNotice extends StatelessWidget {
               IconButton(
                 tooltip: '나중에',
                 visualDensity: VisualDensity.compact,
-                onPressed: onLater,
+                onPressed: busy ? null : onLater,
                 icon: const Icon(Icons.close, size: 18),
               ),
             ]),
             Text('새 버전이 있습니다', style: t.titleSmall),
             const SizedBox(height: 4),
             Text('설치된 버전 ${offer.local.label}\n최신 ${offer.remote.label}', style: t.bodySmall),
+            if (error != null) ...[
+              const SizedBox(height: 6),
+              Text(error!, style: t.bodySmall?.copyWith(color: scheme.error)),
+            ],
             const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: download
-                  ? FilledButton(onPressed: onOpen, child: const Text('받기'))
-                  : Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
-            ),
+            if (phase == UpdatePhase.downloading)
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                LinearProgressIndicator(value: progress),
+                const SizedBox(height: 4),
+                Text('받는 중 ${((progress ?? 0) * 100).round()}%', style: t.bodySmall),
+              ])
+            else if (phase == UpdatePhase.installing)
+              Text('설치하는 중… 끝나면 앱이 다시 열립니다.', style: t.bodySmall)
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: download
+                    ? FilledButton(onPressed: onUpdate, child: const Text('업데이트'))
+                    : Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
+              ),
           ]),
         ),
       ),

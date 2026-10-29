@@ -55,6 +55,8 @@ $env:PATH = "$NodeDir;$env:PATH"
 & $Npm ci --omit=dev --no-fund --no-audit --silent
 Pop-Location
 Get-ChildItem -Recurse -File "$Payload\server\node_modules" -Include *.map, *.d.ts, *.d.mts, *.d.cts, README.md, CHANGELOG.md, HISTORY.md | Remove-Item -Force
+& "$NodeDir\node.exe" "$Root\tool\prune_modules.mjs" "$Payload\server\node_modules" win32 x64
+if ($LASTEXITCODE -ne 0) { throw "설치 파일에서 불필요한 실행 파일을 지우지 못했습니다." }
 
 # -- 3) MinSync (AutoRAG embedding engine; Rust build, cached) -----------------------------------
 if (-not $SkipMinsync) {

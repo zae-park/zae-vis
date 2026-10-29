@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:zaevis/update_apply.dart';
+
 import 'backend.dart';
 
 /// The packaged app's own backend: a Node runtime, the server and the CLI shipped next to the app.
@@ -119,6 +121,44 @@ class IoBackend implements Backend {
     } else if (Platform.isWindows) {
       await Process.run('cmd', ['/c', 'start', '', target]);
     }
+  }
+
+  @override
+  Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {
+    final blocked = problem;
+    if (blocked != null) throw StateError(blocked);
+    if (payload == null) throw StateError('설치본에서만 업데이트할 수 있습니다.');
+    final dir = Directory('${Directory.systemTemp.path}${Platform.pathSeparator}zaevis-update');
+    dir.createSync(recursive: true);
+    if (Platform.isMacOS) {
+      final bundle = macAppBundle(Platform.resolvedExecutable);
+      if (bundle == null) throw StateError('설치본에서만 업데이트할 수 있습니다.');
+      final dmg = File('${dir.path}${Platform.pathSeparator}zaevis.dmg');
+      await downloadTo(Uri.parse(url), dmg, onProgress);
+      onProgress(null);
+      try {
+        await run(const ['stop']).drain<void>();
+      } catch (_) {}
+      try {
+        await installMacDmg(dmg: dmg, appBundle: bundle);
+      } catch (e) {
+        try {
+          await run(const ['start']).drain<void>();
+        } catch (_) {}
+        rethrow;
+      }
+      await Process.start('open', [bundle], mode: ProcessStartMode.detached);
+      exit(0);
+    }
+    if (Platform.isWindows) {
+      final exe = File('${dir.path}\\zaevis-setup.exe');
+      await downloadTo(Uri.parse(url), exe, onProgress);
+      onProgress(null);
+      // Inno closes this process and starts the new app (CloseApplications=force).
+      await Process.start(exe.path, windowsSilentArgs, mode: ProcessStartMode.detached);
+      return;
+    }
+    throw StateError('이 운영체제에서는 자동 업데이트를 지원하지 않습니다.');
   }
 }
 

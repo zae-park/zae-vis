@@ -140,6 +140,9 @@ class _HomeShellState extends State<HomeShell> {
   int _generation = 0; // bumped when the server address changes, to reload every screen
   final _searchFocus = FocusNode();
   UpdateOffer? _update;
+  UpdatePhase _updatePhase = UpdatePhase.idle;
+  double? _updateProgress;
+  String? _updateError;
 
   WorklogApi get api => widget.api;
 
@@ -161,10 +164,35 @@ class _HomeShellState extends State<HomeShell> {
     setState(() => _update = offer);
   }
 
-  Future<void> _openUpdate() async {
+  Future<void> _applyUpdate() async {
     final url = _update?.downloadUrl;
-    setState(() => _update = null);
-    if (url != null) await widget.backend?.open(url);
+    final backend = widget.backend;
+    if (url == null || backend == null || _updatePhase != UpdatePhase.idle) return;
+    setState(() {
+      _updatePhase = UpdatePhase.downloading;
+      _updateProgress = 0;
+      _updateError = null;
+    });
+    try {
+      await backend.installUpdate(url, (progress) {
+        if (!mounted) return;
+        setState(() {
+          if (progress == null) {
+            _updatePhase = UpdatePhase.installing;
+            _updateProgress = null;
+          } else {
+            _updateProgress = progress;
+          }
+        });
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final text = e.toString().replaceFirst(RegExp(r'^(StateError|Exception): '), '');
+      setState(() {
+        _updatePhase = UpdatePhase.idle;
+        _updateError = text;
+      });
+    }
   }
 
   /// The stored spec when the server answers, the platform default otherwise.
@@ -278,7 +306,14 @@ class _HomeShellState extends State<HomeShell> {
         Positioned(
           top: 12,
           right: 16,
-          child: UpdateNotice(offer: _update!, onLater: () => setState(() => _update = null), onOpen: _openUpdate),
+          child: UpdateNotice(
+            offer: _update!,
+            phase: _updatePhase,
+            progress: _updateProgress,
+            error: _updateError,
+            onLater: () => setState(() => _update = null),
+            onUpdate: _applyUpdate,
+          ),
         ),
     ]);
   }

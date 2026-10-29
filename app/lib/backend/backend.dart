@@ -46,6 +46,10 @@ abstract class Backend {
 
   /// Opens a URL or file with the OS.
   Future<void> open(String target);
+
+  /// Downloads the installer at [url] and replaces this app, then restarts it.
+  /// [onProgress] is 0..1 while the file arrives, then null once installation starts.
+  Future<void> installUpdate(String url, void Function(double? progress) onProgress);
 }
 
 Backend createBackend() => impl.createBackend();

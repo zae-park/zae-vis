@@ -70,6 +70,8 @@ class _FakeBackend implements Backend {
   Future<void> ensureServer() async {}
   @override
   Future<void> open(String target) async {}
+  @override
+  Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {}
 }
 
 WorklogApi _fakeApi() => WorklogApi(

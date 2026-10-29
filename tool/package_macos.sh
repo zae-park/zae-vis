@@ -60,6 +60,12 @@ cp -R "$ROOT/server/src" "$ROOT/server/package.json" "$ROOT/server/package-lock.
 # some packages ship runtime modules with names like changelog.js.
 find "$PAYLOAD/server/node_modules" -type f \( -name "*.map" -o -name "*.d.ts" -o -name "*.d.mts" -o -name "*.d.cts" \
   -o -iname "README.md" -o -iname "CHANGELOG.md" -o -iname "HISTORY.md" \) -delete
+ARCH="$(uname -m)"
+case "$ARCH" in
+  arm64|aarch64) ARCH=arm64 ;;
+  x86_64) ARCH=x64 ;;
+esac
+"$NODE_DIR/bin/node" "$ROOT/tool/prune_modules.mjs" "$PAYLOAD/server/node_modules" darwin "$ARCH"
 
 # ── 3) MinSync (AutoRAG embedding engine; Rust build, cached) ──────────────────
 if [[ $SKIP_MINSYNC -eq 0 ]]; then

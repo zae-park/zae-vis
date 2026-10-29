@@ -24,7 +24,9 @@ OutputBaseFilename=zaevis-{#AppVersion}-win-x64
 Compression=zip
 SolidCompression=no
 WizardStyle=modern
-CloseApplications=no
+; A silent update closes zaevis and starts the new build. skipifsilent below avoids a second launch.
+CloseApplications=force
+RestartApplications=yes
 UninstallDisplayIcon={app}\zaevis.exe
 
 [Languages]
