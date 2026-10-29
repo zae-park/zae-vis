@@ -130,7 +130,7 @@ jobs:
             script: tool/package_macos.sh
             artifact: dist/*.dmg
           - os: windows-latest
-            script: powershell -ExecutionPolicy Bypass -File tool/package_windows.ps1
+            script: pwsh -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
             artifact: dist/*.zip
     runs-on: ${{ matrix.os }}
     steps:
