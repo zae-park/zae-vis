@@ -1,0 +1,23 @@
+name: minsync-cache
+
+# GitHub removes an Actions cache that has not been read for 7 days, and that
+# period cannot be raised. Restoring the cache refreshes its last-access time.
+on:
+  schedule:
+    - cron: "17 3 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  touch:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/package/cache/minsync
+            build/package-win/cache/minsync
+          key: minsync-${{ runner.os }}-0.5.0

@@ -128,7 +128,7 @@ bin/zaevis install && zaevis setup
 | `app/` | Flutter 앱 |
 | `kit/` | worklog 템플릿과 정리 프롬프트 |
 
-설치본은 macOS에서 `tool/package_macos.sh`, Windows에서 `tool/package_windows.ps1`입니다. Flutter, protobuf, cmake, Rust가 필요합니다. Kiwi와 임베딩 모델은 설치본에 넣지 않습니다.
+설치본은 macOS에서 `tool/package_macos.sh`(DMG), Windows에서 `tool/package_windows.ps1`(설치 exe)입니다. Flutter, protobuf, cmake, Rust가 필요합니다. Kiwi와 임베딩 모델은 설치본에 넣지 않습니다.
 
 GitHub Actions는 push마다 서버 테스트, Flutter 분석과 테스트, macOS와 Windows 앱 빌드를 돌립니다. main에 푸시하면 `app/pubspec.yaml`의 버전으로 설치 파일을 만들고, 같은 버전의 Release가 있으면 파일과 태그를 이번 커밋으로 바꿉니다. `0.1.0+2`의 `+` 뒤는 버전으로 치지 않습니다. 설치한 앱은 시작할 때 이 Release를 보고, 빌드가 더 새로우면 알림을 띄웁니다.
 

@@ -1,4 +1,5 @@
-# Builds dist\zaevis-<version>-win-x64.zip: a folder people unzip anywhere and run zaevis.exe from.
+# Builds dist\zaevis-<version>-win-x64.exe: an installer. The app is zaevis.exe plus a zaevis\ folder
+# (Node, server, MinSync, web). A lone exe cannot carry those, so the download is an installer.
 # Everything the app needs at runtime is inside (Node runtime, server, MinSync, web build, CLI).
 #
 #   powershell -ExecutionPolicy Bypass -File tool\package_windows.ps1 [-SkipMinsync]
@@ -90,16 +91,10 @@ Remove-Item -Recurse -Force (Join-Path $Build "stage") -ErrorAction SilentlyCont
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 Copy-Item -Recurse "$Root\app\$AppSrc\*" $Stage
 Copy-Item -Recurse $Payload "$Stage\zaevis"
-@"
-zaevis 설치
-
-1. 이 폴더를 원하는 곳(예: C:\Users\<이름>\zaevis)에 두고 zaevis.exe 를 여세요.
-2. 첫 화면의 설정 마법사를 따라가면 끝입니다. 다른 설치는 필요 없습니다.
-   SmartScreen 경고가 뜨면 "추가 정보" → "실행"을 누르세요 (서명 없는 오픈소스 빌드입니다).
-3. 매일 수집 예약은 Windows 작업 스케줄러에 'io.github.zaepark.zaevis.daily'로 등록됩니다.
-"@ | Set-Content "$Stage\처음 열 때 읽어주세요.txt"
-
-$ZipOut = Join-Path $Dist "zaevis-$Version-win-x64.zip"
-Remove-Item $ZipOut -ErrorAction SilentlyContinue
-Compress-Archive -Path $Stage -DestinationPath $ZipOut
-Say "완료: $ZipOut ($([math]::Round((Get-Item $ZipOut).Length / 1MB)) MB)"
+$Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+if (-not (Test-Path $Iscc)) { throw "Inno Setup이 필요합니다: choco install innosetup" }
+$ExeOut = Join-Path $Dist "zaevis-$Version-win-x64.exe"
+Remove-Item $ExeOut -ErrorAction SilentlyContinue
+& $Iscc "/DAppVersion=$Version" "/DStage=$Stage" "/DOutputDir=$Dist" (Join-Path $PSScriptRoot "zaevis.iss")
+if (-not (Test-Path $ExeOut)) { throw "설치 exe가 없습니다: $ExeOut" }
+Say "완료: $ExeOut ($([math]::Round((Get-Item $ExeOut).Length / 1MB)) MB)"

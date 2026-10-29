@@ -64,7 +64,8 @@ String? assetUrl(Object? assets, {required String os, required String arch}) {
     if (name is String && url is String) names[name] = url;
   }
   if (os == 'windows') {
-    return names.entries.where((e) => e.key.endsWith('.zip')).map((e) => e.value).firstOrNull;
+    final exe = names.entries.where((e) => e.key.endsWith('.exe')).map((e) => e.value).firstOrNull;
+    return exe ?? names.entries.where((e) => e.key.endsWith('.zip')).map((e) => e.value).firstOrNull;
   }
   if (os == 'macos') {
     final marker = arch == 'arm64' ? 'arm64' : 'x86_64';

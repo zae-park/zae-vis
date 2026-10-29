@@ -25,6 +25,18 @@ void main() {
     expect(offer.downloadUrl, 'https://example/arm.dmg');
   });
 
+  test('windows offers the installer exe', () {
+    final offer = offerFromRelease('0.1.0+1', {
+      'tag_name': 'v0.1.0',
+      'body': 'version: 0.1.0+2\n',
+      'assets': [
+        {'name': 'zaevis-0.1.0-win-x64.zip', 'browser_download_url': 'https://example/win.zip'},
+        {'name': 'zaevis-0.1.0-win-x64.exe', 'browser_download_url': 'https://example/win.exe'},
+      ],
+    }, os: 'windows', arch: 'x64');
+    expect(offer!.downloadUrl, 'https://example/win.exe');
+  });
+
   test('the same build and the wrong OS installer are not offered', () {
     final same = offerFromRelease('0.1.0+20261029140000', {
       'tag_name': 'v0.1.0',

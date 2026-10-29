@@ -131,7 +131,7 @@ jobs:
             artifact: dist/*.dmg
           - os: windows-latest
             script: pwsh -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
-            artifact: dist/*.zip
+            artifact: dist/*.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
       - name: build tools (protobuf, cmake)
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then brew install protobuf cmake; else choco install -y protoc cmake --no-progress; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install protobuf cmake; else choco install -y protoc cmake innosetup --no-progress; fi
       - uses: actions/cache@v4
         with:
           path: |
@@ -190,7 +190,7 @@ jobs:
             version: ${{ needs.release-needed.outputs.version }}+${{ needs.release-needed.outputs.build }}
           files: |
             dist/*.dmg
-            dist/*.zip
+            dist/*.exe
           fail_on_unmatched_files: true
       - name: delete installer artifacts
         env:
