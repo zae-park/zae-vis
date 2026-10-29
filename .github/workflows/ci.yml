@@ -2,8 +2,14 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      force_release:
+        description: 같은 버전의 Release가 있어도 설치 파일을 다시 만듭니다
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -90,10 +96,60 @@ jobs:
           name: app-${{ matrix.platform }}
           path: ${{ matrix.out }}
 
+  # Publish installers when main's pubspec version has no Release yet.
+  release-needed:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      needed: ${{ steps.check.outputs.needed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: compare pubspec with Releases
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ github.event.inputs.force_release }}
+        run: |
+          set -euo pipefail
+          ver=$(grep -E '^version:' app/pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
+          if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "pubspec version is not x.y.z: ${ver:-empty}" >&2
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE" = "true" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "force: rebuilding v$ver"
+            exit 0
+          fi
+          if gh release view "v$ver" --json tagName --jq .tagName >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "Release v$ver already exists"
+            exit 0
+          fi
+          busy=0
+          for status in queued in_progress waiting; do
+            n=$(gh run list --workflow ci.yml --status "$status" --limit 30 --json headBranch \
+              --jq "[.[] | select(.headBranch==\"v$ver\")] | length")
+            busy=$((busy + n))
+          done
+          if [ "$busy" -gt 0 ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "Release build for v$ver is already running"
+            exit 0
+          fi
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+          echo "will publish v$ver"
+
   # Full installers (Node runtime + MinSync + server + app).
-  # A vX.Y.Z tag publishes them on the Release page; a manual run only keeps short-lived artifacts.
   package:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: release-needed
+    if: needs.release-needed.outputs.needed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -107,16 +163,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: tag matches app version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          ver=$(grep -E '^version:' app/pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
-          tag="${GITHUB_REF_NAME#v}"
-          if [ "$ver" != "$tag" ]; then
-            echo "tag v$tag does not match pubspec version $ver" >&2
-            exit 1
-          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -144,8 +190,8 @@ jobs:
           retention-days: 1
 
   release:
-    needs: package
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-needed, package]
+    if: needs.package.result == 'success' && needs.release-needed.outputs.needed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -158,6 +204,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.release-needed.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: |
             dist/*.dmg
             dist/*.zip
