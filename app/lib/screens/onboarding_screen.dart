@@ -19,7 +19,7 @@ class OnboardingScreen extends StatefulWidget {
 const _sources = [
   ('git', 'git 커밋', '코드 폴더 아래 모든 저장소의 커밋 (작성자별로 표시)'),
   ('agent-sessions', '에이전트 세션', 'Claude Code · Codex · Gemini CLI 대화: 요청→응답, 수정한 파일, 실행한 명령'),
-  ('shell-history', '터미널 명령 이력', 'zsh 히스토리 (비밀값은 가림). 시각 기록은 연결 탭에서 한 번 켭니다'),
+  ('shell-history', '터미널 명령 이력', 'zsh 히스토리 (비밀값은 가림). 명령을 친 시각까지 남기려면 연결 탭에서 한 번 켭니다'),
   ('transcripts', '회의 전사본', '전사 서비스 내보내기 폴더, 앱 안 녹음의 whisperX 전사'),
 ];
 

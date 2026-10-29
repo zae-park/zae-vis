@@ -96,7 +96,7 @@ class _CollectScreenState extends State<CollectScreen> {
         title: const Text('셸 설정에 한 줄 추가'),
         content: const Text('~/.zshrc(또는 \$ZDOTDIR/.zshrc) 끝에 다음 한 줄을 붙입니다. 이미 켜져 있으면 그대로 둡니다.\n\n'
             'setopt EXTENDED_HISTORY  # zaevis\n\n'
-            '새로 여는 터미널부터 명령마다 시각이 남고, 그때부터 수집됩니다. 이미 열려 있는 터미널의 명령은 그대로 시각 없이 남습니다.'),
+            '새로 여는 터미널부터 명령을 친 시각이 남습니다. 시각이 없는 명령도 수집한 날에 모입니다.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('추가')),
@@ -106,7 +106,7 @@ class _CollectScreenState extends State<CollectScreen> {
     if (ok != true || !mounted) return null;
     try {
       final r = await widget.api.enableShellTimestamps();
-      final note = r.changed ? '${r.file}에 추가했습니다. 새 터미널부터 모입니다.' : '${r.file}에 이미 켜져 있습니다. 새 터미널부터 모입니다.';
+      final note = r.changed ? '${r.file}에 추가했습니다. 새 터미널부터 시각이 남습니다.' : '${r.file}에 이미 켜져 있습니다. 새 터미널부터 시각이 남습니다.';
       if (mounted) toast(context, note);
       return note;
     } on ApiException catch (e) {
@@ -384,7 +384,7 @@ class _SourceCardState extends State<_SourceCard> {
                   icon: const Icon(Icons.schedule, size: 18),
                   label: const Text('시각 기록 켜기'),
                 ),
-                Text(_timestampsNote ?? 'zsh에 setopt EXTENDED_HISTORY를 켭니다 (~/.zshrc에 한 줄). 새 터미널부터 모입니다.', style: t.bodySmall?.copyWith(color: _timestampsNote == null ? null : scheme.primary)),
+                Text(_timestampsNote ?? '명령을 친 시각도 남기려면 켭니다. 켜지 않아도 명령은 모입니다.', style: t.bodySmall?.copyWith(color: _timestampsNote == null ? null : scheme.primary)),
               ]),
             ),
           for (final o in s.options)

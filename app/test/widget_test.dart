@@ -743,7 +743,7 @@ void main() {
     await tester.tap(find.text('추가'));
     await tester.pumpAndSettle();
     expect(posted.map((r) => '${r.method} ${r.url.path}').toList(), ['POST /api/sources/shell-history/enable-timestamps']);
-    expect(find.text('/h/.zshrc에 추가했습니다. 새 터미널부터 모입니다.'), findsWidgets);
+    expect(find.text('/h/.zshrc에 추가했습니다. 새 터미널부터 시각이 남습니다.'), findsWidgets);
   });
 
   testWidgets('onboarding: sources match today\'s connectors; after setup it lists what to do next and opens the app', (tester) async {

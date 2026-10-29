@@ -70,7 +70,7 @@ zaevis ingest 회의.txt 녹음.m4a
 |---|---|
 | `git` | 고른 폴더 아래 커밋. 줄마다 작성자 |
 | `agent-sessions` | Claude Code, Codex, Gemini, ChatGPT 내보내기. 요청과 응답, 수정 파일, 명령 |
-| `shell-history` | zsh 명령. 시각이 필요하면 **시각 기록 켜기**. 새 터미널부터 모입니다 |
+| `shell-history` | zsh 명령. 시각이 없어도 모으며, 친 시각까지 남기려면 **시각 기록 켜기** |
 | `transcripts` | 내보낸 전사와 녹음. 녹음은 whisperX |
 | 사용자 커넥터 | Markdown을 출력하는 명령. `{fromDate}` `{toDate}`를 날짜로 바꿉니다 |
 

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { redact } from "../src/redact.ts";
 import { parseGitLog } from "../src/sources/git.ts";
 import { renderSession, summarize, userText } from "../src/sources/claudeCode.ts";
-import { enableExtendedHistory, hasExtendedHistory, parseZshHistory, unmetafy, zshrcPath } from "../src/sources/shellHistory.ts";
+import { enableExtendedHistory, hasExtendedHistory, parseZshHistory, shellHistorySource, unmetafy, zshrcPath } from "../src/sources/shellHistory.ts";
 import { splitByDate } from "../src/sources/command.ts";
 import { isStale, labelFor, parseTime, renderPlist } from "../src/schedule.ts";
 
@@ -106,7 +106,30 @@ test("zsh history: extended format, continuation lines, metafied Korean", () => 
   const { entries, extended } = parseZshHistory(": 1792000000:0;git status\n: 1792000100:3;docker run \\\n  -it img\n");
   assert.ok(extended);
   assert.equal(entries[1].command, "docker run \n  -it img");
-  assert.equal(parseZshHistory("ls\ncd x\n").extended, false);
+  const plain = parseZshHistory("git status\ndocker run \\\n  -it img\n\nls\n");
+  assert.equal(plain.extended, false);
+  assert.equal(plain.entries.length, 3);
+  assert.equal(plain.entries[0].at, null);
+  assert.equal(plain.entries[1].command, "docker run \n  -it img");
+});
+
+test("shell-history: commands without a time are collected on the run day, and not again the next day", async () => {
+  const root = await mkdtemp(join(tmpdir(), "zv-hist-"));
+  const hist = join(root, "hist");
+  await writeFile(hist, "git status\ncd x\nmake build\ngit status\n");
+  const to = new Date(2026, 9, 29, 18, 0, 0);
+  const ctx = { from: new Date(2026, 9, 22), settings: { enabled: true, historyFile: hist }, config: { worklogDir: root } as never, log: () => {} };
+  const r = await shellHistorySource.collect({ ...ctx, to });
+  assert.deepEqual(Object.keys(r.days), ["2026-10-29"]);
+  assert.match(r.days["2026-10-29"], /make build/);
+  assert.doesNotMatch(r.days["2026-10-29"], /`cd x`/);
+  await mkdir(join(root, "sources", "shell-history"), { recursive: true });
+  await writeFile(join(root, "sources", "shell-history", "2026-10-29.md"), r.days["2026-10-29"]);
+  await writeFile(hist, "git status\nmake build\nnpm test\n");
+  const next = await shellHistorySource.collect({ ...ctx, to: new Date(2026, 9, 30, 18, 0, 0) });
+  assert.deepEqual(Object.keys(next.days), ["2026-10-30"]);
+  assert.match(next.days["2026-10-30"], /npm test/);
+  assert.doesNotMatch(next.days["2026-10-30"], /make build/);
 });
 
 test("command connector splits output by date markers", () => {
