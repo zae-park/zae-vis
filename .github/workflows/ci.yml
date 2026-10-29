@@ -90,9 +90,10 @@ jobs:
           name: app-${{ matrix.platform }}
           path: ${{ matrix.out }}
 
-  # Full installers (Node runtime + MinSync + server + app), on demand or for a tag.
+  # Full installers (Node runtime + MinSync + server + app).
+  # A vX.Y.Z tag publishes them on the Release page; a manual run only keeps short-lived artifacts.
   package:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +107,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          ver=$(grep -E '^version:' app/pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$ver" != "$tag" ]; then
+            echo "tag v$tag does not match pubspec version $ver" >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -130,3 +141,35 @@ jobs:
         with:
           name: installer-${{ runner.os }}
           path: ${{ matrix.artifact }}
+          retention-days: 1
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+      - name: delete installer artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("installer-")) | .id' \
+          | while read -r id; do
+              [ -n "$id" ] || continue
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/$id"
+            done
