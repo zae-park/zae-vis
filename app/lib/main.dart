@@ -139,6 +139,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   int _generation = 0; // bumped when the server address changes, to reload every screen
   final _searchFocus = FocusNode();
+  UpdateOffer? _update;
 
   WorklogApi get api => widget.api;
 
@@ -157,9 +158,13 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _checkUpdate(String local) async {
     final offer = await lookForUpdate(local);
     if (!mounted || offer == null) return;
-    final download = await showUpdateDialog(context, offer);
-    final url = offer.downloadUrl;
-    if (download && url != null && mounted) await widget.backend?.open(url);
+    setState(() => _update = offer);
+  }
+
+  Future<void> _openUpdate() async {
+    final url = _update?.downloadUrl;
+    setState(() => _update = null);
+    if (url != null) await widget.backend?.open(url);
   }
 
   /// The stored spec when the server answers, the platform default otherwise.
@@ -266,9 +271,20 @@ class _HomeShellState extends State<HomeShell> {
     final fab = _index == 1
         ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: const Text('한 줄 기록'))
         : null;
+    final scaffold = wide ? _wideScaffold(context, body, fab) : _narrowScaffold(context, body, fab);
+    return Stack(children: [
+      Positioned.fill(child: scaffold),
+      if (_update != null)
+        Positioned(
+          top: 12,
+          right: 16,
+          child: UpdateNotice(offer: _update!, onLater: () => setState(() => _update = null), onOpen: _openUpdate),
+        ),
+    ]);
+  }
 
-    if (wide) {
-      return Scaffold(
+  Widget _wideScaffold(BuildContext context, Widget body, Widget? fab) {
+    return Scaffold(
         floatingActionButton: fab,
         body: Row(children: [
           _Sidebar(
@@ -285,8 +301,10 @@ class _HomeShellState extends State<HomeShell> {
             ]),
           ),
         ]),
-      );
-    }
+    );
+  }
+
+  Widget _narrowScaffold(BuildContext context, Widget body, Widget? fab) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_dests[_index].label),

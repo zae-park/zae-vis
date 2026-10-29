@@ -202,12 +202,21 @@ class GlobalHotkey {
     return HotKey(key: p.key, modifiers: p.modifiers, scope: HotKeyScope.system);
   }
 
+  /// First-show size. The generated macOS window is 800×600, which clips the sidebar layout.
+  static const launchSize = Size(1360, 860);
+  static const minSize = Size(1120, 720);
+
   /// Call before runApp on desktop: clears stale registrations (hot reload) and prepares the window.
   static Future<void> prepare() async {
     if (!AppShortcuts.desktop) return;
     try {
       await windowManager.ensureInitialized();
       await hotKeyManager.unregisterAll();
+      const options = WindowOptions(size: launchSize, minimumSize: minSize, center: true, title: 'zaevis');
+      await windowManager.waitUntilReadyToShow(options, () async {
+        await windowManager.show();
+        await windowManager.focus();
+      });
     } catch (_) {
       // plugin missing (tests, unsupported build): the app still works without the hotkey
     }

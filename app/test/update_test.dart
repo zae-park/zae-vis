@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zaevis/update.dart';
 
@@ -56,5 +57,26 @@ void main() {
     }, os: 'macos', arch: 'x64');
     expect(intel, isNotNull);
     expect(intel!.downloadUrl, isNull);
+  });
+
+  testWidgets('a newer release is a corner card the user can dismiss or open', (tester) async {
+    var opened = false;
+    var later = false;
+    final offer = UpdateOffer(local: parseBuild('0.1.0+1')!, remote: parseBuild('0.1.0+2')!, downloadUrl: 'https://example/arm.dmg');
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: Align(alignment: Alignment.topRight, child: UpdateNotice(offer: offer, onLater: () => later = true, onOpen: () => opened = true))),
+    ));
+    expect(find.text('알림'), findsOneWidget);
+    expect(find.text('새 버전이 있습니다'), findsOneWidget);
+    expect(find.textContaining('0.1.0+2'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+
+    await tester.tap(find.text('받기'));
+    await tester.pump();
+    expect(opened, isTrue);
+
+    await tester.tap(find.byTooltip('나중에'));
+    await tester.pump();
+    expect(later, isTrue);
   });
 }

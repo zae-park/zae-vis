@@ -99,18 +99,56 @@ Future<UpdateOffer?> lookForUpdate(String localVersion, {http.Client? client}) a
   }
 }
 
-Future<bool> showUpdateDialog(BuildContext context, UpdateOffer offer) async {
-  final download = offer.downloadUrl != null;
-  final go = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('새 버전이 있습니다'),
-      content: Text('설치된 버전은 ${offer.local.label}이고, 최신은 ${offer.remote.label}입니다.'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('나중에')),
-        if (download) FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('받기')),
-      ],
-    ),
-  );
-  return go ?? false;
+/// Corner card for a newer release. Stays until the user dismisses it or opens the installer.
+class UpdateNotice extends StatelessWidget {
+  const UpdateNotice({super.key, required this.offer, required this.onLater, required this.onOpen});
+  final UpdateOffer offer;
+  final VoidCallback onLater;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    final download = offer.downloadUrl != null;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      elevation: 3,
+      shadowColor: Colors.black26,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Icon(Icons.notifications_none, size: 18, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text('알림', style: t.labelMedium?.copyWith(color: scheme.primary)),
+              const Spacer(),
+              IconButton(
+                tooltip: '나중에',
+                visualDensity: VisualDensity.compact,
+                onPressed: onLater,
+                icon: const Icon(Icons.close, size: 18),
+              ),
+            ]),
+            Text('새 버전이 있습니다', style: t.titleSmall),
+            const SizedBox(height: 4),
+            Text('설치된 버전 ${offer.local.label}\n최신 ${offer.remote.label}', style: t.bodySmall),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: download
+                  ? FilledButton(onPressed: onOpen, child: const Text('받기'))
+                  : Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }
