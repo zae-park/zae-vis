@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 
 import 'update_arch_stub.dart' if (dart.library.io) 'update_arch_io.dart';
 
+export 'folder_ack_stub.dart' if (dart.library.io) 'folder_ack_io.dart';
+
 const releaseApi = 'https://api.github.com/repos/zae-park/zae-vis/releases/latest';
 
 class AppBuild {
@@ -175,6 +177,49 @@ class UpdateNotice extends StatelessWidget {
                     ? FilledButton(onPressed: onUpdate, child: const Text('업데이트'))
                     : Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
               ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Corner card for the macOS folder prompts the 18:30 scan used to raise one by one.
+class AccessNotice extends StatelessWidget {
+  const AccessNotice({super.key, required this.onApply});
+  final VoidCallback onApply;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      elevation: 3,
+      shadowColor: Colors.black26,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Icon(Icons.notifications_none, size: 18, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text('알림', style: t.labelMedium?.copyWith(color: scheme.primary)),
+            ]),
+            const SizedBox(height: 6),
+            Text('매일 18:30에 폴더 접근을 묻습니다', style: t.titleSmall),
+            const SizedBox(height: 4),
+            Text('데스크탑, 문서, 다운로드, 사진, 음악, 보관함을 저장소 탐색이 하나씩 열고 있습니다. 커밋을 모으는 데는 필요 없습니다.', style: t.bodySmall),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(onPressed: onApply, child: const Text('한 번에 빼기')),
+            ),
           ]),
         ),
       ),

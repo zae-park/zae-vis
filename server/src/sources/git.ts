@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { expandHome } from "../config.ts";
 import { redact } from "../redact.ts";
@@ -26,9 +27,24 @@ export function gitBinary(): string | null {
 
 const SKIP_DIRS = new Set(["node_modules", ".venv", "venv", "build", "dist", ".dart_tool", "Pods", "__pycache__"]);
 
-export async function findRepos(root: string, depth: number): Promise<string[]> {
+/** Home folders macOS asks permission for, one dialog at a time, when a scan enters them. */
+export const GUARDED_HOME_DIRS = ["Desktop", "Documents", "Downloads", "Library", "Pictures", "Movies", "Music"];
+
+/** True when [dir] is one of [GUARDED_HOME_DIRS] under [home], or a Photos library. */
+export function isGuardedHomeDir(dir: string, home: string): boolean {
+  const rel = relative(resolve(home), resolve(dir));
+  if (!rel || rel === "." || rel.startsWith("..") || isAbsolute(rel)) return false;
+  const top = rel.split(sep)[0];
+  if (GUARDED_HOME_DIRS.some((g) => g.toLowerCase() === top.toLowerCase())) return true;
+  return rel.toLowerCase().includes(".photoslibrary");
+}
+
+export async function findRepos(root: string, depth: number, opts: { home?: string; skipGuarded?: boolean } = {}): Promise<string[]> {
+  const home = opts.home ?? homedir();
+  const skipGuarded = opts.skipGuarded ?? process.platform === "darwin";
   const out: string[] = [];
   async function walk(dir: string, d: number): Promise<void> {
+    if (skipGuarded && resolve(dir) !== resolve(root) && isGuardedHomeDir(dir, home)) return;
     if (existsSync(join(dir, ".git"))) out.push(dir);
     if (d >= depth) return;
     let entries;
@@ -73,7 +89,7 @@ export function parseGitLog(repo: string, out: string): Commit[] {
 export const gitSource: Source = {
   name: "git",
   title: "git 커밋",
-  description: "저장소 상위 폴더 아래 모든 git 저장소의 커밋을 작성자와 함께 모읍니다.",
+  description: "저장소 상위 폴더 아래 git 저장소의 커밋을 작성자와 함께 모읍니다. macOS가 접근을 묻는 데스크탑·문서·다운로드·사진·음악·보관함에는 들어가지 않습니다.",
   options: [
     { key: "reposRoot", label: "저장소 상위 폴더", kind: "path" },
     { key: "depth", label: "탐색 깊이", kind: "number" },

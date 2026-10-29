@@ -143,6 +143,7 @@ class _HomeShellState extends State<HomeShell> {
   UpdatePhase _updatePhase = UpdatePhase.idle;
   double? _updateProgress;
   String? _updateError;
+  bool _folderNotice = false;
 
   WorklogApi get api => widget.api;
 
@@ -152,10 +153,18 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     if (_native) _registerHotkey();
-    final local = widget.backend?.buildVersion;
+    final backend = widget.backend;
+    final local = backend?.buildVersion;
     if (local != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate(local));
+      if (!folderSkipAcked(backend!.home)) _folderNotice = true;
     }
+  }
+
+  Future<void> _skipGuardedFolders() async {
+    final home = widget.backend?.home;
+    if (home != null) await ackFolderSkip(home);
+    if (mounted) setState(() => _folderNotice = false);
   }
 
   Future<void> _checkUpdate(String local) async {
@@ -302,18 +311,23 @@ class _HomeShellState extends State<HomeShell> {
     final scaffold = wide ? _wideScaffold(context, body, fab) : _narrowScaffold(context, body, fab);
     return Stack(children: [
       Positioned.fill(child: scaffold),
-      if (_update != null)
+      if (_update != null || _folderNotice)
         Positioned(
           top: 12,
           right: 16,
-          child: UpdateNotice(
-            offer: _update!,
-            phase: _updatePhase,
-            progress: _updateProgress,
-            error: _updateError,
-            onLater: () => setState(() => _update = null),
-            onUpdate: _applyUpdate,
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (_update != null)
+              UpdateNotice(
+                offer: _update!,
+                phase: _updatePhase,
+                progress: _updateProgress,
+                error: _updateError,
+                onLater: () => setState(() => _update = null),
+                onUpdate: _applyUpdate,
+              ),
+            if (_update != null && _folderNotice) const SizedBox(height: 8),
+            if (_folderNotice) AccessNotice(onApply: _skipGuardedFolders),
+          ]),
         ),
     ]);
   }

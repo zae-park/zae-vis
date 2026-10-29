@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zaevis/folder_ack_io.dart';
 import 'package:zaevis/update.dart';
 
 void main() {
@@ -88,5 +91,23 @@ void main() {
     expect(find.text('받는 중 40%'), findsOneWidget);
     expect(find.text('업데이트'), findsNothing);
     expect(tester.widget<IconButton>(find.byType(IconButton)).onPressed, isNull);
+  });
+
+  testWidgets('the folder notice offers one action for every privacy folder', (tester) async {
+    var applied = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AccessNotice(onApply: () => applied = true))));
+    expect(find.text('매일 18:30에 폴더 접근을 묻습니다'), findsOneWidget);
+    expect(find.textContaining('데스크탑, 문서, 다운로드'), findsOneWidget);
+    await tester.tap(find.text('한 번에 빼기'));
+    await tester.pump();
+    expect(applied, isTrue);
+  });
+
+  test('acking the folder notice is remembered', () async {
+    final home = Directory.systemTemp.createTempSync('zv-ack-').path;
+    expect(folderSkipAcked(home), isFalse);
+    await ackFolderSkip(home);
+    expect(folderSkipAcked(home), isTrue);
+    Directory(home).deleteSync(recursive: true);
   });
 }

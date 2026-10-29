@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redact } from "../src/redact.ts";
-import { parseGitLog } from "../src/sources/git.ts";
+import { findRepos, isGuardedHomeDir, parseGitLog } from "../src/sources/git.ts";
 import { renderSession, summarize, userText } from "../src/sources/claudeCode.ts";
 import { enableExtendedHistory, hasExtendedHistory, parseZshHistory, shellHistorySource, unmetafy, zshrcPath } from "../src/sources/shellHistory.ts";
 import { splitByDate } from "../src/sources/command.ts";
@@ -34,6 +34,18 @@ test("parseGitLog reads subject and shortstat", () => {
   assert.equal(c[0].author, "박재");
   assert.equal(c.length, 2);
   assert.deepEqual([c[0].files, c[0].ins, c[0].del, c[1].files], [3, 40, 2, 0]);
+});
+
+test("git scan skips the home folders macOS asks permission for", async () => {
+  const home = await mkdtemp(join(tmpdir(), "zv-guard-"));
+  await mkdir(join(home, "Desktop", "hidden", ".git"), { recursive: true });
+  await mkdir(join(home, "Documents", "notes", ".git"), { recursive: true });
+  await mkdir(join(home, "Pictures", "Photos Library.photoslibrary"), { recursive: true });
+  await mkdir(join(home, "code", "real", ".git"), { recursive: true });
+  assert.equal(isGuardedHomeDir(join(home, "Downloads"), home), true);
+  assert.equal(isGuardedHomeDir(join(home, "code"), home), false);
+  const repos = await findRepos(home, 3, { home, skipGuarded: true });
+  assert.deepEqual(repos, [join(home, "code", "real")]);
 });
 
 test("git source collects every author's commits from a real repo, grouped by day", async () => {
