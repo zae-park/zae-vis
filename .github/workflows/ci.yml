@@ -5,11 +5,6 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      force_release:
-        description: 같은 버전의 Release가 있어도 설치 파일을 다시 만듭니다
-        type: boolean
-        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -96,24 +91,18 @@ jobs:
           name: app-${{ matrix.platform }}
           path: ${{ matrix.out }}
 
-  # Publish installers when main's pubspec version has no Release yet.
+  # Every main push rebuilds installers for the pubspec version and replaces that Release.
   release-needed:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
     outputs:
       needed: ${{ steps.check.outputs.needed }}
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: compare pubspec with Releases
+      - name: read pubspec version
         id: check
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FORCE: ${{ github.event.inputs.force_release }}
         run: |
           set -euo pipefail
           ver=$(grep -E '^version:' app/pubspec.yaml | sed -E 's/version: *([0-9.]+).*/\1/')
@@ -122,27 +111,6 @@ jobs:
             exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
-          if [ "$FORCE" = "true" ]; then
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-            echo "force: rebuilding v$ver"
-            exit 0
-          fi
-          if gh release view "v$ver" --json tagName --jq .tagName >/dev/null 2>&1; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-            echo "Release v$ver already exists"
-            exit 0
-          fi
-          busy=0
-          for status in queued in_progress waiting; do
-            n=$(gh run list --workflow ci.yml --status "$status" --limit 30 --json headBranch \
-              --jq "[.[] | select(.headBranch==\"v$ver\")] | length")
-            busy=$((busy + n))
-          done
-          if [ "$busy" -gt 0 ]; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-            echo "Release build for v$ver is already running"
-            exit 0
-          fi
           echo "needed=true" >> "$GITHUB_OUTPUT"
           echo "will publish v$ver"
 
@@ -202,6 +170,14 @@ jobs:
           pattern: installer-*
           path: dist
           merge-multiple: true
+      - name: drop previous release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ needs.release-needed.outputs.version }}
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${TAG}" || true
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.release-needed.outputs.version }}
