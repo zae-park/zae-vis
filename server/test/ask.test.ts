@@ -234,6 +234,8 @@ test("ask: auto retries the next agent only on quota; a pinned agent and other f
   assert.equal(quotaReason("모델이 빈 답을 돌려줬습니다."), null);
   assert.equal(quotaReason("[시간 초과]"), null);
   assert.match(quotaReason("progress\nYou have hit your usage limit") ?? "", /hit your usage limit/);
+  assert.match(quotaReason("You've hit your weekly limit · resets 7am (Asia/Seoul)") ?? "", /weekly limit/);
+  assert.match(quotaReason("You've hit your session limit · resets 7:20pm (Asia/Seoul)") ?? "", /session limit/);
   assert.match(quotaReason("OpenRouter HTTP 429: rate limit") ?? "", /429/);
 
   const calls: string[] = [];
@@ -269,6 +271,47 @@ test("ask: auto retries the next agent only on quota; a pinned agent and other f
   assert.match(!stopped.ok ? stopped.message : "", /segfault/);
   assert.equal(!stopped.ok ? stopped.rail?.find((s) => s.id === "codex")?.state : "", "error");
   assert.deepEqual(calls, ["/bin/claude", "/bin/codex"]);
+});
+
+test("ask: a weekly-limit line printed as the answer still falls through to Cursor", async () => {
+  const cursor: AgentInfo = { id: "cursor", title: "Cursor", available: true, detail: "1", bin: "/bin/cursor-agent", loggedIn: true };
+  const calls: string[] = [];
+  const exec: Exec = async (bin) => {
+    calls.push(bin);
+    if (bin.endsWith("claude")) return { ok: true, stdout: "You've hit your weekly limit · resets 7am (Asia/Seoul)", stderr: "" };
+    return { ok: true, stdout: "Cursor가 쓴 답 [1]", stderr: "" };
+  };
+  const hopped = await new AskRunner({ exec }).ask("q", {
+    search: fakeSearch,
+    worklogDir: "/w",
+    agent: claude,
+    agents: [claude, cursor],
+    setting: { agent: "auto", model: "" },
+  });
+  assert.equal(hopped.ok, true);
+  if (!hopped.ok) return;
+  assert.equal(hopped.result.agent, "cursor");
+  assert.equal(hopped.result.answer, "Cursor가 쓴 답 [1]");
+  assert.equal(hopped.result.rail.find((s) => s.id === "claude")?.state, "quota");
+  assert.equal(hopped.result.rail.find((s) => s.id === "cursor")?.state, "wrote");
+  assert.deepEqual(calls, ["/bin/claude", "/bin/cursor-agent"]);
+
+  calls.length = 0;
+  const kept: Exec = async (bin) => {
+    calls.push(bin);
+    return { ok: true, stdout: `주간 한도를 weekly limit 이라고 적습니다 [1]. ${"가".repeat(200)}`, stderr: "" };
+  };
+  const stayed = await new AskRunner({ exec: kept }).ask("q", {
+    search: fakeSearch,
+    worklogDir: "/w",
+    agent: claude,
+    agents: [claude, cursor],
+    setting: { agent: "auto", model: "" },
+  });
+  assert.equal(stayed.ok, true);
+  if (!stayed.ok) return;
+  assert.equal(stayed.result.agent, "claude");
+  assert.deepEqual(calls, ["/bin/claude"]);
 });
 
 test("ask: GET /api/ask/:id returns a conversation and DELETE removes it", async () => {

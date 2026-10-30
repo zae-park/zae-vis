@@ -16,7 +16,7 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
 import { spawnBin } from "./spawnbin.ts";
-import { agentsInOrder, fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
+import { agentsInOrder, fallbackCandidates, plannedRail, replyQuota, withStop, type RailStop } from "./rail.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
 import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
 import { Worklog } from "./worklog.ts";
@@ -505,7 +505,7 @@ export class DigestRunner {
         } catch (err) {
           r = { ok: false, output: (err as Error).message };
         }
-        const quota = !r.ok ? quotaReason(r.output) : null;
+        const quota = replyQuota(r.output, "", r.ok);
         if (before && quota && more) {
           const diff = await diffSnapshot(cfg.worklogDir, before);
           const wrote = !isEmptyProposal(diff) || diff.removedLines.length > 0 || diff.stateAfter != null;

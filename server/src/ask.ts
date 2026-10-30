@@ -21,7 +21,7 @@ import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
 import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
-import { fallbackCandidates, plannedRail, quotaReason, withStop, type RailStop } from "./rail.ts";
+import { fallbackCandidates, plannedRail, quotaReason, replyQuota, withStop, type RailStop } from "./rail.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
 export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string; conversationId: string; turn: number; rail?: RailStop[] };
@@ -321,7 +321,7 @@ export async function generateText(agent: AgentInfo, prompt: string, model: stri
     let text = r.stdout;
     if (outFile) text = await readFile(outFile, "utf8").catch(() => r.stdout);
     text = cleanAnswer(text);
-    const quota = !r.ok ? quotaReason(`${r.stderr}\n${r.stdout}`) : null;
+    const quota = replyQuota(text, `${r.stderr}\n${r.stdout}`, r.ok);
     if (quota) throw new Error(quota);
     if (!r.ok && !text) throw new Error(`${agent.title} 실행 실패: ${(r.stderr || r.stdout).split("\n").slice(-3).join(" / ") || "출력 없음"}`);
     if (!text) throw new Error(`${agent.title}가 답을 돌려주지 않았습니다. ${r.stderr.split("\n").slice(-2).join(" / ")}`.trim());

@@ -67,7 +67,7 @@ export type RailStop = {
   reason?: string;
 };
 
-const QUOTA = /rate[\s-]?limit|usage limit|\bquota\b|insufficient_quota|\b429\b|http 402|\b402\b|too many requests|resource_exhausted|hit your (usage |rate )?limit|out of (credits|extra usage)|credit balance|spending cap|exceeded your|extra usage/i;
+const QUOTA = /rate[\s-]?limit|usage limit|session limit|weekly limit|\bquota\b|insufficient_quota|\b429\b|http 402|\b402\b|too many requests|resource_exhausted|hit your(?: [\w-]+){0,3} limit|out of (credits|extra usage)|credit balance|spending cap|exceeded your|extra usage/i;
 
 /** The CLI's own line when `text` is a quota or rate-limit failure, else null. Login and timeout are not quota. */
 export function quotaReason(text: string): string | null {
@@ -75,6 +75,18 @@ export function quotaReason(text: string): string | null {
   if (!QUOTA.test(flat)) return null;
   const line = flat.split("\n").map((s) => s.trim()).filter(Boolean).reverse().find((s) => QUOTA.test(s)) ?? flat.trim();
   return line.replace(/\s+/g, " ").slice(0, 80);
+}
+
+/**
+ * Claude exits 0 and prints "You've hit your weekly limit · resets …" as the whole answer.
+ * A real answer is longer or cites [n], so that text is left alone. A non-zero exit is quota
+ * whenever the output matches, whatever its length.
+ */
+export function replyQuota(stdout: string, stderr: string, ok: boolean): string | null {
+  if (!ok) return quotaReason(`${stderr}\n${stdout}`);
+  const body = stdout.trim();
+  if (!body || body.length > 240 || /\[\d+\]/.test(body)) return null;
+  return quotaReason(body);
 }
 
 /** Who a run will actually call, in the user's order. Pinned → that one agent. Auto → every usable agent not skipped. */
