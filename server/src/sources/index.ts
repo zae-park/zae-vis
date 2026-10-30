@@ -66,6 +66,8 @@ export type CollectStep = {
   title: string;
   state: "waiting" | "running" | "done" | "failed";
   line?: string;
+  /** 0–1 while a transcription phase reports a percent. Null means the phase is running without a number yet. */
+  fraction?: number | null;
   note?: string;
   error?: string;
   /** When this step started running. */
@@ -77,7 +79,7 @@ export type CollectProgress = {
   startedAt: string;
   beat: string;
   outputAt: string;
-  current: { name: string; title: string; line: string } | null;
+  current: { name: string; title: string; line: string; fraction: number | null } | null;
   steps: CollectStep[];
 };
 
@@ -116,11 +118,18 @@ export async function collect(cfg: AppConfig, opts: CollectOptions = {}): Promis
     progress.beat = stamp();
     publish();
   };
-  const note = (line: string) => {
+  const note = (line: string, fraction?: number | null) => {
     progress.beat = progress.outputAt = stamp();
-    if (progress.current) progress.current.line = line;
+    const next = fraction === undefined ? (progress.current?.fraction ?? null) : fraction;
+    if (progress.current) {
+      progress.current.line = line;
+      progress.current.fraction = next;
+    }
     const step = progress.steps.find((s) => s.name === progress.current?.name);
-    if (step) step.line = line;
+    if (step) {
+      step.line = line;
+      if (fraction !== undefined) step.fraction = fraction;
+    }
     log(line);
     publish();
   };
@@ -135,7 +144,8 @@ export async function collect(cfg: AppConfig, opts: CollectOptions = {}): Promis
     step.state = "running";
     step.since = stamp();
     step.line = `${source.title} 수집 중`;
-    progress.current = { name: source.name, title: source.title, line: step.line };
+    step.fraction = null;
+    progress.current = { name: source.name, title: source.title, line: step.line, fraction: null };
     beat();
     try {
       const { days, note: summary } = await source.collect({ from, to: now, settings, config: cfg, log: note, tick: beat });

@@ -23,6 +23,9 @@ Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder
     builder: (_) => _RecordFloater(
       api: api,
       recorder: recorder ?? PluginRecorder(),
+      onQueued: (saved) {
+        if (!completer.isCompleted) completer.complete(saved);
+      },
       onDone: (saved) {
         entry.remove();
         _recordOpen = null;
@@ -35,16 +38,20 @@ Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder
 }
 
 class _RecordFloater extends StatefulWidget {
-  const _RecordFloater({required this.api, required this.recorder, required this.onDone});
+  const _RecordFloater({required this.api, required this.recorder, required this.onQueued, required this.onDone});
   final WorklogApi api;
   final Recorder recorder;
+  /// The file is in the inbox. The floater stays up afterwards while whisperX runs.
+  final void Function(String saved) onQueued;
   final void Function(String? saved) onDone;
 
   @override
   State<_RecordFloater> createState() => _RecordFloaterState();
 }
 
-enum _Phase { idle, recording, uploading }
+enum _Phase { idle, recording, uploading, transcribing }
+
+enum _Job { gone, active, failed }
 
 class _RecordFloaterState extends State<_RecordFloater> {
   _Phase _phase = _Phase.idle;
@@ -55,6 +62,10 @@ class _RecordFloaterState extends State<_RecordFloater> {
   Duration _elapsed = Duration.zero;
   double _level = 0;
   String? _error;
+  String? _saved;
+  String _status = '전사 준비 중';
+  double? _fraction;
+  var _closed = false;
   final _stackKey = GlobalKey();
   final _cardKey = GlobalKey();
   bool _moved = false;
@@ -102,7 +113,26 @@ class _RecordFloaterState extends State<_RecordFloater> {
     setState(() => _phase = _Phase.uploading);
     try {
       final saved = await widget.api.uploadAudio(name: name, size: bytes.length, bytes: bytes);
-      if (mounted) widget.onDone(saved);
+      if (!mounted) return;
+      widget.onQueued(saved);
+      setState(() {
+        _phase = _Phase.transcribing;
+        _saved = saved;
+        _status = '전사 준비 중';
+        _fraction = null;
+      });
+      final job = await _readJob(saved);
+      if (!mounted || _closed) return;
+      if (job != _Job.active) {
+        if (job == _Job.gone) _close(saved);
+        return;
+      }
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) async {
+        final next = await _readJob(saved);
+        if (!mounted || _closed) return;
+        if (next == _Job.gone) _close(saved);
+        if (next == _Job.failed) _tick?.cancel();
+      });
     } on ApiException catch (e) {
       setState(() {
         _phase = _Phase.idle;
@@ -111,12 +141,46 @@ class _RecordFloaterState extends State<_RecordFloater> {
     }
   }
 
+  /// gone: nothing left to wait for. active: still queued or running. failed: the floater stays so the error can be read.
+  Future<_Job> _readJob(String saved) async {
+    try {
+      final inbox = await widget.api.inbox();
+      final match = inbox.jobs.where((j) => j.file == saved);
+      final job = match.isEmpty ? null : match.first;
+      if (job == null || job.state == 'done') return _Job.gone;
+      final current = job;
+      if (current.state == 'failed') {
+        if (mounted) setState(() {
+          _status = '전사 실패';
+          _error = current.error ?? '전사에 실패했습니다';
+          _fraction = null;
+        });
+        return _Job.failed;
+      }
+      if (mounted) setState(() {
+        _status = current.line ?? (current.state == 'queued' ? '전사 대기' : '전사 중…');
+        _fraction = current.fraction;
+        _error = null;
+      });
+      return _Job.active;
+    } catch (_) {
+      return _Job.gone;
+    }
+  }
+
+  void _close(String? saved) {
+    if (_closed) return;
+    _closed = true;
+    _tick?.cancel();
+    widget.onDone(saved);
+  }
+
   Future<void> _cancel() async {
     _tick?.cancel();
     if (_phase == _Phase.recording) await widget.recorder.stop();
     unawaited(_sub?.cancel() ?? Future.value());
     _sub = null;
-    if (mounted) widget.onDone(null);
+    if (mounted) _close(_phase == _Phase.transcribing ? _saved : null);
   }
 
   void _drag(DragUpdateDetails details) {
@@ -141,6 +205,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
     String two(int n) => n.toString().padLeft(2, '0');
     final mmss = '${two(_elapsed.inMinutes)}:${two(_elapsed.inSeconds % 60)}';
     final recording = _phase == _Phase.recording;
+    final transcribing = _phase == _Phase.transcribing;
     return SizedBox.expand(
       key: _stackKey,
       child: Stack(children: [
@@ -171,14 +236,23 @@ class _RecordFloaterState extends State<_RecordFloater> {
                   const Spacer(),
                   IconButton(tooltip: '닫기', visualDensity: VisualDensity.compact, onPressed: _phase == _Phase.uploading ? null : _cancel, icon: const Icon(Icons.close, size: 18)),
                 ]),
-                Text(recording ? mmss : (_phase == _Phase.uploading ? '올리는 중…' : '눌러서 녹음 시작'), style: t.titleSmall),
+                Text(
+                  recording
+                      ? mmss
+                      : transcribing
+                          ? _status
+                          : (_phase == _Phase.uploading ? '올리는 중…' : '눌러서 녹음 시작'),
+                  style: t.titleSmall,
+                ),
                 const SizedBox(height: 8),
-                LinearProgressIndicator(value: recording ? _level : 0, minHeight: 6, borderRadius: BorderRadius.circular(3)),
+                LinearProgressIndicator(value: recording ? _level : (transcribing ? _fraction : 0), minHeight: 6, borderRadius: BorderRadius.circular(3)),
                 const SizedBox(height: 8),
                 Text(
                   recording
                       ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
-                      : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
+                      : transcribing
+                          ? '창을 닫아도 전사는 이어집니다. 음성 인식, 시간 맞추기, 말한 사람 구분 순입니다.'
+                          : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
                   style: t.bodySmall,
                 ),
                 if (_error != null) ...[
@@ -187,13 +261,14 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 ],
                 const SizedBox(height: 10),
                 Row(children: [
-                  TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: const Text('취소')),
+                  TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: Text(transcribing ? '닫기' : '취소')),
                   const Spacer(),
-                  FilledButton.icon(
-                    onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
-                    icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record, size: 18),
-                    label: Text(recording ? '중지하고 올리기' : '녹음 시작'),
-                  ),
+                  if (!transcribing)
+                    FilledButton.icon(
+                      onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
+                      icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record, size: 18),
+                      label: Text(recording ? '중지하고 올리기' : '녹음 시작'),
+                    ),
                 ]),
               ]),
             ),

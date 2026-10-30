@@ -500,12 +500,13 @@ class SourceInfo {
 }
 
 class CollectStep {
-  const CollectStep({required this.name, required this.title, required this.state, this.line, this.note, this.error, this.since});
+  const CollectStep({required this.name, required this.title, required this.state, this.line, this.fraction, this.note, this.error, this.since});
   factory CollectStep.fromJson(Json j) => CollectStep(
         name: _str(j['name']),
         title: _str(j['title']),
         state: _str(j['state']),
         line: _strOrNull(j['line']),
+        fraction: j['fraction'] is num ? (j['fraction'] as num).toDouble() : null,
         note: _strOrNull(j['note']),
         error: _strOrNull(j['error']),
         since: DateTime.tryParse(_str(j['since'])),
@@ -515,6 +516,8 @@ class CollectStep {
   /// waiting | running | done | failed
   final String state;
   final String? line;
+  /// 0–1 while whisperX reports a percent for this step.
+  final double? fraction;
   final String? note;
   final String? error;
   final DateTime? since;
@@ -522,7 +525,7 @@ class CollectStep {
 
 /// Live collect run. [beat] moves while the server is still on this run; [outputAt] moves only when a source prints a line.
 class CollectProgress {
-  const CollectProgress({required this.startedAt, required this.beat, required this.outputAt, this.currentLine, this.steps = const []});
+  const CollectProgress({required this.startedAt, required this.beat, required this.outputAt, this.currentLine, this.fraction, this.steps = const []});
   factory CollectProgress.fromJson(Json j) {
     final current = j['current'];
     return CollectProgress(
@@ -530,6 +533,7 @@ class CollectProgress {
       beat: DateTime.tryParse(_str(j['beat'])) ?? DateTime.now(),
       outputAt: DateTime.tryParse(_str(j['outputAt'])) ?? DateTime.now(),
       currentLine: current is Json ? _strOrNull(current['line']) : null,
+      fraction: current is Json && current['fraction'] is num ? (current['fraction'] as num).toDouble() : null,
       steps: (j['steps'] is List ? j['steps'] as List : const <Object?>[]).whereType<Json>().map(CollectStep.fromJson).toList(),
     );
   }
@@ -537,6 +541,8 @@ class CollectProgress {
   final DateTime beat;
   final DateTime outputAt;
   final String? currentLine;
+  /// 0–1 for the step running now, when whisperX has reported a percent.
+  final double? fraction;
   final List<CollectStep> steps;
 }
 
@@ -601,17 +607,22 @@ class InboxFile {
 }
 
 class TranscribeJob {
-  const TranscribeJob({required this.file, required this.state, this.result, this.error});
+  const TranscribeJob({required this.file, required this.state, this.result, this.error, this.line, this.fraction});
   factory TranscribeJob.fromJson(Json j) => TranscribeJob(
         file: _str(j['file']),
         state: _str(j['state']),
         result: _strOrNull(j['result']),
         error: _strOrNull(j['error']),
+        line: _strOrNull(j['line']),
+        fraction: j['fraction'] is num ? (j['fraction'] as num).toDouble() : null,
       );
   final String file;
   final String state; // queued | running | done | failed
   final String? result;
   final String? error;
+  /// "음성 인식 45%" while this file is being transcribed.
+  final String? line;
+  final double? fraction;
 }
 
 class Inbox {

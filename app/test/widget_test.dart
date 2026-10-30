@@ -156,10 +156,10 @@ WorklogApi _fakeApi() => WorklogApi(
                   'startedAt': '2026-10-30T05:24:00Z',
                   'beat': DateTime.now().toUtc().toIso8601String(),
                   'outputAt': '2026-10-30T05:24:05Z',
-                  'current': {'name': 'transcripts', 'title': '회의 전사본', 'line': '전사 중: 2026-10-30_1424_녹음.wav'},
+                  'current': {'name': 'transcripts', 'title': '회의 전사본', 'line': '전사 1/1 · 2026-10-30_1424_녹음.wav · 음성 인식 42%', 'fraction': 0.42},
                   'steps': [
                     {'name': 'git', 'title': 'git 커밋', 'state': 'done'},
-                    {'name': 'transcripts', 'title': '회의 전사본', 'state': 'running', 'since': '2026-10-30T05:24:10Z', 'line': '전사 중: 2026-10-30_1424_녹음.wav'},
+                    {'name': 'transcripts', 'title': '회의 전사본', 'state': 'running', 'since': '2026-10-30T05:24:10Z', 'line': '전사 1/1 · 2026-10-30_1424_녹음.wav · 음성 인식 42%', 'fraction': 0.42},
                     {'name': 'shell-history', 'title': '셸 명령 이력', 'state': 'waiting'},
                   ],
                 },
@@ -780,7 +780,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.textContaining('진행 중'), findsOneWidget);
-    expect(find.textContaining('전사 중: 2026-10-30_1424_녹음.wav'), findsWidgets);
+    expect(find.textContaining('음성 인식 42%'), findsWidgets);
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, closeTo(0.42, 0.001));
     expect(find.text('git 커밋'), findsWidgets);
     expect(find.textContaining('출력 없이'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());

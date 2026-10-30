@@ -254,7 +254,12 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
           await mkdir(audioDir, { recursive: true });
           const staged = freePath(audioDir, safeStem(basename(f)), ext);
           await copyFile(f, staged); // the original stays where it was
-          const dest = await transcribeFile(staged, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo") });
+          const dest = await transcribeFile(staged, cfg.worklogDir, {
+            language: String(ts.language ?? "ko"),
+            model: String(ts.model ?? "large-v3-turbo"),
+            onProgress: (p) => process.stderr.write(`\r${p.line}   `),
+          });
+          process.stderr.write("\n");
           out.push(`${c.green("✓")} ${basename(dest)}`);
         } else {
           out.push(c.yellow(`건너뜀 (지원하지 않는 형식): ${f}`));

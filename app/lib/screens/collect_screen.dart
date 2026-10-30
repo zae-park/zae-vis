@@ -285,6 +285,7 @@ class _InboxCard extends StatelessWidget {
           for (final j in inbox.jobs.take(5))
             ListTile(
               dense: true,
+              isThreeLine: j.state == 'running',
               contentPadding: EdgeInsets.zero,
               leading: switch (j.state) {
                 'running' => const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -293,7 +294,13 @@ class _InboxCard extends StatelessWidget {
                 _ => const Icon(Icons.schedule),
               },
               title: Text(j.file),
-              subtitle: Text(j.error ?? j.result ?? (j.state == 'queued' ? '전사 대기' : '전사 중…'), maxLines: 2),
+              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(j.error ?? j.line ?? j.result ?? (j.state == 'queued' ? '전사 대기' : '전사 중…'), maxLines: 2),
+                if (j.state == 'running') ...[
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(value: j.fraction, minHeight: 4, borderRadius: BorderRadius.circular(2)),
+                ],
+              ]),
             ),
           group('전사본', inbox.transcripts),
           group('전사 대기 녹음', inbox.audio),
@@ -368,6 +375,10 @@ class _CollectLiveState extends State<_CollectLive> {
       padding: const EdgeInsets.only(top: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(headline, style: t.titleSmall?.copyWith(color: stale ? scheme.error : null)),
+        if (p.fraction != null || (p.currentLine?.startsWith('전사 ') ?? false)) ...[
+          const SizedBox(height: 6),
+          LinearProgressIndicator(value: p.fraction, minHeight: 6, borderRadius: BorderRadius.circular(3)),
+        ],
         if (p.currentLine != null) Text(p.currentLine!, style: t.bodySmall),
         if (note.isNotEmpty) Text(note, style: t.bodySmall),
         const SizedBox(height: 6),

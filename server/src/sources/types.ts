@@ -9,7 +9,8 @@ export type CollectContext = {
   to: Date;
   settings: SourceSettings;
   config: AppConfig;
-  log: (msg: string) => void;
+  /** [fraction] is 0–1 while whisperX reports a percent, or null when the phase has no percent yet. */
+  log: (msg: string, fraction?: number | null) => void;
   /** A quiet long step (transcription) calls this so the app can tell "still working" from "no response". */
   tick?: () => void;
 };

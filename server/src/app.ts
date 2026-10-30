@@ -554,7 +554,7 @@ export function createApp(opts: AppOptions): Server {
                   startedAt: progress?.startedAt ?? now,
                   beat: now,
                   outputAt: now,
-                  current: { name: "index", title: "검색 색인", line: "모은 기록을 검색에 넣는 중" },
+                  current: { name: "index", title: "검색 색인", line: "모은 기록을 검색에 넣는 중", fraction: null },
                   steps: [...steps, { name: "index", title: "검색 색인", state: "running", line: "모은 기록을 검색에 넣는 중", since: now }],
                 };
                 startRefresh(false);

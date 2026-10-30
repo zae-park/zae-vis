@@ -70,17 +70,19 @@ export const transcriptsSource: Source = {
       const hf = hfStatus();
       if (audio.length && !hf.loggedIn) log("화자 구분은 설정에서 Hugging Face에 로그인한 뒤 됩니다. 전사 자체는 그대로 진행합니다.");
       else if (audio.length && hf.accept.length) log(`화자 구분은 ${hf.accept.join(", ")} 사용에 동의한 뒤 됩니다. 설정에서 동의 페이지를 여세요.`);
-      for (const a of audio) {
+      for (let i = 0; i < audio.length; i++) {
+        const a = audio[i]!;
         const day = dayKey((await stat(a)).mtime);
         const file = basename(a);
         try {
-          log(`전사 중: ${file}`);
+          const where = `전사 ${i + 1}/${audio.length} · ${file}`;
+          log(where, null);
           const out = await transcribeFile(a, config.worklogDir, {
             language: String(settings.language ?? "ko"),
             model: String(settings.model ?? "large-v3-turbo"),
             whisperxBin: settings.whisperxBin as string | undefined,
-            onBeat: log,
             onTick: tick,
+            onProgress: (p) => log(`${where} · ${p.line}`, p.fraction),
           });
           addTo(byDay, day, `- 전사: \`${out.split("/").pop()}\``);
           transcribed++;

@@ -24,17 +24,39 @@ export type TranscribeOptions = {
   onBeat?: (line: string) => void;
   /** Still inside this file, even when whisperX has not printed anything. */
   onTick?: () => void;
+  /** Korean status and a 0–1 fraction. Fraction is null while a phase has not reported a percent yet. */
+  onProgress?: (p: { line: string; fraction: number | null }) => void;
 };
 
-function lastProgressLine(chunk: string): string | null {
-  const lines = chunk
+/** What the app shows for one whisperX log line. Null means the line is chatter (a transcript sentence, a download bar). */
+export type WhisperView = { label: string; fraction: number | null };
+
+export function foldWhisperLine(state: WhisperView, raw: string): WhisperView | null {
+  const line = raw.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim();
+  if (!line) return null;
+  const pct = /Progress:\s*([\d.]+)\s*%/.exec(line);
+  if (pct) {
+    const n = Number(pct[1]);
+    if (!Number.isFinite(n)) return null;
+    return { label: state.label, fraction: Math.min(1, Math.max(0, n / 100)) };
+  }
+  if (/Performing transcription/i.test(line)) return { label: "음성 인식", fraction: null };
+  if (/Performing alignment/i.test(line)) return { label: "말 시간에 맞추는 중", fraction: null };
+  if (/Performing diarization/i.test(line)) return { label: "말한 사람 구분 중", fraction: null };
+  return null;
+}
+
+export function whisperStatusLine(state: WhisperView): string {
+  return state.fraction == null ? state.label : `${state.label} ${Math.round(state.fraction * 100)}%`;
+}
+
+function textLines(chunk: string): string[] {
+  return chunk
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
     .replace(/\r/g, "\n")
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-  const line = lines.at(-1);
-  return line ? line.slice(0, 160) : null;
 }
 
 export function whisperxBin(explicit?: string): string | null {
@@ -79,19 +101,29 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
   if (!bin) throw new Error("whisperX가 설치되지 않았습니다. 'zaevis ext install whisperx'를 실행하세요.");
   const out = await mkdtemp(join(tmpdir(), "zaevis-wx-"));
   try {
-    const args = [audio, "--model", opts.model ?? "large-v3-turbo", "--language", opts.language ?? "ko", "--compute_type", "int8", "--device", "cpu", "--output_dir", out, "--output_format", "txt"];
+    const args = [audio, "--model", opts.model ?? "large-v3-turbo", "--language", opts.language ?? "ko", "--compute_type", "int8", "--device", "cpu", "--output_dir", out, "--output_format", "txt", "--print_progress", "True", "--verbose", "False", "--log-level", "info"];
     const hf = opts.hfToken ?? (await tokenForDiarize());
     if (hf) args.push("--diarize", "--hf_token", hf);
+    let view: WhisperView = { label: "모델 불러오는 중", fraction: null };
+    const emit = () => opts.onProgress?.({ line: whisperStatusLine(view), fraction: view.fraction });
+    emit();
     await new Promise<void>((resolve, reject) => {
       // whisperX shells out to `ffmpeg`; the extension links one next to the whisperx binary.
-      const env = { ...process.env, PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter), ...(hf ? { HF_TOKEN: hf } : {}) };
+      // PYTHONUNBUFFERED so each "Progress: N%" line arrives before the buffer fills.
+      const env = { ...process.env, PYTHONUNBUFFERED: "1", PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter), ...(hf ? { HF_TOKEN: hf } : {}) };
       const child = spawnBin(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
       let errText = "";
       const take = (buf: Buffer) => {
-        const chunk = buf.toString();
+        const chunk = hf ? buf.toString().replaceAll(hf, "…") : buf.toString();
         errText = (errText + chunk).slice(-4000);
-        const line = lastProgressLine(chunk);
-        if (line) opts.onBeat?.(hf ? line.replaceAll(hf, "…") : line);
+        for (const line of textLines(chunk)) {
+          opts.onBeat?.(line.slice(0, 160));
+          const next = foldWhisperLine(view, line);
+          if (next) {
+            view = next;
+            emit();
+          }
+        }
       };
       child.stdout?.on("data", take);
       child.stderr?.on("data", take);
@@ -128,7 +160,7 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
 /** One transcription at a time; uploads queue up behind each other. */
 export class TranscribeQueue {
   private chain: Promise<unknown> = Promise.resolve();
-  readonly jobs: Array<{ file: string; state: "queued" | "running" | "done" | "failed"; result?: string; error?: string; at: string }> = [];
+  readonly jobs: Array<{ file: string; state: "queued" | "running" | "done" | "failed"; result?: string; error?: string; at: string; line?: string; fraction?: number | null }> = [];
 
   /** Called when a job finishes either way (the server turns this into an OS notification). */
   onDone?: (job: TranscribeQueue["jobs"][number]) => void;
@@ -140,8 +172,16 @@ export class TranscribeQueue {
     this.chain = this.chain.then(async () => {
       job.state = "running";
       try {
-        job.result = basename(await transcribeFile(audio, worklogDir, opts));
+        job.result = basename(await transcribeFile(audio, worklogDir, {
+          ...opts,
+          onProgress: (p) => {
+            job.line = p.line;
+            job.fraction = p.fraction;
+            opts.onProgress?.(p);
+          },
+        }));
         job.state = "done";
+        job.fraction = 1;
       } catch (err) {
         job.state = "failed";
         job.error = (err as Error).message;
