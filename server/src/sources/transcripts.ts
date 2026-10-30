@@ -3,8 +3,9 @@
 
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { expandHome } from "../config.ts";
+import { hfStatus } from "../hf.ts";
 import { AUDIO_EXT, TEXT_EXT, datedStem, transcribeFile, whisperxBin } from "../transcribe.ts";
 import { addTo, dayKey, type Source } from "./types.ts";
 
@@ -27,7 +28,7 @@ export const transcriptsSource: Source = {
     { key: "language", label: "전사 언어", kind: "text" },
     { key: "model", label: "whisperX 모델", kind: "text" },
   ],
-  async collect({ from, to, settings, config, log }) {
+  async collect({ from, to, settings, config, log, tick }) {
     const inbox = join(config.worklogDir, "inbox", "transcripts");
     const audioDir = expandHome(String(settings.audioDir ?? join(config.worklogDir, "inbox", "audio")));
     await mkdir(inbox, { recursive: true });
@@ -66,14 +67,25 @@ export const transcriptsSource: Source = {
     if (audio.length && !whisperxBin(settings.whisperxBin as string | undefined)) {
       log(`transcripts: 녹음 ${audio.length}개가 있지만 whisperX가 없습니다 ('zaevis ext install whisperx').`);
     } else {
+      const hf = hfStatus();
+      if (audio.length && !hf.loggedIn) log("화자 구분은 설정에서 Hugging Face에 로그인한 뒤 됩니다. 전사 자체는 그대로 진행합니다.");
+      else if (audio.length && hf.accept.length) log(`화자 구분은 ${hf.accept.join(", ")} 사용에 동의한 뒤 됩니다. 설정에서 동의 페이지를 여세요.`);
       for (const a of audio) {
         const day = dayKey((await stat(a)).mtime);
+        const file = basename(a);
         try {
-          const out = await transcribeFile(a, config.worklogDir, { language: String(settings.language ?? "ko"), model: String(settings.model ?? "large-v3-turbo") });
+          log(`전사 중: ${file}`);
+          const out = await transcribeFile(a, config.worklogDir, {
+            language: String(settings.language ?? "ko"),
+            model: String(settings.model ?? "large-v3-turbo"),
+            whisperxBin: settings.whisperxBin as string | undefined,
+            onBeat: log,
+            onTick: tick,
+          });
           addTo(byDay, day, `- 전사: \`${out.split("/").pop()}\``);
           transcribed++;
         } catch (err) {
-          log(`transcripts: ${a} 전사 실패 — ${(err as Error).message}`);
+          log(`transcripts: ${file} 전사 실패 — ${(err as Error).message}`);
         }
       }
     }

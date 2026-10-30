@@ -57,9 +57,19 @@ export function getEnvSecret(name: string): string | null {
 }
 
 export function setEnvSecret(name: string, value: string): void {
+  setSecret(`env:${name}`, value);
+}
+
+/** A named secret. Empty removes it. Values never go back out through the API. */
+export function getSecret(name: string): string | null {
+  const v = readSecrets()[name];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+export function setSecret(name: string, value: string | null): void {
   const s = readSecrets();
-  if (value.trim()) s[`env:${name}`] = value.trim();
-  else delete s[`env:${name}`];
+  if (value && value.trim()) s[name] = value.trim();
+  else delete s[name];
   writeSecrets(s);
 }
 

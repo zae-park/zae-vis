@@ -10,6 +10,8 @@ export type CollectContext = {
   settings: SourceSettings;
   config: AppConfig;
   log: (msg: string) => void;
+  /** A quiet long step (transcription) calls this so the app can tell "still working" from "no response". */
+  tick?: () => void;
 };
 
 export type CollectResult = {

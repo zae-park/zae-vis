@@ -499,8 +499,49 @@ class SourceInfo {
   }
 }
 
+class CollectStep {
+  const CollectStep({required this.name, required this.title, required this.state, this.line, this.note, this.error, this.since});
+  factory CollectStep.fromJson(Json j) => CollectStep(
+        name: _str(j['name']),
+        title: _str(j['title']),
+        state: _str(j['state']),
+        line: _strOrNull(j['line']),
+        note: _strOrNull(j['note']),
+        error: _strOrNull(j['error']),
+        since: DateTime.tryParse(_str(j['since'])),
+      );
+  final String name;
+  final String title;
+  /// waiting | running | done | failed
+  final String state;
+  final String? line;
+  final String? note;
+  final String? error;
+  final DateTime? since;
+}
+
+/// Live collect run. [beat] moves while the server is still on this run; [outputAt] moves only when a source prints a line.
+class CollectProgress {
+  const CollectProgress({required this.startedAt, required this.beat, required this.outputAt, this.currentLine, this.steps = const []});
+  factory CollectProgress.fromJson(Json j) {
+    final current = j['current'];
+    return CollectProgress(
+      startedAt: DateTime.tryParse(_str(j['startedAt'])) ?? DateTime.now(),
+      beat: DateTime.tryParse(_str(j['beat'])) ?? DateTime.now(),
+      outputAt: DateTime.tryParse(_str(j['outputAt'])) ?? DateTime.now(),
+      currentLine: current is Json ? _strOrNull(current['line']) : null,
+      steps: (j['steps'] is List ? j['steps'] as List : const <Object?>[]).whereType<Json>().map(CollectStep.fromJson).toList(),
+    );
+  }
+  final DateTime startedAt;
+  final DateTime beat;
+  final DateTime outputAt;
+  final String? currentLine;
+  final List<CollectStep> steps;
+}
+
 class SourcesState {
-  const SourcesState({required this.sources, required this.collecting, this.lastCollectAt, this.lastCollectError});
+  const SourcesState({required this.sources, required this.collecting, this.progress, this.lastCollectAt, this.lastCollectError});
   factory SourcesState.fromJson(Json j) {
     final last = j['lastCollect'];
     return SourcesState(
@@ -509,14 +550,42 @@ class SourcesState {
           .map(SourceInfo.fromJson)
           .toList(),
       collecting: j['collecting'] == true,
+      progress: j['progress'] is Json ? CollectProgress.fromJson(j['progress'] as Json) : null,
       lastCollectAt: last is Json ? DateTime.tryParse(_str(last['finishedAt'])) : null,
       lastCollectError: last is Json ? _strOrNull(last['error']) : null,
     );
   }
   final List<SourceInfo> sources;
   final bool collecting;
+  final CollectProgress? progress;
   final DateTime? lastCollectAt;
   final String? lastCollectError;
+}
+
+/// Hugging Face login for speaker diarization. The token itself never arrives here.
+class HfStatus {
+  const HfStatus({required this.loggedIn, this.username, this.expiresAt, this.accept = const [], this.loginState, this.userCode, this.verificationUri, this.loginError});
+  factory HfStatus.fromJson(Json j) {
+    final login = j['login'];
+    return HfStatus(
+      loggedIn: j['loggedIn'] == true,
+      username: _strOrNull(j['username']),
+      expiresAt: DateTime.tryParse(_str(j['expiresAt'])),
+      accept: j['accept'] is List ? (j['accept'] as List).whereType<String>().toList() : const [],
+      loginState: login is Json ? _strOrNull(login['state']) : null,
+      userCode: login is Json ? _strOrNull(login['userCode']) : null,
+      verificationUri: login is Json ? _strOrNull(login['verificationUri']) : null,
+      loginError: login is Json ? _strOrNull(login['error']) : null,
+    );
+  }
+  final bool loggedIn;
+  final String? username;
+  final DateTime? expiresAt;
+  final List<String> accept;
+  final String? loginState;
+  final String? userCode;
+  final String? verificationUri;
+  final String? loginError;
 }
 
 class InboxFile {

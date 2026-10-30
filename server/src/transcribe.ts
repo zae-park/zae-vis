@@ -1,18 +1,41 @@
 // Audio → text with whisperX (optional extension, installed by `zaevis ext install whisperx`).
+// Speaker labels are added only after the app's Hugging Face login has a token and the pyannote
+// models have been accepted. A missing login still transcribes; it just does not diarize.
 
-import { execFileBin } from "./spawnbin.ts";
+import { spawnBin } from "./spawnbin.ts";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
 import { expandHome, stateDir } from "./config.ts";
+import { tokenForDiarize } from "./hf.ts";
 import { redact } from "./redact.ts";
 import { dayKey } from "./sources/types.ts";
 
 export const AUDIO_EXT = new Set([".m4a", ".mp3", ".wav", ".aac", ".flac", ".ogg", ".opus", ".webm", ".mp4", ".mov", ".m4v"]);
 export const TEXT_EXT = new Set([".txt", ".md", ".vtt", ".srt"]);
 
-export type TranscribeOptions = { language?: string; model?: string; whisperxBin?: string; hfToken?: string };
+export type TranscribeOptions = {
+  language?: string;
+  model?: string;
+  whisperxBin?: string;
+  hfToken?: string;
+  /** A line whisperX printed. */
+  onBeat?: (line: string) => void;
+  /** Still inside this file, even when whisperX has not printed anything. */
+  onTick?: () => void;
+};
+
+function lastProgressLine(chunk: string): string | null {
+  const lines = chunk
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const line = lines.at(-1);
+  return line ? line.slice(0, 160) : null;
+}
 
 export function whisperxBin(explicit?: string): string | null {
   const win = process.platform === "win32";
@@ -57,14 +80,37 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
   const out = await mkdtemp(join(tmpdir(), "zaevis-wx-"));
   try {
     const args = [audio, "--model", opts.model ?? "large-v3-turbo", "--language", opts.language ?? "ko", "--compute_type", "int8", "--device", "cpu", "--output_dir", out, "--output_format", "txt"];
-    const hf = opts.hfToken ?? process.env.HF_TOKEN;
+    const hf = opts.hfToken ?? (await tokenForDiarize());
     if (hf) args.push("--diarize", "--hf_token", hf);
     await new Promise<void>((resolve, reject) => {
       // whisperX shells out to `ffmpeg`; the extension links one next to the whisperx binary.
-      const env = { ...process.env, PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter) };
-      execFileBin(bin, args, { env, maxBuffer: 64 * 1024 * 1024, timeout: 3 * 60 * 60_000 }, (err, _so, se) =>
-        err ? reject(new Error(`whisperX 실패: ${String(se || err.message).trim().split("\n").slice(-3).join(" ")}`)) : resolve(),
-      );
+      const env = { ...process.env, PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter), ...(hf ? { HF_TOKEN: hf } : {}) };
+      const child = spawnBin(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+      let errText = "";
+      const take = (buf: Buffer) => {
+        const chunk = buf.toString();
+        errText = (errText + chunk).slice(-4000);
+        const line = lastProgressLine(chunk);
+        if (line) opts.onBeat?.(hf ? line.replaceAll(hf, "…") : line);
+      };
+      child.stdout?.on("data", take);
+      child.stderr?.on("data", take);
+      const timer = setInterval(() => opts.onTick?.(), 5000);
+      const killer = setTimeout(() => child.kill("SIGTERM"), 3 * 60 * 60_000);
+      const finish = (err?: Error) => {
+        clearInterval(timer);
+        clearTimeout(killer);
+        if (err) reject(err);
+        else resolve();
+      };
+      child.on("error", (e) => finish(e));
+      child.on("close", (code) => {
+        if (code === 0) finish();
+        else {
+          const tail = errText.trim().split("\n").slice(-3).join(" ");
+          finish(new Error(`whisperX 실패: ${hf ? tail.replaceAll(hf, "…") : tail || `종료 ${code}`}`));
+        }
+      });
     });
     const produced = join(out, basename(audio, extname(audio)) + ".txt");
     const text = (await readFile(produced, "utf8")).trim();

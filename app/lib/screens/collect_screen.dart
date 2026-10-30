@@ -71,7 +71,7 @@ class _CollectScreenState extends State<CollectScreen> {
         _error = null;
       });
       _poll?.cancel();
-      if (s.collecting || i.transcribing || x.syncing) _poll = Timer(const Duration(seconds: 3), _load);
+      if (s.collecting || i.transcribing || x.syncing) _poll = Timer(Duration(seconds: s.collecting ? 1 : 3), _load);
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -179,6 +179,7 @@ class _CollectScreenState extends State<CollectScreen> {
               label: Text(s.collecting ? '수집 중…' : '지금 수집'),
             ),
           ),
+          if (s.collecting) _CollectLive(progress: s.progress),
           if (s.lastCollectError != null)
             Padding(padding: const EdgeInsets.only(top: 6), child: Text(s.lastCollectError!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           const SizedBox(height: 8),
@@ -189,6 +190,7 @@ class _CollectScreenState extends State<CollectScreen> {
                 key: ValueKey(src.name),
                 source: src,
                 busy: s.collecting,
+                live: s.progress?.steps.where((e) => e.name == src.name && e.state == 'running').map((e) => e.line ?? '${src.title} 수집 중').firstOrNull,
                 initiallyExpanded: src.name == _justAdded,
                 onToggle: (on) => _act(() => widget.api.setSourceEnabled(src.name, on)),
                 onCollect: () => _act(() => widget.api.collect(only: [src.name]), done: '${src.title} 수집을 시작했습니다'),
@@ -302,10 +304,111 @@ class _InboxCard extends StatelessWidget {
   }
 }
 
+/// Which source is running, how long it has been, and whether the server is still answering.
+class _CollectLive extends StatefulWidget {
+  const _CollectLive({required this.progress});
+  final CollectProgress? progress;
+
+  @override
+  State<_CollectLive> createState() => _CollectLiveState();
+}
+
+class _CollectLiveState extends State<_CollectLive> {
+  Timer? _clock;
+
+  @override
+  void initState() {
+    super.initState();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
+  String _span(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    if (m >= 60) return '${m ~/ 60}시간 ${m % 60}분';
+    if (m >= 1) return '$m분 $s초';
+    return '$s초';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final p = widget.progress;
+    final now = DateTime.now();
+    if (p == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text('수집을 시작했습니다. 어느 단계인지 확인하는 중…', style: t.bodySmall),
+      );
+    }
+    final beatAge = now.difference(p.beat);
+    final quietAge = now.difference(p.outputAt);
+    final stale = beatAge > const Duration(seconds: 20);
+    final quiet = !stale && quietAge > const Duration(seconds: 20);
+    final headline = stale
+        ? '응답이 없습니다 · 마지막 신호 ${_span(beatAge)} 전'
+        : quiet
+            ? '진행 중 · 출력 없이 ${_span(quietAge)} · 전체 ${_span(now.difference(p.startedAt))}'
+            : '진행 중 · 전체 ${_span(now.difference(p.startedAt))}';
+    final note = stale
+        ? '서버가 이 단계에서 더 이상 신호를 보내지 않습니다.'
+        : quiet
+            ? '전사는 녹음이 길면 한동안 출력이 없습니다. 시간이 늘어나면 아직 그 단계에 있습니다.'
+            : '';
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(headline, style: t.titleSmall?.copyWith(color: stale ? scheme.error : null)),
+        if (p.currentLine != null) Text(p.currentLine!, style: t.bodySmall),
+        if (note.isNotEmpty) Text(note, style: t.bodySmall),
+        const SizedBox(height: 6),
+        for (final step in p.steps)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(children: [
+              Icon(
+                switch (step.state) {
+                  'done' => Icons.check_circle_outline,
+                  'failed' => Icons.error_outline,
+                  'running' => Icons.timelapse,
+                  _ => Icons.radio_button_unchecked,
+                },
+                size: 16,
+                color: step.state == 'failed' ? scheme.error : (step.state == 'running' ? scheme.primary : scheme.outline),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  [
+                    step.title,
+                    if (step.state == 'running' && step.since != null) _span(now.difference(step.since!)),
+                    if (step.state == 'running' && step.line != null) step.line!,
+                  ].join(' · '),
+                  style: t.bodySmall?.copyWith(color: step.state == 'running' ? scheme.primary : null),
+                ),
+              ),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
+
 class _SourceCard extends StatefulWidget {
-  const _SourceCard({super.key, required this.source, required this.busy, required this.onToggle, required this.onCollect, required this.onSave, this.onRemove, this.onEnableTimestamps, this.initiallyExpanded = false});
+  const _SourceCard({super.key, required this.source, required this.busy, required this.onToggle, required this.onCollect, required this.onSave, this.live, this.onRemove, this.onEnableTimestamps, this.initiallyExpanded = false});
   final SourceInfo source;
   final bool busy;
+  /// The line of the step running now, when this card is the current one.
+  final String? live;
   final bool initiallyExpanded;
   final void Function(bool) onToggle;
   final VoidCallback onCollect;
@@ -355,7 +458,7 @@ class _SourceCardState extends State<_SourceCard> {
     final s = widget.source;
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final status = s.lastOk == false ? (s.lastError ?? '실패') : [_ago(s.lastRun), if (s.lastNote != null) s.lastNote!].join(' · ');
+    final status = widget.live ?? (s.lastOk == false ? (s.lastError ?? '실패') : [_ago(s.lastRun), if (s.lastNote != null) s.lastNote!].join(' · '));
     return Card.outlined(
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
@@ -366,7 +469,7 @@ class _SourceCardState extends State<_SourceCard> {
           Switch(value: s.enabled, onChanged: widget.onToggle),
         ]),
         title: Text(s.title, style: t.titleSmall),
-        subtitle: Text(status, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: s.lastOk == false ? scheme.error : null)),
+        subtitle: Text(status, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: widget.live != null ? scheme.primary : (s.lastOk == false ? scheme.error : null))),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [

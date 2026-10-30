@@ -368,7 +368,7 @@ async function extInstallWhisperx(): Promise<void> {
   if (WIN) writeFileSync(link, readFileSync(ff));
   else symlinkSync(ff, link);
   say(`${G("✓")} whisperX 설치 완료. 앱에서 녹음을 올리거나 'zaevis ingest 녹음.m4a'.`);
-  say("  화자 구분이 필요하면 HF_TOKEN 환경변수를 설정하세요 (pyannote 모델 동의 필요).");
+  say("  화자 구분은 앱 설정에서 Hugging Face에 로그인하면 연결됩니다.");
 }
 
 /** Installs the Kiwi library + model for MinSync's Korean BM25 tokenizer (see kiwi.ts). `--force` re-downloads. */

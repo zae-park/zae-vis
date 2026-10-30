@@ -30,6 +30,7 @@ List<Object>? mockAskRail;
 List<Object>? mockAskStatusRail;
 List<Object>? mockDigestRail;
 bool mockKiwiInstalled = false;
+bool mockCollecting = false;
 
 /// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
 Map<String, Object?> _tokenizer() => {
@@ -149,7 +150,19 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## notes\n\n- 색인할 파일이 빠져서 — 박재'});
           case '/api/sources' when req.method == 'GET':
             return _json({
-              'collecting': false,
+              'collecting': mockCollecting,
+              if (mockCollecting)
+                'progress': {
+                  'startedAt': '2026-10-30T05:24:00Z',
+                  'beat': DateTime.now().toUtc().toIso8601String(),
+                  'outputAt': '2026-10-30T05:24:05Z',
+                  'current': {'name': 'transcripts', 'title': '회의 전사본', 'line': '전사 중: 2026-10-30_1424_녹음.wav'},
+                  'steps': [
+                    {'name': 'git', 'title': 'git 커밋', 'state': 'done'},
+                    {'name': 'transcripts', 'title': '회의 전사본', 'state': 'running', 'since': '2026-10-30T05:24:10Z', 'line': '전사 중: 2026-10-30_1424_녹음.wav'},
+                    {'name': 'shell-history', 'title': '셸 명령 이력', 'state': 'waiting'},
+                  ],
+                },
               'sources': [
                 {'name': 'git', 'title': 'git 커밋', 'description': 'd', 'builtin': true, 'enabled': true, 'settings': {'reposRoot': '~/jaepark'}, 'options': [{'key': 'reposRoot', 'label': '저장소 상위 폴더', 'kind': 'path'}], 'lastRun': '2026-10-23T09:00:00Z', 'lastOk': true, 'lastNote': '커밋 3개'},
                 {'name': 'shell-history', 'title': '셸 명령 이력', 'description': 'd', 'builtin': true, 'enabled': true, 'settings': {}, 'options': [], 'lastOk': false, 'lastError': 'EXTENDED_HISTORY 필요'},
@@ -259,6 +272,15 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/sources/shell-history/enable-timestamps':
             posted.add(req);
             return _json({'ok': true, 'file': '/h/.zshrc', 'changed': true});
+          case '/api/hf' when req.method == 'GET':
+            return _json({'loggedIn': false, 'accept': <Object>[], 'login': null});
+          case '/api/hf/login' when req.method == 'POST':
+            posted.add(req);
+            return _json({
+              'loggedIn': false,
+              'accept': <Object>[],
+              'login': {'state': 'pending', 'userCode': 'ABCD-EFGH', 'verificationUri': 'https://hf.co/oauth/device'},
+            });
           case '/api/collect':
             posted.add(req);
             return _json({'started': true}, 202);
@@ -744,6 +766,49 @@ void main() {
     expect(find.text('전사본 (1)'), findsOneWidget);
   });
 
+  testWidgets('collect shows which source is running instead of only a spinner', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockCollecting = true;
+    addTearDown(() => mockCollecting = false);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('연결').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.textContaining('진행 중'), findsOneWidget);
+    expect(find.textContaining('전사 중: 2026-10-30_1424_녹음.wav'), findsWidgets);
+    expect(find.text('git 커밋'), findsWidgets);
+    expect(find.textContaining('출력 없이'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('settings: speaker login opens Hugging Face instead of asking for a token', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: _FakeBackend()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    final login = find.text('로그인');
+    await tester.ensureVisible(login);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('HF_TOKEN'), findsNothing);
+    expect(find.textContaining('브라우저에서 Hugging Face에 로그인하면'), findsOneWidget);
+    await tester.tap(login);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(posted.any((r) => r.url.path == '/api/hf/login'), isTrue);
+    expect(find.textContaining('ABCD-EFGH'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('collect tab: the shell-history card turns zsh timestamps on after confirming', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1;
@@ -988,6 +1053,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(backend.ran, anyElement(equals(['ext', 'install', 'kiwi'])));
     expect(find.textContaining('Kiwi 0.24.1 설치 완료'), findsOneWidget);
+    final title = find.text('한국어 형태소 분석 (Kiwi) 설치');
+    final before = tester.getTopLeft(title);
+    expect(before.dx, greaterThan(700), reason: 'the install log floats at the bottom right');
+    expect(before.dy, greaterThan(400));
+    expect(find.text('색인 갱신'), findsOneWidget, reason: 'the sheet underneath stays usable');
+    await tester.drag(find.byIcon(Icons.drag_indicator), const Offset(-160, -100));
+    await tester.pump();
+    expect(tester.getTopLeft(title).dx, lessThan(before.dx - 80));
     await tester.tap(find.text('완료 · 닫기'));
     await tester.pumpAndSettle();
     // installed now, but the index was built without it: the row says to rebuild

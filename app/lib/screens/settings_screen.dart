@@ -222,6 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
                       : null,
                 ),
+                _HfLogin(api: widget.api, backend: widget.backend),
                 if (_managed) ...[
                   const SizedBox(height: 16),
                   Text('앱', style: t.titleMedium),
@@ -817,4 +818,133 @@ Future<String?> showHotkeyDialog(BuildContext context, {required String current}
       );
     },
   );
+}
+
+/// Hugging Face browser login for speaker diarization. The token stays on the server.
+class _HfLogin extends StatefulWidget {
+  const _HfLogin({required this.api, this.backend});
+  final WorklogApi api;
+  final Backend? backend;
+
+  @override
+  State<_HfLogin> createState() => _HfLoginState();
+}
+
+class _HfLoginState extends State<_HfLogin> {
+  HfStatus? _hf;
+  var _hidden = false;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final hf = await widget.api.hfStatus();
+      if (!mounted) return;
+      setState(() {
+        _hf = hf;
+        _hidden = hf == null;
+      });
+      _watch(hf);
+    } on ApiException {
+      if (mounted) setState(() => _hidden = true);
+    }
+  }
+
+  void _watch(HfStatus? hf) {
+    _poll?.cancel();
+    if (hf?.loginState != 'pending') return;
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) async {
+      try {
+        final next = await widget.api.hfStatus();
+        if (!mounted) return;
+        setState(() => _hf = next);
+        if (next == null || next.loginState != 'pending') _poll?.cancel();
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _login() async {
+    try {
+      final hf = await widget.api.hfLogin();
+      if (!mounted) return;
+      setState(() => _hf = hf);
+      final url = hf.verificationUri;
+      if (url != null) await widget.backend?.open(url);
+      _watch(hf);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    }
+  }
+
+  Future<void> _openAccept() async {
+    final hf = _hf;
+    if (hf == null) return;
+    for (final id in hf.accept) {
+      await widget.backend?.open('https://huggingface.co/$id');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hidden) return const SizedBox.shrink();
+    final hf = _hf;
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final pending = hf?.loginState == 'pending';
+    final String subtitle;
+    if (hf == null) {
+      subtitle = '로그인 상태를 확인하는 중…';
+    } else if (pending && hf.userCode != null) {
+      subtitle = '브라우저에서 Hugging Face에 로그인하고 코드 ${hf.userCode} 를 확인하세요.';
+    } else if (hf.loginError != null) {
+      subtitle = hf.loginError!;
+    } else if (hf.loggedIn && hf.accept.isNotEmpty) {
+      subtitle = '${hf.username ?? "계정"} 으로 연결됨. 화자 모델을 쓰려면 페이지에서 사용에 동의해야 합니다.';
+    } else if (hf.loggedIn) {
+      subtitle = '${hf.username ?? "계정"} 으로 연결됨. 다음 전사부터 말한 사람을 나눕니다.';
+    } else {
+      subtitle = '브라우저에서 Hugging Face에 로그인하면 녹음에서 말한 사람을 나눕니다.';
+    }
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(hf?.loggedIn == true ? Icons.check_circle_outline : Icons.record_voice_over_outlined),
+      title: const Text('화자 구분'),
+      subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(subtitle, style: hf?.loginError != null ? t.bodySmall?.copyWith(color: scheme.error) : null),
+        if (hf != null && hf.accept.isNotEmpty)
+          Wrap(spacing: 4, children: [
+            TextButton(onPressed: _openAccept, child: const Text('동의 페이지')),
+            TextButton(
+              onPressed: () async {
+                final next = await widget.api.hfCheck();
+                if (mounted) setState(() => _hf = next);
+              },
+              child: const Text('다시 확인'),
+            ),
+          ]),
+      ]),
+      trailing: pending
+          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+          : hf?.loggedIn == true
+              ? TextButton(
+                  onPressed: () async {
+                    final next = await widget.api.hfLogout();
+                    if (mounted) setState(() => _hf = next);
+                  },
+                  child: const Text('연결 해제'),
+                )
+              : FilledButton.tonal(onPressed: hf == null ? null : _login, child: const Text('로그인')),
+    );
+  }
 }

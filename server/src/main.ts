@@ -16,6 +16,7 @@ import { DigestRunner, detectAgents, noAgentReason, pickAgent } from "./digest.t
 import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
 import { agentsInOrder, normalizeAgentOrder, normalizeAgentSkip, plannedRail, DEFAULT_AGENT_ORDER } from "./rail.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
+import { hfStatus, logoutHf, recheckHfModels, startHfLogin } from "./hf.ts";
 import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
 import { KIND_LABEL, ReportRunner, defaultPeriod, isKind, isValidPeriod, mergeReportsSetting, readReport } from "./reports.ts";
@@ -58,7 +59,7 @@ const server = createApp({
   webDir: cfg.webDir,
   sources: {
     list: () => listSources(cfg),
-    collect: (only) => collect(cfg, { only, log: (m) => console.log(`[collect] ${m}`) }),
+    collect: (only, hooks) => collect(cfg, { only, log: (m) => console.log(`[collect] ${m}`), onProgress: hooks?.onProgress }),
     update: (name, patch) => saveSourceSettings(name, patch),
     add: (src) => addCustomSource(src),
     remove: (name) => removeCustomSource(name),
@@ -80,6 +81,7 @@ const server = createApp({
         schedule: await scheduleStatus(cfg.dailyAt),
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
+        hf: hfStatus(),
         localEmbedding: cfg.localEmbedding,
         notifications: cfg.notifications,
         hotkey: cfg.hotkey,
@@ -233,6 +235,12 @@ const server = createApp({
   tokenizer: {
     sync: (canRestart) => tokenizer.sync(canRestart),
     refreshed: (force, ok) => tokenizer.refreshed(force, ok),
+  },
+  hf: {
+    status: () => hfStatus(),
+    login: () => startHfLogin(),
+    check: () => recheckHfModels(),
+    logout: () => logoutHf(),
   },
   audio: {
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),

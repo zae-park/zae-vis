@@ -61,7 +61,27 @@ export function listSources(cfg: AppConfig): SourceInfo[] {
   });
 }
 
-export type CollectOptions = { only?: string[]; backfillDays?: number; now?: Date; log?: (m: string) => void };
+export type CollectStep = {
+  name: string;
+  title: string;
+  state: "waiting" | "running" | "done" | "failed";
+  line?: string;
+  note?: string;
+  error?: string;
+  /** When this step started running. */
+  since?: string;
+};
+
+/** What the collect screen draws while a run is in progress. `beat` moves even when a step is quiet; `outputAt` moves only when a source prints something. */
+export type CollectProgress = {
+  startedAt: string;
+  beat: string;
+  outputAt: string;
+  current: { name: string; title: string; line: string } | null;
+  steps: CollectStep[];
+};
+
+export type CollectOptions = { only?: string[]; backfillDays?: number; now?: Date; log?: (m: string) => void; onProgress?: (p: CollectProgress) => void };
 export type CollectReport = Array<{ name: string; ok: boolean; days: string[]; note?: string; error?: string }>;
 
 const header = (name: string, day: string) => `# ${name} · ${day}\n\n<!-- zaevis가 자동으로 만든 파일입니다. 직접 고치면 다음 수집 때 덮어씁니다. -->\n\n`;
@@ -82,25 +102,59 @@ export async function collect(cfg: AppConfig, opts: CollectOptions = {}): Promis
   const log = opts.log ?? ((m: string) => console.error(m));
   const state = loadState();
   const report: CollectReport = [];
+  const targets = resolveSources(cfg).filter(({ source, settings }) => (opts.only?.length ? opts.only.includes(source.name) : settings.enabled !== false));
+  const stamp = () => new Date().toISOString();
+  const progress: CollectProgress = {
+    startedAt: now.toISOString(),
+    beat: now.toISOString(),
+    outputAt: now.toISOString(),
+    current: null,
+    steps: targets.map(({ source }) => ({ name: source.name, title: source.title, state: "waiting" as const })),
+  };
+  const publish = () => opts.onProgress?.({ ...progress, current: progress.current ? { ...progress.current } : null, steps: progress.steps.map((s) => ({ ...s })) });
+  const beat = () => {
+    progress.beat = stamp();
+    publish();
+  };
+  const note = (line: string) => {
+    progress.beat = progress.outputAt = stamp();
+    if (progress.current) progress.current.line = line;
+    const step = progress.steps.find((s) => s.name === progress.current?.name);
+    if (step) step.line = line;
+    log(line);
+    publish();
+  };
+  publish();
 
-  for (const { source, settings } of resolveSources(cfg)) {
-    if (opts.only?.length ? !opts.only.includes(source.name) : settings.enabled === false) continue;
+  for (const { source, settings } of targets) {
+    const step = progress.steps.find((s) => s.name === source.name)!;
     const st = (state.sources[source.name] ??= {});
     // Re-read from the start of the last run's day so every touched day file is rebuilt whole.
     const last = st.lastRun ? new Date(st.lastRun) : new Date(now.getTime() - (opts.backfillDays ?? 7) * 86_400_000);
     const from = startOfDay(last);
+    step.state = "running";
+    step.since = stamp();
+    step.line = `${source.title} 수집 중`;
+    progress.current = { name: source.name, title: source.title, line: step.line };
+    beat();
     try {
-      const { days, note } = await source.collect({ from, to: now, settings, config: cfg, log });
+      const { days, note: summary } = await source.collect({ from, to: now, settings, config: cfg, log: note, tick: beat });
       const dir = join(cfg.worklogDir, "sources", source.name);
       await mkdir(dir, { recursive: true });
       for (const [day, body] of Object.entries(days)) if (body.trim()) await writeDay(dir, source.name, day, body, source.append === true);
-      Object.assign(st, { lastRun: now.toISOString(), lastOk: true, lastError: undefined, lastNote: note });
-      report.push({ name: source.name, ok: true, days: Object.keys(days).sort(), note });
+      Object.assign(st, { lastRun: now.toISOString(), lastOk: true, lastError: undefined, lastNote: summary });
+      step.state = "done";
+      step.note = summary;
+      report.push({ name: source.name, ok: true, days: Object.keys(days).sort(), note: summary });
     } catch (err) {
       const msg = (err as Error).message;
       Object.assign(st, { lastOk: false, lastError: msg, lastErrorAt: now.toISOString() });
+      step.state = "failed";
+      step.error = msg;
       report.push({ name: source.name, ok: false, days: [], error: msg });
     }
+    progress.current = null;
+    beat();
   }
   saveState(state);
   return report;

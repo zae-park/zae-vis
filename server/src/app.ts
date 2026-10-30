@@ -6,6 +6,8 @@ import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join, normalize, sep } from "node:path";
 import type { AskOutcome } from "./ask.ts";
 import type { RefreshPhase, SearchBackend } from "./autorag.ts";
+import type { HfStatus } from "./hf.ts";
+import type { CollectProgress } from "./sources/index.ts";
 import { AUDIO_EXT } from "./transcribe.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
@@ -18,7 +20,7 @@ export type AppOptions = {
   /** Optional features; absent in minimal tests. */
   sources?: {
     list(): unknown[];
-    collect(only?: string[]): Promise<CollectReportLike>;
+    collect(only?: string[], hooks?: { onProgress?: (p: CollectProgress) => void }): Promise<CollectReportLike>;
     update(name: string, patch: Record<string, unknown>): void;
     add(src: { name: string; command: string; description?: string }): void;
     remove(name: string): boolean;
@@ -70,6 +72,13 @@ export type AppOptions = {
   tokenizer?: {
     sync(canRestart: boolean): Promise<Record<string, unknown>>;
     refreshed(force: boolean, ok: boolean): void;
+  };
+  /** Hugging Face login for speaker diarization. Absent in tests that do not exercise it. */
+  hf?: {
+    status(): HfStatus;
+    login(): Promise<HfStatus>;
+    check(): Promise<HfStatus>;
+    logout(): HfStatus;
   };
   audio?: {
     dir(): string;
@@ -182,6 +191,7 @@ export function createApp(opts: AppOptions): Server {
   let lastRefresh: { finishedAt: string; ok: boolean; error?: string } | null = null;
   let collecting: Promise<unknown> | null = null;
   let lastCollect: { finishedAt: string; report: CollectReportLike; error?: string } | null = null;
+  let progress: CollectProgress | null = null;
 
   function startRefresh(force: boolean, phases?: RefreshPhase[]): void {
     if (refreshing) return;
@@ -426,7 +436,7 @@ export function createApp(opts: AppOptions): Server {
 
         case "GET /sources":
           if (!opts.sources) return notFound(res);
-          return send(res, 200, { sources: opts.sources.list(), collecting: collecting !== null, lastCollect });
+          return send(res, 200, { sources: opts.sources.list(), collecting: collecting !== null, progress, lastCollect });
 
         case "POST /sources": {
           if (!opts.sources) return notFound(res);
@@ -503,7 +513,22 @@ export function createApp(opts: AppOptions): Server {
         }
 
         case "GET /collect":
-          return send(res, 200, { collecting: collecting !== null, lastCollect });
+          return send(res, 200, { collecting: collecting !== null, progress, lastCollect });
+
+        case "GET /hf":
+          if (!opts.hf) return notFound(res);
+          return send(res, 200, opts.hf.status());
+
+        case "DELETE /hf":
+          if (!opts.hf) return notFound(res);
+          return send(res, 200, opts.hf.logout());
+
+        case "POST /hf": {
+          if (!opts.hf) return notFound(res);
+          if (arg === "login") return send(res, 200, await opts.hf.login());
+          if (arg === "check") return send(res, 200, await opts.hf.check());
+          return notFound(res);
+        }
 
         case "POST /collect": {
           if (!opts.sources) return notFound(res);
@@ -513,29 +538,43 @@ export function createApp(opts: AppOptions): Server {
           if (!collecting) {
             const srcs = opts.sources;
             const full = !only || only.length === 0;
-            collecting = srcs
-              .collect(only)
-              .then((report) => {
+            collecting = (async () => {
+              let report: CollectReportLike | null = null;
+              try {
+                report = await srcs.collect(only, { onProgress: (p) => (progress = p) });
                 lastCollect = { finishedAt: new Date().toISOString(), report };
-                if (withIndex) startRefresh(false);
-                return report;
-              })
-              .catch((err: unknown) => {
+              } catch (err) {
                 lastCollect = { finishedAt: new Date().toISOString(), report: [], error: String((err as Error)?.message ?? err) };
-                return null;
-              })
-              .finally(() => {
-                collecting = null;
-              })
-              .then(async (report) => {
-                if (!full || !report) return;
-                let index = "건너뜀";
-                if (withIndex) {
+              }
+              let index = "건너뜀";
+              if (withIndex && report) {
+                const now = new Date().toISOString();
+                const steps = (progress?.steps ?? []).map((s) => (s.state === "running" ? { ...s, state: "done" as const } : s));
+                progress = {
+                  startedAt: progress?.startedAt ?? now,
+                  beat: now,
+                  outputAt: now,
+                  current: { name: "index", title: "검색 색인", line: "모은 기록을 검색에 넣는 중" },
+                  steps: [...steps, { name: "index", title: "검색 색인", state: "running", line: "모은 기록을 검색에 넣는 중", since: now }],
+                };
+                startRefresh(false);
+                const beat = setInterval(() => {
+                  if (!progress) return;
+                  const t = new Date().toISOString();
+                  progress = { ...progress, beat: t, outputAt: t };
+                }, 5000);
+                try {
                   await refreshing;
-                  index = lastRefresh?.ok ? "완료" : `실패: ${lastRefresh?.error ?? "?"}`;
+                } finally {
+                  clearInterval(beat);
                 }
-                srcs.recordDaily?.({ ok: report.every((r) => r.ok), index });
-              });
+                index = lastRefresh?.ok ? "완료" : `실패: ${lastRefresh?.error ?? "?"}`;
+              }
+              if (full && report) srcs.recordDaily?.({ ok: report.every((r) => r.ok), index });
+            })().finally(() => {
+              collecting = null;
+              progress = null;
+            });
           }
           return send(res, 202, { collecting: true });
         }

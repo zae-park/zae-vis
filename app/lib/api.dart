@@ -240,6 +240,22 @@ class WorklogApi {
     await _send('POST', '/collect', {if (only != null) 'sources': only});
   }
 
+  /// Speaker diarization login. A 404 means this server does not offer it.
+  Future<HfStatus?> hfStatus() async {
+    try {
+      return HfStatus.fromJson(await _get('/hf'));
+    } on ApiException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<HfStatus> hfLogin() async => HfStatus.fromJson(await _send('POST', '/hf/login'));
+
+  Future<HfStatus> hfCheck() async => HfStatus.fromJson(await _send('POST', '/hf/check'));
+
+  Future<HfStatus> hfLogout() async => HfStatus.fromJson(await _send('DELETE', '/hf'));
+
   // ── external AutoRAG datasources (Slack, Obsidian, GitHub …) ─────────────
   /// Templates with their probe (installed? archive?) and connection state. An older server answers
   /// 404, which reads as "none".
