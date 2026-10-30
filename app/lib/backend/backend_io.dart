@@ -160,6 +160,22 @@ class IoBackend implements Backend {
     }
     throw StateError('이 운영체제에서는 자동 업데이트를 지원하지 않습니다.');
   }
+
+  @override
+  String? get quarantineCommand {
+    if (!Platform.isMacOS) return null;
+    final bundle = macAppBundle(Platform.resolvedExecutable) ?? '/Applications/zaevis.app';
+    return quarantineClearCommand(bundle);
+  }
+
+  @override
+  Future<void> clearQuarantine() async {
+    final command = quarantineCommand;
+    if (command == null) return;
+    final bundle = macAppBundle(Platform.resolvedExecutable) ?? '/Applications/zaevis.app';
+    final result = await Process.run('xattr', ['-dr', 'com.apple.quarantine', bundle]);
+    if (result.exitCode != 0) throw StateError('명령을 실행하지 못했습니다.\n${result.stderr}'.trim());
+  }
 }
 
 Backend createBackend() => IoBackend.detect();

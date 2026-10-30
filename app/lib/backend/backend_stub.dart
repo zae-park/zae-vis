@@ -21,6 +21,10 @@ class _WebBackend implements Backend {
   Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {
     throw UnsupportedError('브라우저에서는 업데이트할 수 없습니다');
   }
+  @override
+  String? get quarantineCommand => null;
+  @override
+  Future<void> clearQuarantine() async {}
 }
 
 Backend createBackend() => _WebBackend();

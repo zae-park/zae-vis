@@ -116,11 +116,11 @@ cat > "$STAGE/처음 열 때 읽어주세요.txt" <<'TXT'
 zaevis 설치
 
 1. zaevis.app 을 Applications 폴더로 끌어다 놓으세요.
-2. Applications 에서 zaevis 를 여세요.
-   "확인되지 않은 개발자" 경고가 뜨면:
-   - 시스템 설정 → 개인정보 보호 및 보안 → 아래쪽 "그래도 열기"를 누르거나
-   - 터미널에서 한 번: xattr -dr com.apple.quarantine /Applications/zaevis.app
-3. 첫 화면의 설정 마법사를 따라가면 끝입니다. 다른 설치는 필요 없습니다.
+2. "손상된 앱"이라고 하면 터미널을 열고 아래를 붙여넣은 뒤 Enter를 누르세요.
+   xattr -dr com.apple.quarantine /Applications/zaevis.app
+3. Applications 에서 zaevis 를 여세요.
+   다음 업데이트부터는 앱 화면에서 받고, 같은 명령은 알림의 "명령 실행"으로 대신할 수 있습니다.
+4. 첫 화면의 설정 마법사를 따라가면 끝입니다. 다른 설치는 필요 없습니다.
 TXT
 
 DMG="$DIST/zaevis-$VERSION-$ARCH.dmg"

@@ -48,8 +48,14 @@ abstract class Backend {
   Future<void> open(String target);
 
   /// Downloads the installer at [url] and replaces this app, then restarts it.
-  /// [onProgress] is 0..1 while the file arrives, then null once installation starts.
+  /// [onProgress] is 0..1 while the file arrives, -1 when the length is unknown, then null once installation starts.
   Future<void> installUpdate(String url, void Function(double? progress) onProgress);
+
+  /// Terminal command that clears the macOS download quarantine on this app, or null elsewhere.
+  String? get quarantineCommand;
+
+  /// Runs [quarantineCommand] so Gatekeeper does not call the app damaged.
+  Future<void> clearQuarantine();
 }
 
 Backend createBackend() => impl.createBackend();

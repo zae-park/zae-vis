@@ -36,7 +36,16 @@ Future<void> replaceMacApp({
   if (src == null) throw Exception('이미지 안에서 zaevis.app을 찾지 못했습니다.');
   final copied = await runProc('ditto', [src.path, appBundle]);
   if (copied.exitCode != 0) throw Exception('앱을 교체하지 못했습니다.\n${copied.stderr}'.trim());
-  await runProc('xattr', ['-dr', 'com.apple.quarantine', appBundle]);
+  final cleared = await runProc('xattr', ['-dr', 'com.apple.quarantine', appBundle]);
+  if (cleared.exitCode != 0) {
+    throw Exception('격리 표시를 지우지 못했습니다. 터미널에서 실행하세요.\n${quarantineClearCommand(appBundle)}\n${cleared.stderr}'.trim());
+  }
+}
+
+/// What to paste in Terminal when macOS says the downloaded app is damaged.
+String quarantineClearCommand(String appBundle) {
+  final quoted = appBundle.contains(' ') ? "'${appBundle.replaceAll("'", r"'\''")}'" : appBundle;
+  return 'xattr -dr com.apple.quarantine $quoted';
 }
 
 /// Mounts [dmg], replaces [appBundle], then unmounts. [run] is the process runner (tests pass a fake).
@@ -72,7 +81,9 @@ Future<void> downloadTo(Uri url, File dest, void Function(double? progress) onPr
   final http = client ?? HttpClient();
   try {
     final req = await http.getUrl(url);
+    req.followRedirects = true;
     req.headers.set(HttpHeaders.userAgentHeader, 'zaevis');
+    req.headers.set(HttpHeaders.acceptHeader, 'application/octet-stream');
     final res = await req.close();
     if (res.statusCode != 200) throw Exception('설치 파일을 받지 못했습니다 (${res.statusCode})');
     final total = res.contentLength;
@@ -82,7 +93,7 @@ Future<void> downloadTo(Uri url, File dest, void Function(double? progress) onPr
     await for (final chunk in res) {
       got += chunk.length;
       sink.add(chunk);
-      if (total > 0) onProgress(got / total);
+      onProgress(total > 0 ? got / total : -1);
     }
     await sink.close();
   } finally {

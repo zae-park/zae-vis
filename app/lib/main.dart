@@ -322,6 +322,8 @@ class _HomeShellState extends State<HomeShell> {
                 phase: _updatePhase,
                 progress: _updateProgress,
                 error: _updateError,
+                quarantineCommand: widget.backend?.quarantineCommand,
+                onRunQuarantine: widget.backend == null ? null : () => widget.backend!.clearQuarantine(),
                 onLater: () => setState(() => _update = null),
                 onUpdate: _applyUpdate,
               ),

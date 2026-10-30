@@ -8,26 +8,45 @@ import '../recording/recorder.dart';
 import 'input_dialogs.dart' show toast;
 
 /// Records from the microphone and uploads the result to the inbox (whisperX transcribes it in the
-/// background when installed). Returns the saved file name, or null when cancelled.
-Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder? recorder}) =>
-    showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _RecordDialog(api: api, recorder: recorder ?? PluginRecorder()),
-    );
+/// background when installed). The controls float at the bottom right and can be dragged, so the
+/// rest of the app stays usable. Returns the saved file name, or null when cancelled.
+Completer<String?>? _recordOpen;
 
-class _RecordDialog extends StatefulWidget {
-  const _RecordDialog({required this.api, required this.recorder});
+Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder? recorder}) {
+  final pending = _recordOpen;
+  if (pending != null) return pending.future;
+  final completer = Completer<String?>();
+  _recordOpen = completer;
+  final overlay = Overlay.of(context, rootOverlay: true);
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => _RecordFloater(
+      api: api,
+      recorder: recorder ?? PluginRecorder(),
+      onDone: (saved) {
+        entry.remove();
+        _recordOpen = null;
+        if (!completer.isCompleted) completer.complete(saved);
+      },
+    ),
+  );
+  overlay.insert(entry);
+  return completer.future;
+}
+
+class _RecordFloater extends StatefulWidget {
+  const _RecordFloater({required this.api, required this.recorder, required this.onDone});
   final WorklogApi api;
   final Recorder recorder;
+  final void Function(String? saved) onDone;
 
   @override
-  State<_RecordDialog> createState() => _RecordDialogState();
+  State<_RecordFloater> createState() => _RecordFloaterState();
 }
 
 enum _Phase { idle, recording, uploading }
 
-class _RecordDialogState extends State<_RecordDialog> {
+class _RecordFloaterState extends State<_RecordFloater> {
   _Phase _phase = _Phase.idle;
   final _chunks = <Uint8List>[];
   StreamSubscription<Uint8List>? _sub;
@@ -36,6 +55,10 @@ class _RecordDialogState extends State<_RecordDialog> {
   Duration _elapsed = Duration.zero;
   double _level = 0;
   String? _error;
+  final _stackKey = GlobalKey();
+  final _cardKey = GlobalKey();
+  bool _moved = false;
+  Offset _topLeft = Offset.zero;
 
   @override
   void dispose() {
@@ -79,7 +102,7 @@ class _RecordDialogState extends State<_RecordDialog> {
     setState(() => _phase = _Phase.uploading);
     try {
       final saved = await widget.api.uploadAudio(name: name, size: bytes.length, bytes: bytes);
-      if (mounted) Navigator.of(context).pop(saved);
+      if (mounted) widget.onDone(saved);
     } on ApiException catch (e) {
       setState(() {
         _phase = _Phase.idle;
@@ -93,7 +116,22 @@ class _RecordDialogState extends State<_RecordDialog> {
     if (_phase == _Phase.recording) await widget.recorder.stop();
     unawaited(_sub?.cancel() ?? Future.value());
     _sub = null;
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) widget.onDone(null);
+  }
+
+  void _drag(DragUpdateDetails details) {
+    final stack = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    final card = _cardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (stack == null || card == null) return;
+    if (!_moved) {
+      _topLeft = stack.globalToLocal(card.localToGlobal(Offset.zero));
+      _moved = true;
+    }
+    final size = stack.size;
+    setState(() {
+      final next = _topLeft + details.delta;
+      _topLeft = Offset(next.dx.clamp(8, size.width - 308), next.dy.clamp(8, size.height - 80));
+    });
   }
 
   @override
@@ -103,46 +141,65 @@ class _RecordDialogState extends State<_RecordDialog> {
     String two(int n) => n.toString().padLeft(2, '0');
     final mmss = '${two(_elapsed.inMinutes)}:${two(_elapsed.inSeconds % 60)}';
     final recording = _phase == _Phase.recording;
-    return AlertDialog(
-      title: const Text('녹음'),
-      content: SizedBox(
-        width: 360,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 8),
-          GestureDetector(
-            onTap: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
-            child: CircleAvatar(
-              radius: 40,
-              backgroundColor: recording ? scheme.error : scheme.primary,
-              child: Icon(recording ? Icons.stop : Icons.mic, size: 40, color: scheme.onPrimary),
+    return SizedBox.expand(
+      key: _stackKey,
+      child: Stack(children: [
+        Positioned(
+          left: _moved ? _topLeft.dx : null,
+          top: _moved ? _topLeft.dy : null,
+          right: _moved ? null : 20,
+          bottom: _moved ? null : 24,
+          width: 300,
+          child: Material(
+            key: _cardKey,
+            elevation: 6,
+            color: scheme.surfaceContainerLowest,
+            shadowColor: Colors.black26,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: scheme.outlineVariant)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(children: [
+                  GestureDetector(
+                    onPanUpdate: _drag,
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.drag_indicator, size: 18),
+                      SizedBox(width: 4),
+                      Text('녹음'),
+                    ]),
+                  ),
+                  const Spacer(),
+                  IconButton(tooltip: '닫기', visualDensity: VisualDensity.compact, onPressed: _phase == _Phase.uploading ? null : _cancel, icon: const Icon(Icons.close, size: 18)),
+                ]),
+                Text(recording ? mmss : (_phase == _Phase.uploading ? '올리는 중…' : '눌러서 녹음 시작'), style: t.titleSmall),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: recording ? _level : 0, minHeight: 6, borderRadius: BorderRadius.circular(3)),
+                const SizedBox(height: 8),
+                Text(
+                  recording
+                      ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
+                      : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
+                  style: t.bodySmall,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: TextStyle(color: scheme.error)),
+                ],
+                const SizedBox(height: 10),
+                Row(children: [
+                  TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: const Text('취소')),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
+                    icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record, size: 18),
+                    label: Text(recording ? '중지하고 올리기' : '녹음 시작'),
+                  ),
+                ]),
+              ]),
             ),
           ),
-          const SizedBox(height: 14),
-          Text(recording ? mmss : (_phase == _Phase.uploading ? '올리는 중…' : '눌러서 녹음 시작'), style: t.titleMedium),
-          const SizedBox(height: 10),
-          LinearProgressIndicator(value: recording ? _level : 0, minHeight: 6, borderRadius: BorderRadius.circular(3)),
-          const SizedBox(height: 12),
-          Text(
-            recording
-                ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
-                : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
-            style: t.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Text(_error!, style: TextStyle(color: scheme.error), textAlign: TextAlign.center),
-          ],
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: const Text('취소')),
-        FilledButton.icon(
-          onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
-          icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record),
-          label: Text(recording ? '중지하고 올리기' : '녹음 시작'),
         ),
-      ],
+      ]),
     );
   }
 }

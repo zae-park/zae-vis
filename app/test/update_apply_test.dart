@@ -4,6 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zaevis/update_apply.dart';
 
 void main() {
+  test('the quarantine command names the installed app', () {
+    expect(quarantineClearCommand('/Applications/zaevis.app'), 'xattr -dr com.apple.quarantine /Applications/zaevis.app');
+    expect(quarantineClearCommand('/Applications/My Apps/zaevis.app'), "xattr -dr com.apple.quarantine '/Applications/My Apps/zaevis.app'");
+  });
+
   test('the running macOS bundle is the .app above Contents', () {
     final sep = Platform.pathSeparator;
     expect(macAppBundle(['', 'Applications', 'zaevis.app', 'Contents', 'MacOS', 'zaevis'].join(sep)), '${sep}Applications${sep}zaevis.app');

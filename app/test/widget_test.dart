@@ -72,6 +72,10 @@ class _FakeBackend implements Backend {
   Future<void> open(String target) async {}
   @override
   Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {}
+  @override
+  String? get quarantineCommand => null;
+  @override
+  Future<void> clearQuarantine() async {}
 }
 
 WorklogApi _fakeApi() => WorklogApi(
@@ -595,7 +599,33 @@ void main() {
     expect(find.textContaining('마이크 접근이 허용되지 않았습니다'), findsOneWidget);
     await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
-    expect(find.text('눌러서 녹음 시작'), findsNothing, reason: 'dialog closed');
+    expect(find.text('눌러서 녹음 시작'), findsNothing, reason: 'floater closed');
+  });
+
+  testWidgets('recording floater stays out of the way and can be dragged', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: _FakeRecorder()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('녹음'));
+    await tester.pumpAndSettle();
+
+    final before = tester.getTopLeft(find.text('눌러서 녹음 시작'));
+    expect(before.dx, greaterThan(700));
+    expect(before.dy, greaterThan(400));
+
+    // the overlay does not take the screen: the search field still receives taps
+    await tester.tap(find.byType(TextField).first);
+    await tester.pump();
+    expect(find.text('눌러서 녹음 시작'), findsOneWidget);
+
+    await tester.drag(find.byIcon(Icons.drag_indicator), const Offset(-160, -120));
+    await tester.pump();
+    final after = tester.getTopLeft(find.text('눌러서 녹음 시작'));
+    expect(after.dx, lessThan(before.dx - 80));
+    expect(after.dy, lessThan(before.dy - 60));
   });
 
   testWidgets('keyboard shortcuts: ⌘2 switches tab, ⌘K returns to search and focuses it, ⌘N opens 한 줄 기록', (tester) async {
