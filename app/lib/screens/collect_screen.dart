@@ -6,11 +6,14 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../api.dart';
 import '../backend/backend.dart';
 import '../models.dart';
+import '../recording_trail.dart';
 import '../widgets/task_dialog.dart';
 import '../widgets/common.dart';
 import '../recording/recorder.dart';
 import '../widgets/input_dialogs.dart';
 import '../widgets/record_dialog.dart';
+import '../widgets/recording_trail_strip.dart';
+import 'file_screen.dart';
 
 String _ago(DateTime? t) {
   if (t == null) return '아직 수집 안 함';
@@ -24,6 +27,8 @@ String _ago(DateTime? t) {
 String _size(int b) => b >= 1 << 20 ? '${(b / (1 << 20)).toStringAsFixed(1)}MB' : '${(b / 1024).ceil()}KB';
 
 /// Data sources (batch) + inbox and real-time input.
+enum _ConnectPane { now, daily, outside }
+
 class CollectScreen extends StatefulWidget {
   const CollectScreen({super.key, required this.api, this.recorder, this.backend});
   final WorklogApi api;
@@ -39,9 +44,11 @@ class CollectScreen extends StatefulWidget {
 class _CollectScreenState extends State<CollectScreen> {
   SourcesState? _sources;
   Inbox? _inbox;
+  IndexStatus? _index;
   DatasourcesState? _external;
   Object? _error;
   Timer? _poll;
+  _ConnectPane _pane = _ConnectPane.now;
 
   /// Connector just added from the dialog: its card opens so the first collect's result is visible.
   String? _justAdded;
@@ -63,10 +70,15 @@ class _CollectScreenState extends State<CollectScreen> {
       final s = await widget.api.sources();
       final i = await widget.api.inbox();
       final x = await widget.api.datasources();
+      IndexStatus? index;
+      try {
+        index = await widget.api.indexStatus();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _sources = s;
         _inbox = i;
+        _index = index;
         _external = x;
         _error = null;
       });
@@ -132,10 +144,42 @@ class _CollectScreenState extends State<CollectScreen> {
     final inbox = _inbox;
     if (s == null || inbox == null) return const Center(child: CircularProgressIndicator());
 
+    final trails = recordingTrails(inbox: inbox, index: _index, collectLine: s.progress?.currentLine);
     return Readable(
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 32), children: [
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        RecordingTrailStrip(
+          items: trails,
+          onOpen: (item) {
+            if (item.watch) {
+              showRecordDialog(context, widget.api, recorder: widget.recorder, watch: item.file);
+              return;
+            }
+            final path = item.openPath;
+            if (path != null) FileScreen.open(context, widget.api, path);
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<_ConnectPane>(
+              segments: const [
+                ButtonSegment(value: _ConnectPane.now, label: Text('지금'), icon: Icon(Icons.inbox_outlined, size: 18)),
+                ButtonSegment(value: _ConnectPane.daily, label: Text('매일'), icon: Icon(Icons.event_repeat, size: 18)),
+                ButtonSegment(value: _ConnectPane.outside, label: Text('바깥'), icon: Icon(Icons.hub_outlined, size: 18)),
+              ],
+              selected: {_pane},
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              onSelectionChanged: (v) => setState(() => _pane = v.first),
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
+          if (_pane == _ConnectPane.now) ...[
           // ── real-time input ─────────────────────────────────────────────
           const SectionHeader('바로 넣기', subtitle: '저장하는 즉시 worklog에 들어갑니다. 검색에는 다음 색인 뒤에 잡힙니다.'),
           Wrap(spacing: 8, runSpacing: 8, children: [
@@ -175,7 +219,9 @@ class _CollectScreenState extends State<CollectScreen> {
           ]),
           const SizedBox(height: 16),
           _InboxCard(inbox: inbox, onCancel: _cancelTranscription),
-          const SizedBox(height: 28),
+          ],
+          if (_pane == _ConnectPane.daily) ...[
+          const SizedBox(height: 8),
 
           // ── batch sources ────────────────────────────────────────────────
           SectionHeader(
@@ -214,7 +260,10 @@ class _CollectScreenState extends State<CollectScreen> {
             onPressed: () async {
               final name = await showAddSourceDialog(context, widget.api);
               if (name == null) return;
-              setState(() => _justAdded = name);
+              setState(() {
+                _justAdded = name;
+                _pane = _ConnectPane.daily;
+              });
               // collect right away so the user sees whether the command works, on the card below
               await _act(() => widget.api.collect(only: [name]), done: '"$name" 커넥터를 추가하고 첫 수집을 시작했습니다. 결과는 카드에 표시됩니다.');
             },
@@ -226,9 +275,10 @@ class _CollectScreenState extends State<CollectScreen> {
             child: Text('Markdown이나 텍스트를 출력하는 명령이면 무엇이든 데이터소스가 됩니다 — 폴더의 노트, 캘린더, 사내 도구의 내보내기 스크립트.',
                 style: Theme.of(context).textTheme.bodySmall),
           ),
+          ],
 
           // ── external AutoRAG datasources ─────────────────────────────────
-          if (_external != null && _external!.datasources.isNotEmpty) ...[
+          if (_pane == _ConnectPane.outside && _external != null && _external!.datasources.isNotEmpty) ...[
             const SizedBox(height: 28),
             SectionHeader(
               '외부 소스 (AutoRAG)',
@@ -263,9 +313,13 @@ class _CollectScreenState extends State<CollectScreen> {
                   onRemove: () => _act(() => widget.api.removeDatasource(d.name), done: '${d.title} 연결을 지웠습니다'),
                 ),
               ),
-          ],
+            ],
+          if (_pane == _ConnectPane.outside && (_external == null || _external!.datasources.isEmpty))
+            Text('연결된 외부 소스가 없습니다.', style: Theme.of(context).textTheme.bodySmall),
         ]),
-      ),
+          ),
+        ),
+      ]),
     );
   }
 }

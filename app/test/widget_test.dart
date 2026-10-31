@@ -31,6 +31,7 @@ List<Object>? mockAskStatusRail;
 List<Object>? mockDigestRail;
 bool mockKiwiInstalled = false;
 bool mockCollecting = false;
+bool mockSearchEmpty = false;
 List<Object> mockInboxJobs = const [];
 bool mockHoldTranscription = false;
 String? mockLastAudio;
@@ -103,7 +104,7 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({
               'ok': true,
               'query': req.url.queryParameters['q'],
-              'hits': [
+              'hits': mockSearchEmpty ? <Object>[] : [
                 {
                   'number': 1, 'title': '색인 회의', 'path': 'sources/git/2026-10-09.md', 'snippet': '색인할 파일이 빠져서', 'score': 1.0, 'weak': false,
                   'context': {'kind': 'git', 'sourceLabel': 'git 커밋', 'date': '2026-10-09', 'section': 'notes', 'author': '박재', 'matched': ['색인']},
@@ -532,6 +533,8 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('정리'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('서비스 순서'), findsOneWidget);
     expect(find.text('Claude Code · 할당량'), findsOneWidget);
@@ -559,6 +562,8 @@ void main() {
     expect(find.textContaining('Claude Code·Codex·Gemini CLI 중 하나를 설치하세요'), findsOneWidget);
     await tester.tap(find.text('설정 열기'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('정리'));
+    await tester.pumpAndSettle();
     expect(find.text('정리 (지식화)'), findsOneWidget); // settings opened
   });
 
@@ -570,13 +575,20 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
 
     expect(find.text('의미 검색 (로컬 임베딩)'), findsOneWidget);
     expect(find.text('검색 결과 재정렬 (OpenRouter)'), findsOneWidget);
     expect(find.textContaining('지금 외부로 나가는 요청: 없음'), findsOneWidget);
     expect(find.text('키 삭제'), findsNothing);
+    // nothing to save yet: the save button stays disabled until a key is typed
+    final save = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장'));
+    expect(save.onPressed, isNull);
 
     // the digest section lists detected agents, marks the one that will run, shows the last report
+    await tester.tap(find.text('정리'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('Claude Code'), findsOneWidget);
     expect(find.text('Codex CLI'), findsOneWidget);
@@ -590,9 +602,6 @@ void main() {
     await tester.tap(find.ancestor(of: find.text('지금 정리하기'), matching: find.byWidgetPredicate((w) => w is FilledButton)));
     await tester.pumpAndSettle();
     expect(posted.where((r) => r.url.path == '/api/digest/run').length, 1);
-    // nothing to save yet: the save button stays disabled until a key is typed
-    final save = tester.widget<FilledButton>(find.widgetWithText(FilledButton, '저장'));
-    expect(save.onPressed, isNull);
   });
 
   testWidgets('record button records, stops, and uploads a WAV to the inbox', (tester) async {
@@ -643,7 +652,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('전사 취소'), findsOneWidget);
-    expect(find.textContaining('멈추려면 전사 취소'), findsOneWidget);
+    expect(find.textContaining('오른쪽 위를 누르면'), findsOneWidget);
     await tester.tap(find.text('전사 취소'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -806,11 +815,13 @@ void main() {
     await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
 
+    expect(find.text('전사본 (1)'), findsOneWidget);
+    await tester.tap(find.text('매일'));
+    await tester.pumpAndSettle();
     expect(find.text('git 커밋'), findsOneWidget);
     expect(find.textContaining('커밋 3개'), findsOneWidget);
     expect(find.text('EXTENDED_HISTORY 필요'), findsOneWidget);
     expect(find.text('지금 수집'), findsOneWidget);
-    expect(find.text('전사본 (1)'), findsOneWidget);
   });
 
   testWidgets('collect shows which source is running instead of only a spinner', (tester) async {
@@ -825,6 +836,8 @@ void main() {
     await tester.tap(find.text('연결').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('매일'));
+    await tester.pump();
 
     expect(find.textContaining('진행 중'), findsOneWidget);
     expect(find.textContaining('음성 인식 42%'), findsWidgets);
@@ -873,6 +886,8 @@ void main() {
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('연결').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('매일'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('셸 명령 이력'));
     await tester.pumpAndSettle();
@@ -1020,6 +1035,33 @@ void main() {
     expect(find.text('1 / 2건'), findsOneWidget);
     expect(find.text('무관한 줄'), findsOneWidget);
     expect(find.text('색인할 파일이 빠져서'), findsNothing);
+
+    SearchScreen.clock = () => DateTime(2026, 11, 15);
+    await tester.tap(find.widgetWithText(ChoiceChip, '이번 달'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('전체 2건'), findsOneWidget);
+    await tester.tap(find.text('필터 지우기'));
+    await tester.pumpAndSettle();
+    expect(find.text('2건'), findsOneWidget);
+  });
+
+  testWidgets('an empty latin search says to ask in Korean', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockSearchEmpty = true;
+    indexPolls = 5;
+    addTearDown(() {
+      mockSearchEmpty = false;
+      indexPolls = 0;
+    });
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'rosetta');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('한글로 물어보세요'), findsOneWidget);
   });
 
   testWidgets('settings: notification switch saves; the hotkey dialog records ⌘⇧J', (tester) async {
@@ -1041,6 +1083,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(jsonDecode(posted.single.body), {'notifications': false});
 
+    await tester.tap(find.text('앱'));
+    await tester.pumpAndSettle();
     await tester.dragUntilVisible(find.text('바꾸기').last.hitTestable(), scrollable, const Offset(0, -250));
     await tester.tap(find.text('바꾸기').last);
     await tester.pumpAndSettle();
@@ -1069,6 +1113,9 @@ void main() {
     mockKiwiInstalled = false;
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    indexPolls = 0;
     await tester.tap(find.text('색인'));
     // not pumpAndSettle: the spinner in the button animates until the 2s poll fires
     await tester.pump();
@@ -1136,6 +1183,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
     final tile = find.widgetWithText(ListTile, '한국어 형태소 분석 (Kiwi)');
     await tester.dragUntilVisible(tile, find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
     await tester.pumpAndSettle();
@@ -1182,6 +1231,8 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('매일'));
+    await tester.pumpAndSettle();
     await tester.dragUntilVisible(find.text('커넥터 추가').hitTestable(), find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
     await tester.tap(find.text('커넥터 추가'));
     await tester.pumpAndSettle();
@@ -1211,6 +1262,8 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('연결').first);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('바깥'));
+    await tester.pumpAndSettle();
     final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
     await tester.dragUntilVisible(find.text('외부 소스 (AutoRAG)').hitTestable(), list, const Offset(0, -250));
     await tester.pumpAndSettle();
@@ -1228,7 +1281,7 @@ void main() {
     await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));
     await tester.tap(find.text('Obsidian 볼트'));
     await tester.pumpAndSettle();
-    expect(find.text('연결 안 됨'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('ext-obsidian')), matching: find.text('연결 안 됨')), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextField, '볼트 폴더 *'), '/tmp/vault');
     await tester.dragUntilVisible(find.widgetWithText(FilledButton, '연결').hitTestable(), list, const Offset(0, -250));
     await tester.tap(find.widgetWithText(FilledButton, '연결'));
@@ -1251,6 +1304,8 @@ void main() {
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('연결').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('바깥'));
     await tester.pumpAndSettle();
     final list = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
     await tester.dragUntilVisible(find.text('Obsidian 볼트').hitTestable(), list, const Offset(0, -250));

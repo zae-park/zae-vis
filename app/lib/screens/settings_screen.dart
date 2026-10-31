@@ -24,9 +24,12 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+enum _SettingsPane { mic, digest, search, app }
+
 class _SettingsScreenState extends State<SettingsScreen> {
   late final _server = TextEditingController(text: widget.api.baseUrl);
   late Future<AppSettings> _future = widget.api.settings();
+  _SettingsPane _pane = _SettingsPane.mic;
 
   @override
   void dispose() {
@@ -151,9 +154,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : s.scheduleLoaded
                           ? '매일 ${s.dailyAt} 실행 중 (맥이 잠자기였으면 깨어날 때 실행)'
                           : '등록됐지만 아직 로드되지 않음';
-              final wide = MediaQuery.sizeOf(context).width >= 1100;
-              final collect = <Widget>[
-                Text('매일 수집 · 색인', style: t.titleMedium),
+              final scheduleTile = <Widget>[
+                Text('매일 수집', style: t.titleMedium),
                 const SizedBox(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -176,6 +178,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 if (s.lastDaily != null)
                   Padding(padding: const EdgeInsets.only(left: 56), child: Text('마지막 실행: ${s.lastDaily!.toLocal()}'.split('.').first, style: t.bodySmall)),
+              ];
+              final search = <Widget>[
+                Text('검색', style: t.titleMedium),
+                const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.bolt),
@@ -185,7 +191,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (v) => _update(indexOnInject: v),
                 ),
                 const SizedBox(height: 16),
-                Text('검색', style: t.titleMedium),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   secondary: const Icon(Icons.psychology_outlined),
@@ -198,19 +203,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (s.tokenizer != null) _KiwiTile(status: s.tokenizer!, managed: _managed, onInstall: _installKiwi),
                 if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
               ];
-              final side = <Widget>[
-                Text('알림', style: t.titleMedium),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Icons.notifications_outlined),
-                  title: const Text('시스템 알림'),
-                  subtitle: const Text('정리가 끝나 검토할 것이 생겼을 때, 수집이 실패했을 때, 녹음 전사가 끝났을 때 알립니다. '
-                      '서버가 보내므로 앱 창이 닫혀 있어도 옵니다.'),
-                  value: s.notifications,
-                  onChanged: (v) => _update(notifications: v),
-                ),
-                const SizedBox(height: 16),
-                Text('확장', style: t.titleMedium),
+              final mic = <Widget>[
+                Text('녹음', style: t.titleMedium),
+                const SizedBox(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(s.whisperx ? Icons.check_circle_outline : Icons.extension_outlined),
@@ -223,9 +218,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : null,
                 ),
                 _HfLogin(api: widget.api, backend: widget.backend),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.notifications_outlined),
+                  title: const Text('시스템 알림'),
+                  subtitle: const Text('정리가 끝나 검토할 것이 생겼을 때, 수집이 실패했을 때, 녹음 전사가 끝났을 때 알립니다. '
+                      '서버가 보내므로 앱 창이 닫혀 있어도 옵니다.'),
+                  value: s.notifications,
+                  onChanged: (v) => _update(notifications: v),
+                ),
+              ];
+              final app = <Widget>[
+                ...scheduleTile,
                 if (_managed) ...[
                   const SizedBox(height: 16),
-                  Text('앱', style: t.titleMedium),
+                  Text('이 맥', style: t.titleMedium),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.open_in_browser),
@@ -305,20 +313,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ];
               return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('정리 (지식화)', style: t.titleMedium),
-                _DigestSection(api: widget.api),
-                const SizedBox(height: 20),
-                if (wide)
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: collect)),
-                    const SizedBox(width: 36),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: side)),
-                  ])
-                else ...[
-                  ...collect,
-                  const SizedBox(height: 16),
-                  ...side,
-                ],
+                SegmentedButton<_SettingsPane>(
+                  segments: const [
+                    ButtonSegment(value: _SettingsPane.mic, label: Text('녹음')),
+                    ButtonSegment(value: _SettingsPane.digest, label: Text('정리')),
+                    ButtonSegment(value: _SettingsPane.search, label: Text('검색')),
+                    ButtonSegment(value: _SettingsPane.app, label: Text('앱')),
+                  ],
+                  selected: {_pane},
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                  onSelectionChanged: (v) => setState(() => _pane = v.first),
+                ),
+                const SizedBox(height: 16),
+                ...switch (_pane) {
+                  _SettingsPane.mic => mic,
+                  _SettingsPane.digest => [
+                      Text('정리 (지식화)', style: t.titleMedium),
+                      _DigestSection(api: widget.api),
+                    ],
+                  _SettingsPane.search => search,
+                  _SettingsPane.app => app,
+                },
               ]);
             },
           ),

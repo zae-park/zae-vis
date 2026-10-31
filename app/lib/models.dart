@@ -309,6 +309,7 @@ class IndexStatus {
     this.embedding,
     this.progress,
     this.tokenizer,
+    this.finishedAt,
   });
 
   factory IndexStatus.fromJson(Json j) {
@@ -327,6 +328,7 @@ class IndexStatus {
       embedding: j['embedding'] is Json ? EmbeddingStatus.fromJson(j['embedding'] as Json) : null,
       progress: a['progress'] is Json ? IndexProgress.fromJson(a['progress'] as Json) : null,
       tokenizer: j['tokenizer'] is Json ? TokenizerStatus.fromJson(j['tokenizer'] as Json) : null,
+      finishedAt: last is Json ? DateTime.tryParse(_str(last['finishedAt'])) : null,
     );
   }
 
@@ -344,6 +346,9 @@ class IndexStatus {
 
   /// Korean keyword tokenizer (Kiwi) state; null when the server does not report it.
   final TokenizerStatus? tokenizer;
+
+  /// When the last index refresh finished. Null when this process has not finished one yet.
+  final DateTime? finishedAt;
 }
 
 /// What the BM25 index tokenizes with — Kiwi morphemes (`multilingual`) or whitespace only — and whether

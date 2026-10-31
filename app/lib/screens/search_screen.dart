@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
+import '../recording_trail.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/record_dialog.dart';
+import '../widgets/recording_trail_strip.dart';
 import 'ask_view.dart';
 import 'file_screen.dart';
 
@@ -66,14 +71,47 @@ class _SearchScreenState extends State<SearchScreen> {
   final Set<String> _kinds = {};
   SearchPeriod _period = SearchPeriod.all;
   SearchMode _mode = SearchMode.search;
+  Inbox? _inbox;
+  IndexStatus? _index;
+  Timer? _trailTimer;
   // the conversation lives here so switching to 검색 and back keeps it
   late final AskController _ask = AskController(widget.api);
 
   @override
+  void initState() {
+    super.initState();
+    _loadTrail();
+  }
+
+  @override
   void dispose() {
+    _trailTimer?.cancel();
     _controller.dispose();
     _ask.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadTrail() async {
+    try {
+      final inbox = await widget.api.inbox();
+      final index = await widget.api.indexStatus();
+      if (!mounted) return;
+      setState(() {
+        _inbox = inbox;
+        _index = index;
+      });
+      _trailTimer?.cancel();
+      if (inbox.transcribing) _trailTimer = Timer(const Duration(seconds: 2), _loadTrail);
+    } catch (_) {}
+  }
+
+  void _openTrail(RecordingTrail item) {
+    if (item.watch) {
+      showRecordDialog(context, widget.api, watch: item.file);
+      return;
+    }
+    final path = item.openPath;
+    if (path != null) FileScreen.open(context, widget.api, path);
   }
 
   void _submit([String? _]) {
@@ -84,6 +122,7 @@ class _SearchScreenState extends State<SearchScreen> {
       // ask for more than fits one screen: the filters below narrow it on the client
       _result = widget.api.search(q, topK: 40);
     });
+    _loadTrail();
   }
 
   void _setMode(SearchMode m) {
@@ -124,6 +163,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ]),
           ),
+          RecordingTrailStrip(items: _trails, onOpen: _openTrail),
           Expanded(
             child: ask ? AskView(controller: _ask, focusNode: widget.focusNode, onOpenSettings: widget.onOpenSettings) : _searchBody(),
           ),
@@ -147,7 +187,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       if (!r.ok) {
                         return _SearchError(result: r, onOpenIndex: widget.onOpenIndex);
                       }
-                      if (r.hits.isEmpty) return EmptyPane('"$_query"에 대한 결과가 없습니다.');
+                      if (r.hits.isEmpty) return _emptyNote(total: 0, shown: 0, filtered: false);
                       final now = SearchScreen.clock();
                       final kinds = <String, (String, int)>{};
                       for (final h in r.hits) {
@@ -171,7 +211,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ),
                         Expanded(
                           child: shown.isEmpty
-                              ? const EmptyPane('필터에 맞는 결과가 없습니다. 출처나 기간을 넓혀 보세요.', icon: Icons.filter_alt_off_outlined)
+                              ? _emptyNote(total: r.hits.length, shown: 0, filtered: _kinds.isNotEmpty || _period != SearchPeriod.all)
                               : ListView.separated(
                                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                                   itemCount: shown.length,
@@ -182,6 +222,31 @@ class _SearchScreenState extends State<SearchScreen> {
                       ]);
                     },
                   );
+  }
+
+  List<RecordingTrail> get _trails => _inbox == null ? const [] : recordingTrails(inbox: _inbox!, index: _index);
+
+  Widget _emptyNote({required int total, required int shown, required bool filtered}) {
+    final note = emptySearchNote(query: _query, total: total, shown: shown, filtered: filtered, index: _index, inbox: _inbox);
+    final clear = filtered && total > 0 && shown == 0;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(note, textAlign: TextAlign.center),
+          if (clear) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => setState(() {
+                _kinds.clear();
+                _period = SearchPeriod.all;
+              }),
+              child: const Text('필터 지우기'),
+            ),
+          ],
+        ]),
+      ),
+    );
   }
 }
 

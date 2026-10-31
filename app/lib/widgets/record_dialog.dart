@@ -12,7 +12,7 @@ import 'input_dialogs.dart' show toast;
 /// rest of the app stays usable. Returns the saved file name, or null when cancelled.
 Completer<String?>? _recordOpen;
 
-Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder? recorder}) {
+Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder? recorder, String? watch}) {
   final pending = _recordOpen;
   if (pending != null) return pending.future;
   final completer = Completer<String?>();
@@ -23,6 +23,7 @@ Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder
     builder: (_) => _RecordFloater(
       api: api,
       recorder: recorder ?? PluginRecorder(),
+      watch: watch,
       onQueued: (saved) {
         if (!completer.isCompleted) completer.complete(saved);
       },
@@ -38,9 +39,12 @@ Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder
 }
 
 class _RecordFloater extends StatefulWidget {
-  const _RecordFloater({required this.api, required this.recorder, required this.onQueued, required this.onDone});
+  const _RecordFloater({required this.api, required this.recorder, required this.onQueued, required this.onDone, this.watch});
   final WorklogApi api;
   final Recorder recorder;
+
+  /// An audio file already in the queue. The floater opens on its progress instead of a new recording.
+  final String? watch;
   /// The file is in the inbox. The floater stays up afterwards while whisperX runs.
   final void Function(String saved) onQueued;
   final void Function(String? saved) onDone;
@@ -70,6 +74,34 @@ class _RecordFloaterState extends State<_RecordFloater> {
   final _cardKey = GlobalKey();
   bool _moved = false;
   Offset _topLeft = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    final watch = widget.watch;
+    if (watch == null) return;
+    _phase = _Phase.transcribing;
+    _saved = watch;
+    _status = '전사 중…';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_closed) _follow(watch);
+    });
+  }
+
+  Future<void> _follow(String saved) async {
+    final job = await _readJob(saved);
+    if (!mounted || _closed) return;
+    if (job != _Job.active) {
+      if (job == _Job.gone) _close(saved);
+      return;
+    }
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final next = await _readJob(saved);
+      if (!mounted || _closed) return;
+      if (next == _Job.gone) _close(saved);
+      if (next == _Job.failed) _tick?.cancel();
+    });
+  }
 
   @override
   void dispose() {
@@ -272,7 +304,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
                   recording
                       ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
                       : transcribing
-                          ? '닫아도 전사는 이어집니다. 멈추려면 전사 취소를 누르세요. 녹음은 inbox에 남습니다.'
+                          ? '오른쪽 위를 누르면 전사는 이어집니다. 녹음은 inbox에 남습니다.'
                           : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
                   style: t.bodySmall,
                 ),
@@ -282,10 +314,10 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 ],
                 const SizedBox(height: 10),
                 Row(children: [
-                  TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: Text(transcribing ? '닫기' : '취소')),
+                  if (!transcribing) TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: const Text('취소')),
                   const Spacer(),
                   if (transcribing)
-                    TextButton(onPressed: _stopping ? null : _stopTranscription, child: const Text('전사 취소')),
+                    FilledButton(onPressed: _stopping ? null : _stopTranscription, child: const Text('전사 취소')),
                   if (!transcribing)
                     FilledButton.icon(
                       onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
