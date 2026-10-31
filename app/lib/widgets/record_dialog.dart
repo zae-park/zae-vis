@@ -147,7 +147,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
       final inbox = await widget.api.inbox();
       final match = inbox.jobs.where((j) => j.file == saved);
       final job = match.isEmpty ? null : match.first;
-      if (job == null || job.state == 'done') return _Job.gone;
+      if (job == null || job.state == 'done' || job.state == 'cancelled') return _Job.gone;
       final current = job;
       if (current.state == 'failed') {
         if (mounted) setState(() {
@@ -166,6 +166,27 @@ class _RecordFloaterState extends State<_RecordFloater> {
     } catch (_) {
       return _Job.gone;
     }
+  }
+
+  var _stopping = false;
+
+  Future<void> _stopTranscription() async {
+    if (_stopping) return;
+    _stopping = true;
+    final saved = _saved;
+    if (mounted) setState(() => _status = '취소하는 중');
+    if (saved != null) {
+      try {
+        await widget.api.cancelTranscription(saved);
+      } on ApiException catch (e) {
+        if (e.status != 404) {
+          _stopping = false;
+          if (mounted) setState(() => _error = e.message);
+          return;
+        }
+      }
+    }
+    if (mounted) _close(saved);
   }
 
   void _close(String? saved) {
@@ -251,7 +272,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
                   recording
                       ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
                       : transcribing
-                          ? '창을 닫아도 전사는 이어집니다. 음성 인식, 시간 맞추기, 말한 사람 구분 순입니다.'
+                          ? '닫아도 전사는 이어집니다. 멈추려면 전사 취소를 누르세요. 녹음은 inbox에 남습니다.'
                           : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
                   style: t.bodySmall,
                 ),
@@ -263,6 +284,8 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 Row(children: [
                   TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: Text(transcribing ? '닫기' : '취소')),
                   const Spacer(),
+                  if (transcribing)
+                    TextButton(onPressed: _stopping ? null : _stopTranscription, child: const Text('전사 취소')),
                   if (!transcribing)
                     FilledButton.icon(
                       onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),

@@ -77,6 +77,16 @@ class _CollectScreenState extends State<CollectScreen> {
     }
   }
 
+  Future<void> _cancelTranscription(String file) async {
+    try {
+      await widget.api.cancelTranscription(file);
+      if (mounted) toast(context, '전사를 취소했습니다');
+    } on ApiException catch (e) {
+      if (e.status != 404 && mounted) toast(context, e.message, error: true);
+    }
+    await _load();
+  }
+
   Future<void> _act(Future<void> Function() f, {String? done}) async {
     try {
       await f();
@@ -164,7 +174,7 @@ class _CollectScreenState extends State<CollectScreen> {
             ),
           ]),
           const SizedBox(height: 16),
-          _InboxCard(inbox: inbox),
+          _InboxCard(inbox: inbox, onCancel: _cancelTranscription),
           const SizedBox(height: 28),
 
           // ── batch sources ────────────────────────────────────────────────
@@ -179,7 +189,7 @@ class _CollectScreenState extends State<CollectScreen> {
               label: Text(s.collecting ? '수집 중…' : '지금 수집'),
             ),
           ),
-          if (s.collecting) _CollectLive(progress: s.progress),
+          if (s.collecting) _CollectLive(progress: s.progress, onCancel: _cancelTranscription),
           if (s.lastCollectError != null)
             Padding(padding: const EdgeInsets.only(top: 6), child: Text(s.lastCollectError!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           const SizedBox(height: 8),
@@ -261,8 +271,9 @@ class _CollectScreenState extends State<CollectScreen> {
 }
 
 class _InboxCard extends StatelessWidget {
-  const _InboxCard({required this.inbox});
+  const _InboxCard({required this.inbox, this.onCancel});
   final Inbox inbox;
+  final void Function(String file)? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -291,16 +302,27 @@ class _InboxCard extends StatelessWidget {
                 'running' => const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                 'failed' => Icon(Icons.error_outline, color: scheme.error),
                 'done' => const Icon(Icons.check_circle_outline),
+                'cancelled' => const Icon(Icons.stop_circle_outlined),
                 _ => const Icon(Icons.schedule),
               },
               title: Text(j.file),
               subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(j.error ?? j.line ?? j.result ?? (j.state == 'queued' ? '전사 대기' : '전사 중…'), maxLines: 2),
+                Text(
+                  j.error ?? j.line ?? j.result ?? switch (j.state) {
+                    'queued' => '전사 대기',
+                    'cancelled' => '취소했습니다',
+                    _ => '전사 중…',
+                  },
+                  maxLines: 2,
+                ),
                 if (j.state == 'running') ...[
                   const SizedBox(height: 6),
                   LinearProgressIndicator(value: j.fraction, minHeight: 4, borderRadius: BorderRadius.circular(2)),
                 ],
               ]),
+              trailing: (j.state == 'queued' || j.state == 'running') && onCancel != null
+                  ? TextButton(onPressed: () => onCancel!(j.file), child: const Text('취소'))
+                  : null,
             ),
           group('전사본', inbox.transcripts),
           group('전사 대기 녹음', inbox.audio),
@@ -313,8 +335,9 @@ class _InboxCard extends StatelessWidget {
 
 /// Which source is running, how long it has been, and whether the server is still answering.
 class _CollectLive extends StatefulWidget {
-  const _CollectLive({required this.progress});
+  const _CollectLive({required this.progress, this.onCancel});
   final CollectProgress? progress;
+  final void Function(String file)? onCancel;
 
   @override
   State<_CollectLive> createState() => _CollectLiveState();
@@ -335,6 +358,15 @@ class _CollectLiveState extends State<_CollectLive> {
   void dispose() {
     _clock?.cancel();
     super.dispose();
+  }
+
+  String? _runningFile(CollectProgress? p) {
+    final line = p?.currentLine;
+    if (line == null || !line.startsWith('전사 ')) return null;
+    final parts = line.split(' · ');
+    if (parts.length < 2) return null;
+    final name = parts[1].trim();
+    return name.isEmpty ? null : name;
   }
 
   String _span(Duration d) {
@@ -380,6 +412,12 @@ class _CollectLiveState extends State<_CollectLive> {
           LinearProgressIndicator(value: p.fraction, minHeight: 6, borderRadius: BorderRadius.circular(3)),
         ],
         if (p.currentLine != null) Text(p.currentLine!, style: t.bodySmall),
+        if (_runningFile(p) case final file?)
+          if (widget.onCancel != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: () => widget.onCancel!(file), child: const Text('전사 취소')),
+            ),
         if (note.isNotEmpty) Text(note, style: t.bodySmall),
         const SizedBox(height: 6),
         for (final step in p.steps)

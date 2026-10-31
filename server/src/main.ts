@@ -249,6 +249,7 @@ const server = createApp({
       queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), whisperxBin: ts.whisperxBin as string | undefined });
     },
     jobs: () => queue.jobs,
+    cancel: (file) => queue.cancel(file),
   },
   datasources: {
     list: async () => datasources.listStatus(cfg.autoragConfig, (await search.datasources()) as datasources.AutoragDatasource[] | null, loadState().datasources ?? {}),

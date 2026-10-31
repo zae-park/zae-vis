@@ -161,10 +161,10 @@ class WorklogApi {
 
   static const _mutating = {'content-type': 'application/json', 'x-zaevis': '1'};
 
-  Future<Json> _send(String method, String path, [Object? body]) async {
+  Future<Json> _send(String method, String path, [Object? body, Map<String, String>? query]) async {
     final http.Response res;
     try {
-      final req = http.Request(method, _uri(path))
+      final req = http.Request(method, _uri(path, query))
         ..headers.addAll(_mutating)
         ..body = jsonEncode(body ?? const <String, dynamic>{});
       res = await http.Response.fromStream(await _client.send(req));
@@ -208,6 +208,11 @@ class WorklogApi {
       throw ApiException(0, '업로드에 실패했습니다: $baseUrl');
     }
     return (_decode(res)['file'] as String?) ?? name;
+  }
+
+  /// Stops a queued or running transcription. The recording stays in the inbox.
+  Future<void> cancelTranscription(String file) async {
+    await _send('DELETE', '/inbox/audio', const {}, {'name': file});
   }
 
   // ── data sources (batch) ─────────────────────────────────────────────────

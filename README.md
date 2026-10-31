@@ -34,6 +34,12 @@
 
 [Releases](https://github.com/zae-park/zae-vis/releases)에서 받습니다.
 
+macOS가 앱을 손상됐다고 하면, 설치한 뒤 한 번 실행합니다.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/zaevis.app
+```
+
 ## 명령
 
 ```bash

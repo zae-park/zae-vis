@@ -912,9 +912,9 @@ class _HfLoginState extends State<_HfLogin> {
     } else if (hf.loggedIn && hf.accept.isNotEmpty) {
       subtitle = '${hf.username ?? "계정"} 으로 연결됨. 화자 모델을 쓰려면 페이지에서 사용에 동의해야 합니다.';
     } else if (hf.loggedIn) {
-      subtitle = '${hf.username ?? "계정"} 으로 연결됨. 다음 전사부터 말한 사람을 나눕니다.';
+      subtitle = '${hf.username ?? "계정"} 으로 연결됨. 녹음 글은 먼저 저장되고, 말한 사람은 그 뒤에 같은 파일에 붙습니다.';
     } else {
-      subtitle = '브라우저에서 Hugging Face에 로그인하면 녹음에서 말한 사람을 나눕니다.';
+      subtitle = '녹음 글은 바로 저장됩니다. 말한 사람을 나누려면 로그인하세요. 구분은 글이 저장된 뒤에 이어집니다.';
     }
     return ListTile(
       contentPadding: EdgeInsets.zero,

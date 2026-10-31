@@ -31,6 +31,9 @@ List<Object>? mockAskStatusRail;
 List<Object>? mockDigestRail;
 bool mockKiwiInstalled = false;
 bool mockCollecting = false;
+List<Object> mockInboxJobs = const [];
+bool mockHoldTranscription = false;
+String? mockLastAudio;
 
 /// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
 Map<String, Object?> _tokenizer() => {
@@ -173,7 +176,11 @@ WorklogApi _fakeApi() => WorklogApi(
               'transcripts': [{'name': '2026-10-23_회의.txt', 'size': 2048, 'modified': '2026-10-23T09:00:00Z'}],
               'sessions': <Object>[],
               'audio': <Object>[],
-              'jobs': <Object>[],
+              'jobs': mockHoldTranscription && mockLastAudio != null
+                  ? [
+                      {'file': mockLastAudio, 'state': 'running', 'line': '음성 인식 10%', 'fraction': 0.1},
+                    ]
+                  : mockInboxJobs,
             });
           case '/api/settings' when req.method == 'GET':
             return _json({
@@ -213,8 +220,14 @@ WorklogApi _fakeApi() => WorklogApi(
             return _json({'src': req.url.queryParameters['src'], 'paths': ['processed/transcripts/2026-10-09_회의.txt']});
           case '/api/projects':
             return _json({'projects': [{'slug': 'notes', 'title': '노트', 'status': '', 'repos': <Object>[], 'currentState': ''}]});
+          case '/api/inbox/audio' when req.method == 'DELETE':
+            posted.add(req);
+            mockHoldTranscription = false;
+            mockInboxJobs = const [];
+            return _json({'ok': true});
           case '/api/inbox/audio':
             posted.add(req);
+            mockLastAudio = req.url.queryParameters['name'];
             return _json({'file': req.url.queryParameters['name']}, 201);
           case '/api/logs' when req.method == 'POST':
             posted.add(req);
@@ -607,6 +620,40 @@ void main() {
     expect(find.textContaining('전사 대기열에 넣었습니다'), findsOneWidget);
   });
 
+  testWidgets('transcription cancel stops the job the floater is waiting on', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(() async {
+      mockHoldTranscription = false;
+      mockLastAudio = null;
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+    posted.clear();
+    mockHoldTranscription = true;
+    final rec = _FakeRecorder();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: rec));
+    await tester.tap(find.byTooltip('녹음'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('녹음 시작'));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.tap(find.text('중지하고 올리기'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('전사 취소'), findsOneWidget);
+    expect(find.textContaining('멈추려면 전사 취소'), findsOneWidget);
+    await tester.tap(find.text('전사 취소'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(
+      posted.where((r) => r.method == 'DELETE' && r.url.path == '/api/inbox/audio' && r.url.queryParameters['name'] == mockLastAudio).length,
+      1,
+    );
+    expect(find.text('전사 취소'), findsNothing);
+  });
+
   testWidgets('record button explains a denied microphone', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -784,6 +831,14 @@ void main() {
     expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, closeTo(0.42, 0.001));
     expect(find.text('git 커밋'), findsWidgets);
     expect(find.textContaining('출력 없이'), findsOneWidget);
+    expect(find.text('전사 취소'), findsOneWidget);
+    await tester.tap(find.text('전사 취소'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(
+      posted.where((r) => r.method == 'DELETE' && r.url.queryParameters['name'] == '2026-10-30_1424_녹음.wav').length,
+      1,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -801,7 +856,7 @@ void main() {
     await tester.ensureVisible(login);
     await tester.pumpAndSettle();
     expect(find.textContaining('HF_TOKEN'), findsNothing);
-    expect(find.textContaining('브라우저에서 Hugging Face에 로그인하면'), findsOneWidget);
+    expect(find.textContaining('글이 저장된 뒤에'), findsOneWidget);
     await tester.tap(login);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));

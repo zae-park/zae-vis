@@ -84,6 +84,8 @@ export type AppOptions = {
     dir(): string;
     enqueue(file: string): void;
     jobs(): unknown[];
+    /** Stops a queued or running transcription. Absent in tests that only upload. */
+    cancel?(file: string): boolean;
   };
   /** A .md/.txt under an extra indexed folder (absolute path). Worklog-relative paths stay on `worklog`. */
   indexedFile?: (path: string) => { path: string; markdown: string } | null;
@@ -394,6 +396,14 @@ export function createApp(opts: AppOptions): Server {
 
         case "GET /inbox":
           return send(res, 200, { ...(await worklog.inbox()), jobs: opts.audio?.jobs() ?? [] });
+
+        case "DELETE /inbox": {
+          if (arg !== "audio" || !opts.audio?.cancel) return notFound(res);
+          const name = url.searchParams.get("name") ?? "";
+          if (!name || name !== basename(name)) throw new HttpError(400, "파일 이름이 필요합니다.");
+          if (!opts.audio.cancel(name)) return send(res, 404, { error: "not_running", message: "진행 중인 전사가 없습니다." });
+          return send(res, 200, { ok: true, file: name });
+        }
 
         case "POST /inbox": {
           if (arg === "transcripts") {

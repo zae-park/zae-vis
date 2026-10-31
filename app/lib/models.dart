@@ -617,7 +617,7 @@ class TranscribeJob {
         fraction: j['fraction'] is num ? (j['fraction'] as num).toDouble() : null,
       );
   final String file;
-  final String state; // queued | running | done | failed
+  final String state; // queued | running | done | failed | cancelled
   final String? result;
   final String? error;
   /// "음성 인식 45%" while this file is being transcribed.

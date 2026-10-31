@@ -6,7 +6,7 @@ import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { expandHome } from "../config.ts";
 import { hfStatus } from "../hf.ts";
-import { AUDIO_EXT, TEXT_EXT, datedStem, transcribeFile, whisperxBin } from "../transcribe.ts";
+import { AUDIO_EXT, TEXT_EXT, datedStem, transcribeFile, TranscribeCancelled, whisperxBin } from "../transcribe.ts";
 import { addTo, dayKey, type Source } from "./types.ts";
 
 async function files(dir: string): Promise<string[]> {
@@ -68,14 +68,15 @@ export const transcriptsSource: Source = {
       log(`transcripts: 녹음 ${audio.length}개가 있지만 whisperX가 없습니다 ('zaevis ext install whisperx').`);
     } else {
       const hf = hfStatus();
-      if (audio.length && !hf.loggedIn) log("화자 구분은 설정에서 Hugging Face에 로그인한 뒤 됩니다. 전사 자체는 그대로 진행합니다.");
-      else if (audio.length && hf.accept.length) log(`화자 구분은 ${hf.accept.join(", ")} 사용에 동의한 뒤 됩니다. 설정에서 동의 페이지를 여세요.`);
+      if (audio.length && !hf.loggedIn) log("글은 먼저 저장됩니다. 말한 사람 구분은 설정에서 Hugging Face에 로그인한 뒤, 전사가 끝난 파일에 붙습니다.");
+      else if (audio.length && hf.accept.length) log(`화자 구분은 ${hf.accept.join(", ")} 사용에 동의한 뒤 됩니다. 글은 먼저 저장되고, 구분은 그 다음에 붙습니다.`);
+      else if (audio.length) log("말한 사람 구분은 글이 저장된 뒤에 같은 파일에 붙습니다.");
       for (let i = 0; i < audio.length; i++) {
         const a = audio[i]!;
         const day = dayKey((await stat(a)).mtime);
         const file = basename(a);
+        const where = `전사 ${i + 1}/${audio.length} · ${file}`;
         try {
-          const where = `전사 ${i + 1}/${audio.length} · ${file}`;
           log(where, null);
           const out = await transcribeFile(a, config.worklogDir, {
             language: String(settings.language ?? "ko"),
@@ -87,7 +88,8 @@ export const transcriptsSource: Source = {
           addTo(byDay, day, `- 전사: \`${out.split("/").pop()}\``);
           transcribed++;
         } catch (err) {
-          log(`transcripts: ${file} 전사 실패 — ${(err as Error).message}`);
+          if (err instanceof TranscribeCancelled) log(`${where} · 취소했습니다`, null);
+          else log(`transcripts: ${file} 전사 실패 — ${(err as Error).message}`);
         }
       }
     }
