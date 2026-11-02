@@ -147,8 +147,20 @@ class AskSource {
 }
 
 /// An answer with [n] citations into [sources].
+/// The agent asking back because the question could mean different things in the records.
+class Clarify {
+  const Clarify({required this.question, this.options = const []});
+  static Clarify? fromJson(Object? j) {
+    if (j is! Json || _str(j['question']).isEmpty) return null;
+    return Clarify(question: _str(j['question']), options: (j['options'] is List ? j['options'] as List : const <Object?>[]).whereType<String>().toList());
+  }
+
+  final String question;
+  final List<String> options;
+}
+
 class AskResult {
-  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0, this.rail = const []});
+  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0, this.rail = const [], this.clarify});
   factory AskResult.fromJson(Json j) => AskResult(
         question: _str(j['q']),
         answer: _str(j['answer']),
@@ -158,9 +170,13 @@ class AskResult {
         conversationId: _str(j['conversationId']),
         turn: (j['turn'] as num?)?.toInt() ?? 0,
         rail: RailStop.list(j['rail']),
+        clarify: Clarify.fromJson(j['clarify']),
       );
   final String question;
   final String answer;
+
+  /// Set when the agent asked back instead of answering.
+  final Clarify? clarify;
   final List<AskSource> sources;
   final String agent; // claude | codex | gemini | openrouter
   final int ms;

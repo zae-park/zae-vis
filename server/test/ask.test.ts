@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ask-state-"));
-const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, pickSources, searchQueryFor } = await import("../src/ask.ts");
+const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, execCli, parseClarify, pickSources, searchQueryFor } = await import("../src/ask.ts");
 const { quotaReason } = await import("../src/rail.ts");
 const { createApp } = await import("../src/app.ts");
 const { normalizeSearch } = await import("../src/autorag.ts");
@@ -152,6 +152,7 @@ before(async () => {
     ask: {
       status: async () => ({ ...runner.status(), agents: [claude], chosen: agent?.id ?? null, setting: { agent: "auto", model: "" } }),
       run: (q, topK, conversationId) => runner.ask(q, { search: fakeSearch, agent, setting: { model: "" }, worklogDir: root, topK, conversationId }),
+      cancel: () => runner.cancel(),
       conversation: (id) => runner.store.get(id),
       remove: (id) => runner.store.remove(id),
     },
@@ -185,6 +186,9 @@ test("ask: POST /api/ask answers with sources; GET reports agents and the last a
   assert.equal(none.body.error, "no_agent");
   assert.match(none.body.message, /Claude Code·Codex·Gemini/);
   assert.equal((await fetch(base + "/api/ask/other")).status, 404);
+  const cancel = await fetch(base + "/api/ask/cancel", { method: "POST", headers: { "x-zaevis": "1" } });
+  assert.deepEqual(await cancel.json(), { cancelled: false }, "nothing running");
+  assert.equal((await fetch(base + "/api/ask/cancel", { method: "POST" })).status, 403, "mutating requests need the header");
 });
 
 test("ask: a follow-up continues the conversation — history in the prompt, short question searched with the previous one", async () => {
@@ -328,3 +332,63 @@ test("ask: GET /api/ask/:id returns a conversation and DELETE removes it", async
   assert.equal(del.status, 200);
   assert.equal((await fetch(`${base}/api/ask/${id}`)).status, 404);
 });
+
+test("ask: cancel kills the agent's process; the question answers cancelled and is not saved", async () => {
+  const store = new ConversationStore(await mkdtemp(join(tmpdir(), "zv-ask-cancel-")));
+  let seen: AbortSignal | undefined;
+  const exec: Exec = (_bin, _args, _cwd, _env, _timeout, signal) =>
+    new Promise((res) => {
+      seen = signal;
+      signal?.addEventListener("abort", () => res({ ok: false, stdout: "", stderr: "[취소됨]" }));
+    });
+  const runner = new AskRunner({ exec, store });
+  assert.equal(runner.cancel(), false, "nothing to cancel");
+  const pending = runner.ask("오래 걸리는 질문", { search: fakeSearch, agent: claude, setting: { model: "" }, worklogDir: "/w" });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(seen && !seen.aborted);
+  assert.equal(runner.cancel(), true);
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.equal(!r.ok && r.error, "cancelled");
+  assert.equal(!r.ok && r.status, 409);
+  assert.equal(runner.status().running, null);
+  assert.deepEqual(store.list(), [], "a stopped question leaves no conversation behind");
+  const again = await new AskRunner({ exec: async () => ({ ok: true, stdout: "답 [1]", stderr: "" }), store }).ask("다음 질문", { search: fakeSearch, agent: claude, setting: { model: "" }, worklogDir: "/w" });
+  assert.equal(again.ok, true, "the next question runs normally");
+});
+
+test("execCli: an abort stops the real child process", { skip: process.platform === "win32" }, async () => {
+  const ac = new AbortController();
+  const started = Date.now();
+  const run = execCli("/bin/sleep", ["30"], tmpdir(), process.env, 60_000, ac.signal);
+  setTimeout(() => ac.abort(), 100);
+  const r = await run;
+  assert.equal(r.ok, false);
+  assert.match(r.stderr, /취소됨/);
+  assert.ok(Date.now() - started < 5000, "killed, not waited out");
+});
+
+test("ask: the prompt allows one question back; the reply is parsed into a question and choices", async () => {
+  const sources = pickSources(normalizeSearch("색인", RAW, ["/w"], 1000).hits, 10);
+  assert.match(buildAskPrompt("색인 어떻게 됐어?", sources), /되묻기: /);
+  const after = buildAskPrompt("zaevis 쪽", sources, [{ q: "색인 어떻게 됐어?", answer: "되묻기: 어느 쪽?", clarify: { question: "어느 쪽?", options: [] } }]);
+  assert.match(after, /이번에는 되묻지 말고/);
+  assert.doesNotMatch(after, /답하지 말고 되묻는다/);
+
+  assert.deepEqual(parseClarify("되묻기: 어느 프로젝트의 색인을 말씀하시나요?\n- zaevis 검색 색인 [1]\n- rosetta 문서 색인 [2][3]\n"), {
+    question: "어느 프로젝트의 색인을 말씀하시나요?",
+    options: ["zaevis 검색 색인", "rosetta 문서 색인"],
+  });
+  assert.deepEqual(parseClarify("**되묻기: 언제 것인가요?**\n1. 10월 회의\n2) 11월 회의"), { question: "언제 것인가요?", options: ["10월 회의", "11월 회의"] });
+  assert.deepEqual(parseClarify("되묻기: 어느 쪽?\n- zaevis 검색 색인: Kiwi 형태소를 붙여 처음부터 다시 색인함 [1]\n- rosetta 문서 색인 [2]")?.options, ["zaevis 검색 색인", "rosetta 문서 색인"]);
+  assert.equal(parseClarify("색인은 미뤘다 [1]."), null);
+
+  const exec: Exec = async () => ({ ok: true, stdout: "되묻기: 어느 쪽인가요?\n- 검색 결과 맥락 [1]\n- 하이브리드 랭킹 [2]", stderr: "" });
+  const store = new ConversationStore(await mkdtemp(join(tmpdir(), "zv-ask-clarify-")));
+  const r = await new AskRunner({ exec, store }).ask("그거 언제 했지?", { search: fakeSearch, agent: claude, setting: { model: "" }, worklogDir: "/w" });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.deepEqual(r.result.clarify, { question: "어느 쪽인가요?", options: ["검색 결과 맥락", "하이브리드 랭킹"] });
+  assert.deepEqual(store.get(r.result.conversationId)?.turns[0].clarify, r.result.clarify, "kept so the next turn knows it already asked");
+});
+

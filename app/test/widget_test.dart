@@ -37,6 +37,12 @@ List<Object> mockInboxJobs = const [];
 bool mockHoldTranscription = false;
 String? mockLastAudio;
 
+/// While set, POST /ask waits on it; POST /ask/cancel completes it with 409 cancelled.
+Completer<http.Response>? mockAskHold;
+
+/// The first question gets a question back instead of an answer.
+bool mockAskClarify = false;
+
 /// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
 Map<String, Object?> _tokenizer() => {
       'active': 'whitespace',
@@ -137,8 +143,26 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'id': 'openrouter', 'title': 'OpenRouter API', 'available': false, 'detail': '키 없음'},
               ],
             });
+          case '/api/ask/cancel' when req.method == 'POST':
+            posted.add(req);
+            final hold = mockAskHold;
+            mockAskHold = null;
+            hold?.complete(_json({'error': 'cancelled', 'message': '질문을 멈췄습니다.'}, 409));
+            return _json({'cancelled': hold != null});
           case '/api/ask' when req.method == 'POST':
             posted.add(req);
+            if (mockAskHold != null) return mockAskHold!.future;
+            if (mockAskClarify && (jsonDecode(req.body) as Map)['conversationId'] == null) {
+              return _json({
+                'q': (jsonDecode(req.body) as Map)['q'], 'agent': 'claude', 'ms': 900, 'conversationId': '20261027-120000', 'turn': 0,
+                'answer': '되묻기: 어느 색인을 말씀하시나요?\n- zaevis 검색 색인 [1]\n- rosetta 문서 색인 [2]',
+                'clarify': {'question': '어느 색인을 말씀하시나요?', 'options': ['zaevis 검색 색인', 'rosetta 문서 색인']},
+                'sources': [
+                  {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋', 'passage': '색인할 파일이 빠져서'},
+                  {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': 'rosetta 색인'},
+                ],
+              });
+            }
             if (mockAskAgent == null) return _json({'error': 'no_agent', 'message': '답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하세요.'}, 409);
             final askBody = jsonDecode(req.body) as Map<String, dynamic>;
             return _json({
@@ -480,6 +504,61 @@ void main() {
     await tester.tap(find.text('내려받기'));
     await tester.pumpAndSettle();
     expect(saved.last, 'sources/git/2026-10-09.md');
+  });
+
+  testWidgets('멈추기 stops the answer on the server; 다시 묻기 asks again', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockAskHold = Completer<http.Response>();
+    addTearDown(() => mockAskHold = null);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '색인은 왜 미뤘지?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('답을 쓰는 중'), findsOneWidget);
+    await tester.tap(find.text('멈추기'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(posted.where((r) => r.url.path == '/api/ask/cancel'), hasLength(1));
+    expect(posted.last.headers['x-zaevis'], '1');
+    expect(find.text('멈췄습니다'), findsOneWidget);
+    expect(find.textContaining('질문을 멈췄습니다'), findsNothing, reason: 'a stop is not shown as an error');
+
+    await tester.tap(find.text('다시 묻기'));
+    await tester.pumpAndSettle();
+    expect(posted.where((r) => r.url.path == '/api/ask'), hasLength(2));
+    expect(find.text('멈췄습니다'), findsNothing);
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
+  });
+
+  testWidgets('a question back shows choices; a choice or a typed reply continues as an answer', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockAskClarify = true;
+    addTearDown(() => mockAskClarify = false);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '색인 어떻게 됐어?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(find.text('되묻기'), findsOneWidget);
+    expect(find.text('어느 색인을 말씀하시나요?'), findsOneWidget);
+    expect(find.textContaining('되묻기:'), findsNothing, reason: 'the raw marker is not shown');
+
+    await tester.tap(find.widgetWithText(ActionChip, 'rosetta 문서 색인'));
+    await tester.pumpAndSettle();
+    final asks = posted.where((r) => r.url.path == '/api/ask').toList();
+    expect(jsonDecode(asks.last.body), {'q': 'rosetta 문서 색인', 'topK': 10, 'conversationId': '20261027-120000'},
+        reason: 'a choice is a keyword line, but after a question back it is the reply');
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
+    expect(tester.widget<ActionChip>(find.widgetWithText(ActionChip, 'zaevis 검색 색인')).onPressed, isNull, reason: 'an answered question back is closed');
   });
 
   testWidgets('질문 mode is a conversation: bubbles, a follow-up carries the conversation id, [n] opens the source panel and the file', (tester) async {

@@ -173,6 +173,7 @@ const server = createApp({
       const agent = pickAgent(cfg.digest, agents);
       return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId });
     },
+    cancel: () => ask.cancel(),
     conversation: (id) => ask.store.get(id),
     remove: (id) => ask.store.remove(id),
   },

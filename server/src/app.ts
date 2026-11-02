@@ -52,6 +52,8 @@ export type AppOptions = {
     /** Agents, which one would answer, whether one is answering now, and the last answer. */
     status(): Promise<Record<string, unknown>>;
     run(q: string, topK?: number, conversationId?: string): Promise<AskOutcome>;
+    /** Stops the question in flight; false when none is running. Absent in tests that do not cancel. */
+    cancel?(): boolean;
     /** One conversation with its turns, or null. */
     conversation(id: string): unknown | null;
     remove(id: string): boolean;
@@ -299,7 +301,9 @@ export function createApp(opts: AppOptions): Server {
           return safe(() => opts.ask!.remove(arg)) ? send(res, 200, { ok: true }) : notFound(res);
 
         case "POST /ask": {
-          // POST /api/ask { q, topK?, conversationId? } → { answer, sources[{ n, path, label, passage }], agent, ms, conversationId, turn }
+          // POST /api/ask { q, topK?, conversationId? } → { answer, sources[{ n, path, label, passage }], agent, ms, conversationId, turn, clarify? }
+          // POST /api/ask/cancel → { cancelled } — the waiting POST /api/ask then answers 409 { error: "cancelled" }
+          if (opts.ask && arg === "cancel") return send(res, 200, { cancelled: opts.ask.cancel?.() ?? false });
           if (!opts.ask || arg) return notFound(res);
           const b = await readJson(req);
           const q = typeof b.q === "string" ? b.q.trim() : "";

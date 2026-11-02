@@ -19,9 +19,12 @@ String defaultBaseUrl() {
 }
 
 class ApiException implements Exception {
-  ApiException(this.status, this.message, {this.rail = const []});
+  ApiException(this.status, this.message, {this.rail = const [], this.code});
   final int status;
   final String message;
+
+  /// The server's `error` code ("cancelled", "no_agent", "busy" …), when it sent one.
+  final String? code;
 
   /// The agent rail when a question failed after one or more attempts.
   final List<RailStop> rail;
@@ -57,15 +60,17 @@ class WorklogApi {
     final body = utf8.decode(res.bodyBytes);
     if (res.statusCode >= 400) {
       String? message;
+      String? code;
       var rail = const <RailStop>[];
       try {
         final j = jsonDecode(body);
         if (j is Json) {
           message = (j['message'] ?? j['reason']) is String ? (j['message'] ?? j['reason']) as String : null;
           rail = RailStop.list(j['rail']);
+          code = j['error'] is String ? j['error'] as String : null;
         }
       } catch (_) {}
-      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'), rail: rail);
+      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'), rail: rail, code: code);
     }
     final Object? decoded;
     try {
@@ -137,6 +142,9 @@ class WorklogApi {
   /// Asks; with [conversationId] the question continues that conversation (the server keeps the turns).
   Future<AskResult> ask(String question, {int topK = 10, String? conversationId}) async =>
       AskResult.fromJson(await _send('POST', '/ask', {'q': question, 'topK': topK, if (conversationId != null) 'conversationId': conversationId}));
+
+  /// Stops the question in flight; its POST /ask then fails with code `cancelled`. False when none was running.
+  Future<bool> cancelAsk() async => (await _send('POST', '/ask/cancel'))['cancelled'] == true;
 
   Future<Conversation> conversation(String id) async => Conversation.fromJson(await _get('/ask/${Uri.encodeComponent(id)}'));
 

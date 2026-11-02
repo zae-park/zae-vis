@@ -44,11 +44,17 @@ class AskTurn {
   List<RailStop> rail;
   bool answering = false;
 
+  /// The user pressed 멈추기 while the answer was being written.
+  bool cancelled = false;
+
+  /// "멈추기" was pressed and the server has not let go yet.
+  bool stopping = false;
+
   /// Waiting on the server for anything.
   bool get pending => searching || finding || answering;
 
-  /// An answer was asked for (in flight, written or failed).
-  bool get asked => answering || result != null || error != null;
+  /// An answer was asked for (in flight, written, failed or stopped).
+  bool get asked => answering || result != null || error != null || cancelled;
 }
 
 /// A source the user is looking at: which turn, which [n].
@@ -101,11 +107,17 @@ class AskController extends ChangeNotifier {
     });
   }
 
+  /// The agent's open question back, when the last thing in the chat is one.
+  Clarify? get openClarify => turns.isEmpty ? null : turns.last.result?.clarify;
+
   /// Sends a line: searches it, answers it when it reads as a question, or finds the files it asks for.
+  /// Right after the agent asked back, a line is the reply to it (an answer), unless it asks for a file.
   Future<void> send(String line) async {
     final q = line.trim();
     if (q.isEmpty || busy) return;
-    final turn = AskTurn(q, intent: chatIntent(q));
+    var intent = chatIntent(q);
+    if (openClarify != null && intent != ChatIntent.download) intent = ChatIntent.ask;
+    final turn = AskTurn(q, intent: intent);
     turns.add(turn);
     selected = null;
     notifyListeners();
@@ -189,9 +201,25 @@ class AskController extends ChangeNotifier {
     return null;
   }
 
+  /// 멈추기: asks the server to stop the agent; the waiting answer comes back as cancelled.
+  Future<void> cancel() async {
+    final turn = turns.where((t) => t.answering).firstOrNull;
+    if (turn == null || turn.stopping) return;
+    turn.stopping = true;
+    notifyListeners();
+    try {
+      await api.cancelAsk();
+    } catch (_) {
+      turn.stopping = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _answer(AskTurn turn) async {
     turn
       ..answering = true
+      ..cancelled = false
+      ..stopping = false
       ..error = null;
     liveRail = const [];
     notifyListeners();
@@ -203,19 +231,24 @@ class AskController extends ChangeNotifier {
       conversationId = r.conversationId.isEmpty ? conversationId : r.conversationId;
       status = api.askStatus(); // the conversation list changed
     } catch (e) {
-      turn.error = e;
-      turn.rail = e is ApiException && e.rail.isNotEmpty ? e.rail : liveRail;
+      if (e is ApiException && e.code == 'cancelled') {
+        turn.cancelled = true;
+      } else {
+        turn.error = e;
+        turn.rail = e is ApiException && e.rail.isNotEmpty ? e.rail : liveRail;
+      }
     } finally {
       turn.answering = false;
+      turn.stopping = false;
       _poll?.cancel();
       _poll = null;
     }
     notifyListeners();
   }
 
-  /// Re-asks a failed answer in place.
+  /// Re-asks a failed or stopped answer in place.
   Future<void> retry(AskTurn turn) async {
-    if (turn.error == null || busy) return;
+    if ((turn.error == null && !turn.cancelled) || busy) return;
     await _answer(turn);
   }
 
@@ -379,11 +412,19 @@ class _AskViewState extends State<AskView> {
             ),
           if (t.asked && (t.search != null || t.searchError != null)) const SizedBox(height: 8),
           if (t.answering)
-            _PendingBubble(status: c.status, rail: c.liveRail)
+            _PendingBubble(status: c.status, rail: c.liveRail, stopping: t.stopping, onStop: c.cancel)
+          else if (t.cancelled)
+            _StoppedBubble(onRetry: c.busy ? null : () => c.retry(t))
           else if (t.error != null)
             _ErrorBubble(error: t.error!, rail: t.rail, onRetry: () => c.retry(t), onOpenSettings: widget.onOpenSettings)
           else if (t.result != null)
-            _AnswerBubble(result: t.result!, selected: c.selected?.turn == i ? c.selected!.n : null, onCite: (n) => _cite(i, n)),
+            _AnswerBubble(
+              result: t.result!,
+              selected: c.selected?.turn == i ? c.selected!.n : null,
+              onCite: (n) => _cite(i, n),
+              // only the newest question back takes a reply
+              onChoose: i == c.turns.length - 1 && !c.busy ? (choice) => c.send(choice) : null,
+            ),
         ]),
       ));
     }
@@ -407,7 +448,11 @@ class _AskViewState extends State<AskView> {
             textInputAction: TextInputAction.send,
             onSubmitted: _send,
             decoration: InputDecoration(
-              hintText: continuing ? '이어서… ("그건 왜?", "[2] 내려받기"처럼 짧게 이어도 됩니다)' : '찾을 말, 질문, 또는 "11월 2일 전사본 내려받기"',
+              hintText: c.openClarify != null
+                  ? '위 질문에 답해 주세요 (고르거나 직접 적기)'
+                  : continuing
+                      ? '이어서… ("그건 왜?", "[2] 내려받기"처럼 짧게 이어도 됩니다)'
+                      : '찾을 말, 질문, 또는 "11월 2일 전사본 내려받기"',
               prefixIcon: const Icon(Icons.search),
               isDense: true,
             ),
@@ -539,9 +584,11 @@ class _QuestionBubble extends StatelessWidget {
 }
 
 class _PendingBubble extends StatelessWidget {
-  const _PendingBubble({required this.status, required this.rail});
+  const _PendingBubble({required this.status, required this.rail, this.stopping = false, this.onStop});
   final Future<AskStatus> status;
   final List<RailStop> rail;
+  final bool stopping;
+  final VoidCallback? onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -554,8 +601,18 @@ class _PendingBubble extends StatelessWidget {
           const SizedBox(width: 10),
           FutureBuilder<AskStatus>(
             future: status,
-            builder: (context, snap) => Text('${snap.data?.chosenAgent?.title ?? '에이전트'}가 기록을 읽고 답을 쓰는 중… (수십 초)', style: t.bodyMedium),
+            builder: (context, snap) => Text(
+                stopping ? '멈추는 중…' : '${snap.data?.chosenAgent?.title ?? '에이전트'}가 기록을 읽고 답을 쓰는 중… (수십 초)',
+                style: t.bodyMedium),
           ),
+          if (onStop != null) ...[
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: stopping ? null : onStop,
+              icon: const Icon(Icons.stop_circle_outlined, size: 18),
+              label: const Text('멈추기'),
+            ),
+          ],
         ]),
       ]),
     );
@@ -595,16 +652,42 @@ class _ErrorBubble extends StatelessWidget {
 
 /// The answer with tappable [n] marks, then a row of every source as a chip (hover = passage, tap = panel).
 class _AnswerBubble extends StatelessWidget {
-  const _AnswerBubble({required this.result, required this.selected, required this.onCite});
+  const _AnswerBubble({required this.result, required this.selected, required this.onCite, this.onChoose});
   final AskResult result;
   final int? selected;
   final ValueChanged<int> onCite;
+
+  /// Sends a choice as the reply to a question back; null once the chat has moved on.
+  final ValueChanged<String>? onChoose;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
     final agent = agentTitles[result.agent] ?? result.agent;
+    final clarify = result.clarify;
+    if (clarify != null) {
+      return _Bubble(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.help_outline, size: 18, color: scheme.primary),
+            const SizedBox(width: 6),
+            Text('되묻기', style: t.labelMedium?.copyWith(color: scheme.primary, fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 6),
+          SelectableText(clarify.question, style: t.bodyLarge, minLines: 1),
+          if (clarify.options.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final o in clarify.options) ActionChip(label: Text(o), onPressed: onChoose == null ? null : () => onChoose!(o)),
+            ]),
+          ],
+          const SizedBox(height: 8),
+          Text(onChoose == null ? '${_who(result, agent)} · 기록이 여러 갈래라 되물었습니다' : '고르거나 아래에 직접 적어 주세요 · ${_who(result, agent)}',
+              style: t.labelSmall?.copyWith(color: scheme.outline)),
+        ]),
+      );
+    }
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (result.rail.isNotEmpty) AgentRail(stops: result.rail),
@@ -749,6 +832,27 @@ class _FileRow extends StatelessWidget {
         TextButton(onPressed: () => FileScreen.open(context, api, file.path), child: const Text('열기')),
         const SizedBox(width: 4),
         FilledButton.icon(onPressed: () => saveWorklogFile(context, api, file.path), icon: const Icon(Icons.download, size: 18), label: const Text('내려받기')),
+      ]),
+    );
+  }
+}
+
+/// A question the user stopped: no answer, and a way to ask it again.
+class _StoppedBubble extends StatelessWidget {
+  const _StoppedBubble({this.onRetry});
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return _Bubble(
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.stop_circle_outlined, size: 18, color: scheme.outline),
+        const SizedBox(width: 8),
+        Text('멈췄습니다', style: t.bodyMedium?.copyWith(color: scheme.outline)),
+        const SizedBox(width: 12),
+        TextButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 18), label: const Text('다시 묻기')),
       ]),
     );
   }
