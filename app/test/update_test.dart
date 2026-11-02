@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zaevis/folder_ack_io.dart';
-import 'package:zaevis/update.dart';
+import 'package:zaevis/update.dart' hide ackFolderSkip, folderSkipAcked;
 
 void main() {
   test('a later build of the same version is newer, an older one is not', () {
