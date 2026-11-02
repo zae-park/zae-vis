@@ -147,6 +147,23 @@ export class EmbeddingDaemon {
         finish();
       });
       child.on("exit", (code, signal) => {
+        // "exit" can come before stdout is drained: a minsync that prints "adopted" and exits at once
+        // would look like it died before ready. Judge once the output is closed (or shortly after).
+        if (this.status.state === "starting" && this.child === child) {
+          let judged = false;
+          const judge = () => {
+            if (judged) return;
+            judged = true;
+            clearTimeout(t);
+            onExit(code, signal);
+          };
+          const t = setTimeout(judge, 1000);
+          child.once("close", judge);
+          return;
+        }
+        onExit(code, signal);
+      });
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
         if (this.child !== child) return; // adopted / detached: its exit is not ours to judge
         this.child = null;
         if (this.status.state === "ready" && !this.status.external) {
@@ -156,7 +173,7 @@ export class EmbeddingDaemon {
           this.status = { enabled: true, state: "failed", available: true, error: `minsync serve 가 준비되기 전에 끝났습니다 (code ${code ?? signal}): ${stderr.trim().split("\n").pop() ?? "(출력 없음)"}` };
         }
         finish();
-      });
+      };
     });
   }
 
