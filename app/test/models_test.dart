@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zaevis/chat_intent.dart';
 import 'package:zaevis/models.dart';
 import 'package:zaevis/screens/search_screen.dart';
 import 'package:zaevis/shortcuts.dart';
@@ -174,5 +175,26 @@ void main() {
     expect(IndexProgress.fromJson({'phase': 'minsync', 'sourceFiles': {'total': 10}, 'minsync': {'synced': 10}}).fraction, closeTo(0.9, 1e-9));
     expect(IndexProgress.fromJson({'phase': 'finalizing'}).fraction, closeTo(1.0, 1e-9));
     expect(IndexProgress.fromJson({'phase': 'minsync', 'minsync': {'synced': 7}}).label, '임베딩·색인 중 7개');
+  });
+
+  test('chatIntent: keywords search, questions ask, file requests download', () {
+    expect(chatIntent('색인'), ChatIntent.search);
+    expect(chatIntent('검색 색인 git'), ChatIntent.search);
+    expect(chatIntent('색인은 왜 미뤘지?'), ChatIntent.ask);
+    expect(chatIntent('그건 왜'), ChatIntent.ask);
+    expect(chatIntent('지난주 회의에서 정한 것 알려줘'), ChatIntent.ask);
+    expect(chatIntent('색인을 다시 만들기로 했다'), ChatIntent.ask);
+    expect(chatIntent('11월 2일 전사본 txt로 다운받아줘'), ChatIntent.download);
+    expect(chatIntent('이거 텍스트 파일로 줘'), ChatIntent.download);
+    expect(chatIntent('어제 전사본 내려받을 수 있어?'), ChatIntent.download);
+    expect(chatIntent('[2] export'), ChatIntent.download);
+    expect(chatIntent('txt로 저장하는 방법은?'), ChatIntent.ask, reason: 'a question about saving is not a request for a file');
+    expect(chatIntent('저장소 구조'), ChatIntent.search);
+    expect(chatIntent('다운타임 원인'), ChatIntent.search);
+    expect(citedNumber('[2] 내려받기'), 2);
+    expect(citedNumber('3번 파일 줘'), 3);
+    expect(citedNumber('11월 2일 전사본'), isNull);
+    expect(pointsBack('이거 txt로 받을래'), isTrue);
+    expect(pointsBack('11월 2일 전사본 다운'), isFalse);
   });
 }

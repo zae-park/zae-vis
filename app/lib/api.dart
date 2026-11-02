@@ -159,6 +159,24 @@ class WorklogApi {
   /// A markdown file inside the worklog (the original behind a search hit).
   Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));
 
+  /// The worklog files a sentence names ("11월 2일 전사본"), or the files behind its top search hits.
+  Future<FileMatches> findFiles(String request) async => FileMatches.fromJson(await _get('/files', {'q': request}));
+
+  /// Where the file itself is served as an attachment (the web build links to it).
+  Uri downloadUri(String path) => _uri('/download', {'path': path});
+
+  /// The file's bytes exactly as stored, for saving on the desktop.
+  Future<List<int>> downloadBytes(String path) async {
+    final http.Response res;
+    try {
+      res = await _client.get(downloadUri(path));
+    } catch (_) {
+      throw ApiException(0, '서버에 연결할 수 없습니다: $baseUrl');
+    }
+    if (res.statusCode >= 400) _decode(res); // throws with the server's message
+    return res.bodyBytes;
+  }
+
   static const _mutating = {'content-type': 'application/json', 'x-zaevis': '1'};
 
   Future<Json> _send(String method, String path, [Object? body, Map<String, String>? query]) async {

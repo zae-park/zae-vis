@@ -3,11 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../chat_intent.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
+import '../widgets/hit_card.dart';
+import '../widgets/save_file.dart';
+import '../recording_trail.dart';
 import 'file_screen.dart';
+import 'search_screen.dart';
 
 const agentTitles = {'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter'};
 
@@ -19,14 +24,31 @@ String _who(AskResult result, String fallback) {
   return '${skips.join(', ')} 할당량 → $wrote가 작성';
 }
 
-/// One exchange in the thread: the question, then the answer (or the error) once the server replies.
+/// One exchange in the thread: the line the user sent, then what it got — hits (검색), an answer (질문),
+/// or files to save (내려받기). A searched line can later get an answer too ("답 받기").
 class AskTurn {
-  AskTurn(this.question, {this.result, this.error, this.rail = const []});
+  AskTurn(this.question, {this.intent = ChatIntent.ask, this.result, this.error, this.rail = const []});
   final String question;
+  ChatIntent intent;
+
+  SearchResult? search;
+  Object? searchError;
+  bool searching = false;
+
+  FileMatches? files;
+  Object? filesError;
+  bool finding = false;
+
   AskResult? result;
   Object? error;
   List<RailStop> rail;
-  bool get pending => result == null && error == null;
+  bool answering = false;
+
+  /// Waiting on the server for anything.
+  bool get pending => searching || finding || answering;
+
+  /// An answer was asked for (in flight, written or failed).
+  bool get asked => answering || result != null || error != null;
 }
 
 /// A source the user is looking at: which turn, which [n].
@@ -36,7 +58,8 @@ class SelectedSource {
   final int n;
 }
 
-/// The conversation state, owned by the screen so it survives switching between 검색 and 질문.
+/// The chat state, owned by the screen. Answers belong to a server-side conversation; searches and file
+/// requests live only here.
 class AskController extends ChangeNotifier {
   AskController(this.api);
   final WorklogApi api;
@@ -51,6 +74,7 @@ class AskController extends ChangeNotifier {
   Timer? _poll;
 
   bool get busy => turns.any((t) => t.pending);
+  bool get answering => turns.any((t) => t.answering);
 
   @override
   void dispose() {
@@ -77,18 +101,103 @@ class AskController extends ChangeNotifier {
     });
   }
 
-  /// Asks in the current conversation (a new one when there is none).
-  Future<void> ask(String question) async {
-    final q = question.trim();
+  /// Sends a line: searches it, answers it when it reads as a question, or finds the files it asks for.
+  Future<void> send(String line) async {
+    final q = line.trim();
     if (q.isEmpty || busy) return;
-    final turn = AskTurn(q);
+    final turn = AskTurn(q, intent: chatIntent(q));
     turns.add(turn);
     selected = null;
+    notifyListeners();
+    switch (turn.intent) {
+      case ChatIntent.download:
+        await _findFiles(turn);
+      case ChatIntent.search:
+        await _search(turn);
+      case ChatIntent.ask:
+        await _answer(turn);
+    }
+  }
+
+  /// "답 받기" on a searched line: asks the same words in the current conversation.
+  Future<void> answer(AskTurn turn) async {
+    if (busy || turn.asked) return;
+    turn.intent = ChatIntent.ask;
+    await _answer(turn);
+  }
+
+  Future<void> _search(AskTurn turn) async {
+    turn.searching = true;
+    notifyListeners();
+    try {
+      // more than the chat shows: "모두 보기" filters the rest
+      turn.search = await api.search(turn.question, topK: 40);
+    } catch (e) {
+      turn.searchError = e;
+    } finally {
+      turn.searching = false;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _findFiles(AskTurn turn) async {
+    final earlier = _pointedFiles(turn);
+    if (earlier != null) {
+      turn.files = FileMatches(files: earlier, by: 'chat');
+      notifyListeners();
+      return;
+    }
+    turn.finding = true;
+    notifyListeners();
+    try {
+      turn.files = await api.findFiles(turn.question);
+    } catch (e) {
+      turn.filesError = e;
+    } finally {
+      turn.finding = false;
+    }
+    notifyListeners();
+  }
+
+  /// Files the line points at in what the chat already showed: "[2] 내려받기" or "이거 txt로 받을래".
+  List<FoundFile>? _pointedFiles(AskTurn turn) {
+    final before = turns.takeWhile((t) => t != turn).toList().reversed;
+    FoundFile ref(String path, String kind) => FoundFile(path: path, name: path.split('/').last, bytes: 0, kind: kind);
+    final n = citedNumber(turn.question);
+    if (n != null) {
+      for (final t in before) {
+        final src = t.result?.sources.where((s) => s.n == n).firstOrNull;
+        if (src != null && src.path.isNotEmpty) return [ref(src.path, src.label)];
+        final hit = t.search?.hits.where((h) => h.number == n).firstOrNull;
+        if (hit != null && hit.path.isNotEmpty) return [ref(hit.path, hit.context?.sourceLabel ?? hit.title)];
+      }
+      return null;
+    }
+    if (!pointsBack(turn.question)) return null;
+    for (final t in before) {
+      final files = t.files?.files ?? const <FoundFile>[];
+      if (files.isNotEmpty) return files;
+      final paths = <String, String>{};
+      for (final s in t.result?.sources ?? const <AskSource>[]) {
+        if (s.path.isNotEmpty) paths.putIfAbsent(s.path, () => s.label);
+      }
+      for (final h in (t.search?.hits ?? const <SearchHit>[]).where((h) => !h.weak).take(3)) {
+        if (h.path.isNotEmpty) paths.putIfAbsent(h.path, () => h.context?.sourceLabel ?? h.title);
+      }
+      if (paths.isNotEmpty) return [for (final e in paths.entries) ref(e.key, e.value)];
+    }
+    return null;
+  }
+
+  Future<void> _answer(AskTurn turn) async {
+    turn
+      ..answering = true
+      ..error = null;
     liveRail = const [];
     notifyListeners();
     _watchRail();
     try {
-      final r = await api.ask(q, conversationId: conversationId);
+      final r = await api.ask(turn.question, conversationId: conversationId);
       turn.result = r;
       turn.rail = r.rail;
       conversationId = r.conversationId.isEmpty ? conversationId : r.conversationId;
@@ -97,17 +206,17 @@ class AskController extends ChangeNotifier {
       turn.error = e;
       turn.rail = e is ApiException && e.rail.isNotEmpty ? e.rail : liveRail;
     } finally {
+      turn.answering = false;
       _poll?.cancel();
       _poll = null;
     }
     notifyListeners();
   }
 
-  /// Re-asks a failed turn in place.
+  /// Re-asks a failed answer in place.
   Future<void> retry(AskTurn turn) async {
     if (turn.error == null || busy) return;
-    turns.remove(turn);
-    await ask(turn.question);
+    await _answer(turn);
   }
 
   void newConversation() {
@@ -142,18 +251,28 @@ class AskController extends ChangeNotifier {
   AskSource? get selectedSource {
     final s = selected;
     if (s == null || s.turn >= turns.length) return null;
-    final sources = turns[s.turn].result?.sources ?? const [];
+    final sources = turns[s.turn].result?.sources ?? const <AskSource>[];
     return sources.where((x) => x.n == s.n).firstOrNull;
   }
 }
 
-/// 질문 as a conversation: question and answer bubbles, a composer at the bottom, and the source
-/// a citation points at in a panel on the right (wide) or a sheet from the bottom (narrow).
+/// The chat: the user's lines and what each got, a composer at the bottom, and the source a citation
+/// points at in a panel on the right (wide) or a sheet from the bottom (narrow).
 class AskView extends StatefulWidget {
-  const AskView({super.key, required this.controller, this.focusNode, this.onOpenSettings});
+  const AskView({super.key, required this.controller, this.focusNode, this.onOpenSettings, this.onOpenIndex, this.index, this.inbox, this.onSent});
   final AskController controller;
   final FocusNode? focusNode;
   final VoidCallback? onOpenSettings;
+
+  /// Opens the index sheet from a search that failed for want of an index.
+  final VoidCallback? onOpenIndex;
+
+  /// For the note under an empty search ("색인 중", "방금 넣은 전사본은 아직…").
+  final IndexStatus? index;
+  final Inbox? inbox;
+
+  /// After each line is handled (the screen refreshes its recording trail).
+  final VoidCallback? onSent;
 
   /// Below this width the source opens as a bottom sheet instead of a side panel.
   static const panelBreakpoint = 980.0;
@@ -193,12 +312,13 @@ class _AskViewState extends State<AskView> {
     if (mounted) setState(() {});
   }
 
-  void _send([String? _]) {
+  Future<void> _send([String? _]) async {
     final q = _composer.text.trim();
     if (q.isEmpty || c.busy) return;
     _composer.clear();
-    c.ask(q);
     widget.focusNode?.requestFocus();
+    await c.send(q);
+    widget.onSent?.call();
   }
 
   void _cite(int turn, int n) {
@@ -247,11 +367,22 @@ class _AskViewState extends State<AskView> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _QuestionBubble(text: t.question),
           const SizedBox(height: 8),
-          if (t.pending)
+          if (t.intent == ChatIntent.download) _FilesBubble(turn: t, api: c.api),
+          if (t.searching || t.search != null || t.searchError != null)
+            _SearchBubble(
+              turn: t,
+              api: c.api,
+              index: widget.index,
+              inbox: widget.inbox,
+              onOpenIndex: widget.onOpenIndex,
+              onAnswer: t.asked || c.busy ? null : () => c.answer(t),
+            ),
+          if (t.asked && (t.search != null || t.searchError != null)) const SizedBox(height: 8),
+          if (t.answering)
             _PendingBubble(status: c.status, rail: c.liveRail)
           else if (t.error != null)
             _ErrorBubble(error: t.error!, rail: t.rail, onRetry: () => c.retry(t), onOpenSettings: widget.onOpenSettings)
-          else
+          else if (t.result != null)
             _AnswerBubble(result: t.result!, selected: c.selected?.turn == i ? c.selected!.n : null, onCite: (n) => _cite(i, n)),
         ]),
       ));
@@ -276,8 +407,8 @@ class _AskViewState extends State<AskView> {
             textInputAction: TextInputAction.send,
             onSubmitted: _send,
             decoration: InputDecoration(
-              hintText: continuing ? '이어서 질문… ("그건 왜?"처럼 짧게 이어도 됩니다)' : '기록을 근거로 답합니다 (예: 색인은 왜 미뤘지?)',
-              prefixIcon: const Icon(Icons.question_answer_outlined),
+              hintText: continuing ? '이어서… ("그건 왜?", "[2] 내려받기"처럼 짧게 이어도 됩니다)' : '찾을 말, 질문, 또는 "11월 2일 전사본 내려받기"',
+              prefixIcon: const Icon(Icons.search),
               isDense: true,
             ),
           ),
@@ -286,14 +417,14 @@ class _AskViewState extends State<AskView> {
         FilledButton.icon(
           onPressed: c.busy ? null : _send,
           icon: c.busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send),
-          label: Text(c.busy ? '답하는 중' : '보내기'),
+          label: Text(c.answering ? '답하는 중' : c.busy ? '찾는 중' : '보내기'),
         ),
       ]),
     );
   }
 }
 
-/// The header controls for the 질문 mode: new conversation, previous conversations, delete.
+/// The chat's header: its title, new conversation, previous conversations, delete.
 class AskHeader extends StatelessWidget {
   const AskHeader({super.key, required this.controller});
   final AskController controller;
@@ -363,9 +494,10 @@ class _Intro extends StatelessWidget {
         final agent = st?.chosenAgent;
         final noAgent = snap.connectionState == ConnectionState.done && !snap.hasError && st?.chosen == null;
         return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const EmptyPane('검색한 문단만 근거로 답을 씁니다\n'
-              '질문으로 기록을 검색하고, 상위 문단을 이 맥에 있는 에이전트(Claude Code·Codex·Gemini CLI)나 OpenRouter에 넣어 출처 [번호]가 달린 답을 받습니다. '
-              '이어서 물으면 앞의 대화를 기억합니다. 에이전트는 파일을 읽기만 합니다.', icon: Icons.question_answer_outlined),
+          const EmptyPane('기록에 말을 거세요\n'
+              '단어를 넣으면 로그 · 프로젝트 · 리포트 · 전사본 · 수집 원본에서 바로 찾습니다. '
+              '"색인은 왜 미뤘지?"처럼 물으면 찾은 문단만 근거로 에이전트가 출처 [번호]를 달아 답합니다. '
+              '"11월 2일 전사본 내려받기"처럼 말하면 그 파일을 내려받을 수 있습니다. 에이전트는 파일을 읽기만 합니다.', icon: Icons.forum_outlined),
           if (agent != null) Text('답은 ${agent.title}가 씁니다 · ${agent.detail}', style: t.bodySmall?.copyWith(color: scheme.outline)),
           if (st != null && st.rail.isNotEmpty) AgentRail(stops: st.rail),
           for (final a in st?.agents.where((a) => a.needsLogin) ?? const <AgentInfo>[])
@@ -484,6 +616,139 @@ class _AnswerBubble extends StatelessWidget {
         ]),
         const SizedBox(height: 6),
         Text('${_who(result, agent)} · ${(result.ms / 1000).toStringAsFixed(1)}초 · 발췌 ${result.sources.length}개만 근거로 썼습니다', style: t.labelSmall?.copyWith(color: scheme.outline)),
+      ]),
+    );
+  }
+}
+
+/// The hits for a line: the first few as cards, then "모두 보기" (filters) and, when no answer was asked, "답 받기".
+class _SearchBubble extends StatelessWidget {
+  const _SearchBubble({required this.turn, required this.api, this.index, this.inbox, this.onOpenIndex, this.onAnswer});
+  final AskTurn turn;
+  final WorklogApi api;
+  final IndexStatus? index;
+  final Inbox? inbox;
+  final VoidCallback? onOpenIndex;
+  final VoidCallback? onAnswer;
+
+  static const shown = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    if (turn.searching) {
+      return _Bubble(child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(width: 10),
+        Text('찾는 중…', style: t.bodyMedium),
+      ]));
+    }
+    final err = turn.searchError;
+    if (err != null) return _Bubble(color: scheme.errorContainer.withValues(alpha: 0.35), child: Text(err is ApiException ? err.message : '$err'));
+    final r = turn.search!;
+    if (!r.ok) return _Bubble(child: SearchErrorNote(result: r, onOpenIndex: onOpenIndex));
+    final hits = r.hits;
+    return _Bubble(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(hits.isEmpty ? emptySearchNote(query: turn.question, total: 0, shown: 0, filtered: false, index: index, inbox: inbox) : '찾은 기록 ${hits.length}건',
+            style: hits.isEmpty ? t.bodyMedium : t.labelMedium?.copyWith(color: scheme.outline)),
+        for (final h in hits.take(shown)) ...[
+          const SizedBox(height: 8),
+          HitCard(
+            hit: h,
+            maxLines: 4,
+            onOpen: () => FileScreen.open(context, api, h.path),
+            onDownload: () => saveWorklogFile(context, api, h.path),
+          ),
+        ],
+        if (hits.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            if (onAnswer != null && hits.isNotEmpty)
+              FilledButton.tonalIcon(onPressed: onAnswer, icon: const Icon(Icons.question_answer_outlined, size: 18), label: const Text('답 받기')),
+            if (hits.length > 1)
+              OutlinedButton.icon(
+                onPressed: () => SearchResultsScreen.open(context, api, turn.question, r, index: index, inbox: inbox),
+                icon: const Icon(Icons.filter_list, size: 18),
+                label: Text('모두 보기 (${hits.length}건)'),
+              ),
+          ]),
+        ],
+      ]),
+    );
+  }
+}
+
+/// The files a line asked for, each with 열기 and 내려받기; or why none were found.
+class _FilesBubble extends StatelessWidget {
+  const _FilesBubble({required this.turn, required this.api});
+  final AskTurn turn;
+  final WorklogApi api;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    if (turn.finding) {
+      return _Bubble(child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(width: 10),
+        Text('파일을 찾는 중…', style: t.bodyMedium),
+      ]));
+    }
+    final err = turn.filesError;
+    if (err != null) return _Bubble(color: scheme.errorContainer.withValues(alpha: 0.35), child: Text(err is ApiException ? err.message : '$err'));
+    final m = turn.files;
+    if (m == null || m.files.isEmpty) {
+      return const _Bubble(
+        child: Text('그 파일을 찾지 못했습니다. 날짜와 종류("11월 2일 전사본", "어제 git 커밋")나 파일 이름으로 말해 주세요. '
+            '검색이나 답에 나온 것이면 "[2] 내려받기"처럼 번호로 가리켜도 됩니다.'),
+      );
+    }
+    final note = switch (m.by) {
+      'search' => '이름이나 날짜로 딱 맞는 파일이 없어, 검색에서 찾은 파일입니다.',
+      'chat' => '위에 나온 파일입니다.',
+      _ => m.files.length == 1 ? '이 파일을 찾았습니다.' : '파일 ${m.files.length}개를 찾았습니다.',
+    };
+    return _Bubble(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(note, style: t.labelMedium?.copyWith(color: scheme.outline)),
+        for (final f in m.files) ...[
+          const SizedBox(height: 8),
+          _FileRow(file: f, api: api),
+        ],
+      ]),
+    );
+  }
+}
+
+class _FileRow extends StatelessWidget {
+  const _FileRow({required this.file, required this.api});
+  final FoundFile file;
+  final WorklogApi api;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final meta = [if (file.kind.isNotEmpty) file.kind, if (file.bytes > 0) file.size].join(' · ');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(color: scheme.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: scheme.outlineVariant)),
+      child: Row(children: [
+        Icon(file.name.endsWith('.txt') ? Icons.description_outlined : Icons.article_outlined, color: scheme.primary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(file.name, style: t.titleSmall),
+            Text(meta.isEmpty ? file.path : '$meta · ${file.path}', style: ZaevisTheme.mono.copyWith(fontSize: 11.5, color: scheme.outline), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        TextButton(onPressed: () => FileScreen.open(context, api, file.path), child: const Text('열기')),
+        const SizedBox(width: 4),
+        FilledButton.icon(onPressed: () => saveWorklogFile(context, api, file.path), icon: const Icon(Icons.download, size: 18), label: const Text('내려받기')),
       ]),
     );
   }
@@ -660,6 +925,12 @@ class _SourcePanel extends StatelessWidget {
             onPressed: s.path.isEmpty ? null : () => FileScreen.open(context, api, s.path),
             icon: const Icon(Icons.open_in_new, size: 18),
             label: const Text('원문 열기'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: s.path.isEmpty ? null : () => saveWorklogFile(context, api, s.path),
+            icon: const Icon(Icons.download_outlined, size: 18),
+            label: const Text('내려받기'),
           ),
         ]),
       ]),

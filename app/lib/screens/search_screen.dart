@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../models.dart';
 import '../recording_trail.dart';
-import '../theme.dart';
 import '../widgets/common.dart';
-import '../widgets/markdown_view.dart';
+import '../widgets/hit_card.dart';
 import '../widgets/record_dialog.dart';
 import '../widgets/recording_trail_strip.dart';
+import '../widgets/save_file.dart';
 import 'ask_view.dart';
 import 'file_screen.dart';
 
@@ -36,16 +36,6 @@ enum SearchPeriod {
   }
 }
 
-/// 검색: ranked passages. 질문: the same search, then an agent writes an answer from the passages.
-enum SearchMode {
-  search('검색', Icons.search),
-  ask('질문', Icons.question_answer_outlined);
-
-  const SearchMode(this.label, this.icon);
-  final String label;
-  final IconData icon;
-}
-
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key, required this.api, required this.onOpenIndex, this.onOpenSettings, this.focusNode});
   final WorklogApi api;
@@ -64,18 +54,13 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+/// One chat for everything: each line is searched at once, questions also get an answer, and file requests get
+/// download buttons (see chat_intent.dart). The full, filterable result list is a page behind "모두 보기".
 class _SearchScreenState extends State<SearchScreen> {
-  final _controller = TextEditingController();
-  Future<SearchResult>? _result;
-  String _query = '';
-  final Set<String> _kinds = {};
-  SearchPeriod _period = SearchPeriod.all;
-  SearchMode _mode = SearchMode.search;
   Inbox? _inbox;
   IndexStatus? _index;
   Timer? _trailTimer;
-  // the conversation lives here so switching to 검색 and back keeps it
-  late final AskController _ask = AskController(widget.api);
+  late final AskController _chat = AskController(widget.api);
 
   @override
   void initState() {
@@ -86,8 +71,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void dispose() {
     _trailTimer?.cancel();
-    _controller.dispose();
-    _ask.dispose();
+    _chat.dispose();
     super.dispose();
   }
 
@@ -114,121 +98,103 @@ class _SearchScreenState extends State<SearchScreen> {
     if (path != null) FileScreen.open(context, widget.api, path);
   }
 
-  void _submit([String? _]) {
-    final q = _controller.text.trim();
-    if (q.isEmpty) return;
-    setState(() {
-      _query = q;
-      // ask for more than fits one screen: the filters below narrow it on the client
-      _result = widget.api.search(q, topK: 40);
-    });
-    _loadTrail();
-  }
-
-  void _setMode(SearchMode m) {
-    setState(() => _mode = m);
-    widget.focusNode?.requestFocus();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final ask = _mode == SearchMode.ask;
     return Readable(
       // results use the whole width; the conversation's source panel needs it too
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-            child: Row(children: [
-              SegmentedButton<SearchMode>(
-                segments: [for (final m in SearchMode.values) ButtonSegment(value: m, label: Text(m.label), icon: Icon(m.icon, size: 18))],
-                selected: {_mode},
-                showSelectedIcon: false,
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                onSelectionChanged: (s) => _setMode(s.first),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ask
-                    ? AskHeader(controller: _ask)
-                    : SearchBar(
-                        controller: _controller,
-                        focusNode: ask ? null : widget.focusNode,
-                        autoFocus: true,
-                        hintText: '무엇을 했는지, 왜 그렇게 정했는지 물어보세요 (예: 검색 색인)',
-                        leading: const Icon(Icons.search),
-                        onSubmitted: _submit,
-                        trailing: [IconButton(onPressed: _submit, icon: const Icon(Icons.arrow_forward), tooltip: '검색')],
-                      ),
-              ),
-            ]),
-          ),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 10, 8, 6), child: AskHeader(controller: _chat)),
           RecordingTrailStrip(items: _trails, onOpen: _openTrail),
           Expanded(
-            child: ask ? AskView(controller: _ask, focusNode: widget.focusNode, onOpenSettings: widget.onOpenSettings) : _searchBody(),
+            child: AskView(
+              controller: _chat,
+              focusNode: widget.focusNode,
+              onOpenSettings: widget.onOpenSettings,
+              onOpenIndex: widget.onOpenIndex,
+              index: _index,
+              inbox: _inbox,
+              onSent: _loadTrail,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _searchBody() {
-    return _result == null
-                ? const EmptyPane('기록 전체를 뜻으로 찾습니다\n'
-                    '로그 · 프로젝트 · 월간 정리 · 전사본 · 수집 원본을 키워드와 의미(로컬 임베딩)로 함께 검색합니다. 결과를 누르면 원문이 열립니다.', icon: Icons.manage_search)
-                : FutureBuilder<SearchResult>(
-                    future: _result,
-                    builder: (context, snap) {
-                      if (snap.connectionState != ConnectionState.done) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snap.hasError) return ErrorPane(error: snap.error!, onRetry: _submit);
-                      final r = snap.data!;
-                      if (!r.ok) {
-                        return _SearchError(result: r, onOpenIndex: widget.onOpenIndex);
-                      }
-                      if (r.hits.isEmpty) return _emptyNote(total: 0, shown: 0, filtered: false);
-                      final now = SearchScreen.clock();
-                      final kinds = <String, (String, int)>{};
-                      for (final h in r.hits) {
-                        final c = h.context;
-                        if (c == null) continue;
-                        kinds.update(c.kind, (v) => (v.$1, v.$2 + 1), ifAbsent: () => (c.sourceLabel, 1));
-                      }
-                      final shown = r.hits
-                          .where((h) => _kinds.isEmpty || (h.context != null && _kinds.contains(h.context!.kind)))
-                          .where((h) => _period.accepts(h.context?.date, now))
-                          .toList();
-                      return Column(children: [
-                        _Filters(
-                          kinds: kinds,
-                          selected: _kinds,
-                          period: _period,
-                          onKind: (k, on) => setState(() => on ? _kinds.add(k) : _kinds.remove(k)),
-                          onPeriod: (p) => setState(() => _period = p),
-                          shown: shown.length,
-                          total: r.hits.length,
-                        ),
-                        Expanded(
-                          child: shown.isEmpty
-                              ? _emptyNote(total: r.hits.length, shown: 0, filtered: _kinds.isNotEmpty || _period != SearchPeriod.all)
-                              : ListView.separated(
-                                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                                  itemCount: shown.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                  itemBuilder: (context, i) => _HitCard(hit: shown[i], onOpen: () => FileScreen.open(context, widget.api, shown[i].path)),
-                                ),
-                        ),
-                      ]);
-                    },
-                  );
+  List<RecordingTrail> get _trails => _inbox == null ? const [] : recordingTrails(inbox: _inbox!, index: _index);
+}
+
+/// Every hit of one search with the source and period filters, opened from a search answer in the chat.
+class SearchResultsScreen extends StatefulWidget {
+  const SearchResultsScreen({super.key, required this.api, required this.query, required this.result, this.index, this.inbox});
+  final WorklogApi api;
+  final String query;
+  final SearchResult result;
+  final IndexStatus? index;
+  final Inbox? inbox;
+
+  static Future<void> open(BuildContext context, WorklogApi api, String query, SearchResult result, {IndexStatus? index, Inbox? inbox}) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SearchResultsScreen(api: api, query: query, result: result, index: index, inbox: inbox)));
+
+  @override
+  State<SearchResultsScreen> createState() => _SearchResultsScreenState();
+}
+
+class _SearchResultsScreenState extends State<SearchResultsScreen> {
+  final Set<String> _kinds = {};
+  SearchPeriod _period = SearchPeriod.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.result;
+    final now = SearchScreen.clock();
+    final kinds = <String, (String, int)>{};
+    for (final h in r.hits) {
+      final c = h.context;
+      if (c == null) continue;
+      kinds.update(c.kind, (v) => (v.$1, v.$2 + 1), ifAbsent: () => (c.sourceLabel, 1));
+    }
+    final shown = r.hits
+        .where((h) => _kinds.isEmpty || (h.context != null && _kinds.contains(h.context!.kind)))
+        .where((h) => _period.accepts(h.context?.date, now))
+        .toList();
+    return Scaffold(
+      appBar: AppBar(title: Text('"${widget.query}" 검색 결과')),
+      body: Readable(
+        child: Column(children: [
+          const SizedBox(height: 8),
+          _Filters(
+            kinds: kinds,
+            selected: _kinds,
+            period: _period,
+            onKind: (k, on) => setState(() => on ? _kinds.add(k) : _kinds.remove(k)),
+            onPeriod: (p) => setState(() => _period = p),
+            shown: shown.length,
+            total: r.hits.length,
+          ),
+          Expanded(
+            child: shown.isEmpty
+                ? _emptyNote(total: r.hits.length, filtered: _kinds.isNotEmpty || _period != SearchPeriod.all)
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    itemCount: shown.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) => HitCard(
+                      hit: shown[i],
+                      onOpen: () => FileScreen.open(context, widget.api, shown[i].path),
+                      onDownload: () => saveWorklogFile(context, widget.api, shown[i].path),
+                    ),
+                  ),
+          ),
+        ]),
+      ),
+    );
   }
 
-  List<RecordingTrail> get _trails => _inbox == null ? const [] : recordingTrails(inbox: _inbox!, index: _index);
-
-  Widget _emptyNote({required int total, required int shown, required bool filtered}) {
-    final note = emptySearchNote(query: _query, total: total, shown: shown, filtered: filtered, index: _index, inbox: _inbox);
-    final clear = filtered && total > 0 && shown == 0;
+  Widget _emptyNote({required int total, required bool filtered}) {
+    final note = emptySearchNote(query: widget.query, total: total, shown: 0, filtered: filtered, index: widget.index, inbox: widget.inbox);
+    final clear = filtered && total > 0;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -296,73 +262,20 @@ class _Filters extends StatelessWidget {
   }
 }
 
-class _SearchError extends StatelessWidget {
-  const _SearchError({required this.result, required this.onOpenIndex});
+/// Why a search failed (no index yet, AutoRAG error) and the way to the index sheet.
+class SearchErrorNote extends StatelessWidget {
+  const SearchErrorNote({super.key, required this.result, this.onOpenIndex});
   final SearchResult result;
-  final VoidCallback onOpenIndex;
+  final VoidCallback? onOpenIndex;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.info_outline, size: 40),
-          const SizedBox(height: 12),
-          Text(result.needsRefresh ? '아직 색인이 없습니다. 색인을 먼저 만들어 주세요.' : (result.errorMessage ?? '검색에 실패했습니다'),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          FilledButton.icon(onPressed: onOpenIndex, icon: const Icon(Icons.sync), label: const Text('색인 상태 열기')),
-        ]),
-      ),
-    );
-  }
-}
-
-class _HitCard extends StatelessWidget {
-  const _HitCard({required this.hit, required this.onOpen});
-  final SearchHit hit;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    final ctx = hit.context;
-    final labels = ctx?.labels ?? [hit.title];
-    return Opacity(
-      opacity: hit.weak ? 0.55 : 1,
-      child: Card.outlined(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: hit.path.isEmpty ? null : onOpen,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                CircleAvatar(radius: 12, child: Text('${hit.number}', style: t.labelSmall)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                    for (var i = 0; i < labels.length; i++)
-                      Text(labels[i], style: i == 0 ? t.titleSmall : t.bodyMedium?.copyWith(color: i == labels.length - 1 && ctx?.author != null ? scheme.tertiary : null)),
-                    if (hit.weak) Chip(label: const Text('약한 일치'), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, labelStyle: t.labelSmall),
-                  ]),
-                ),
-              ]),
-              if (hit.snippet.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                // minLines matters: without it SelectableText reserves the full maxLines height
-                SelectableText.rich(inlineSpan(context, hit.snippet, base: t.bodyMedium, highlight: ctx?.matched ?? const []), minLines: 1, maxLines: 8),
-              ],
-              if (hit.path.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(hit.path, style: ZaevisTheme.mono.copyWith(fontSize: 11.5, color: scheme.outline)),
-              ],
-            ]),
-          ),
-        ),
-      ),
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Text(result.needsRefresh ? '아직 색인이 없습니다. 색인을 먼저 만들어 주세요.' : (result.errorMessage ?? '검색에 실패했습니다')),
+      if (onOpenIndex != null) ...[
+        const SizedBox(height: 10),
+        FilledButton.tonalIcon(onPressed: onOpenIndex, icon: const Icon(Icons.sync, size: 18), label: const Text('색인 상태 열기')),
+      ],
+    ]);
   }
 }

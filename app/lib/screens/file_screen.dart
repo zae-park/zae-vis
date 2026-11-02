@@ -6,6 +6,7 @@ import '../recording_trail.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/save_file.dart';
 
 /// The original worklog file behind a search hit, rendered as markdown.
 class FileScreen extends StatelessWidget {
@@ -20,7 +21,12 @@ class FileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: Text(path.split('/').last), bottom: PreferredSize(
+      appBar: AppBar(title: Text(path.split('/').last), actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: TextButton.icon(onPressed: () => saveWorklogFile(context, api, path), icon: const Icon(Icons.download_outlined), label: const Text('내려받기')),
+        ),
+      ], bottom: PreferredSize(
         preferredSize: const Size.fromHeight(20),
         child: Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(path, style: ZaevisTheme.mono.copyWith(fontSize: 11.5, color: t.bodySmall?.color))),
       )),

@@ -9,6 +9,7 @@ import type { RefreshPhase, SearchBackend } from "./autorag.ts";
 import type { HfStatus } from "./hf.ts";
 import type { CollectProgress } from "./sources/index.ts";
 import { AUDIO_EXT } from "./transcribe.ts";
+import { contentDisposition, findFiles, listWorklogFiles } from "./files.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
 export type CollectReportLike = Array<{ name: string; ok: boolean; days: string[]; note?: string; error?: string }>;
@@ -328,6 +329,38 @@ export function createApp(opts: AppOptions): Server {
           const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
           const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
           return f ? send(res, 200, f) : notFound(res);
+        }
+
+        case "GET /files": {
+          // GET /api/files?q=<sentence> → { files[{ path, name, bytes, date, kind }], by: "name"|"search"|"none" }
+          // The worklog files a request names ("11월 2일 전사본"); when none fit, the files behind the top search hits.
+          const q = (url.searchParams.get("q") ?? "").trim();
+          if (!q) return send(res, 400, { error: "missing_query" });
+          const catalog = await listWorklogFiles(worklog.root);
+          const named = findFiles(catalog, q);
+          if (named.length) return send(res, 200, { files: named, by: "name" });
+          const known = new Map(catalog.map((f) => [f.path, f]));
+          const r = await search.search(q, 10).catch(() => null);
+          const paths = [...new Set((r?.ok ? r.hits : []).filter((h) => !h.weak).map((h) => h.path))].filter((p) => known.has(p)).slice(0, 5);
+          const files = paths.map((p) => findFiles([known.get(p)!], p)[0]).filter(Boolean);
+          return send(res, 200, { files, by: files.length ? "search" : "none" });
+        }
+
+        case "GET /download": {
+          // GET /api/download?path= → the file itself as an attachment (worklog .md/.txt, or an indexed/external original)
+          const rel = (url.searchParams.get("path") ?? "").trim();
+          if (!rel) return send(res, 400, { error: "missing_path" });
+          const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
+          const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
+          if (!f) return notFound(res);
+          const name = basename(f.path) || "file.txt";
+          const body = Buffer.from(f.markdown, "utf8");
+          res.writeHead(200, {
+            "content-type": `${extname(name).toLowerCase() === ".md" ? "text/markdown" : "text/plain"}; charset=utf-8`,
+            "content-length": body.length,
+            "content-disposition": contentDisposition(name),
+          });
+          return void res.end(body);
         }
 
         case "GET /index":

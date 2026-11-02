@@ -270,6 +270,38 @@ class WorklogFile {
   final String markdown;
 }
 
+/// A worklog file the chat found for a download request (GET /api/files).
+class FoundFile {
+  const FoundFile({required this.path, required this.name, required this.bytes, this.date, this.kind = ''});
+  factory FoundFile.fromJson(Json j) => FoundFile(
+        path: _str(j['path']),
+        name: _str(j['name']),
+        bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+        date: j['date'] is String ? j['date'] as String : null,
+        kind: _str(j['kind']),
+      );
+  final String path;
+  final String name;
+  final int bytes;
+  final String? date;
+  final String kind;
+
+  /// "12.4 KB", for the file row.
+  String get size => bytes < 1024 ? '$bytes B' : bytes < 1024 * 1024 ? '${(bytes / 1024).toStringAsFixed(1)} KB' : '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+}
+
+/// The answer to "which files does this sentence mean": `name` when the request named them (date, kind, file name),
+/// `search` when they are the files behind the top search hits, `none` when nothing fit.
+class FileMatches {
+  const FileMatches({required this.files, required this.by});
+  factory FileMatches.fromJson(Json j) => FileMatches(
+        files: (j['files'] is List ? j['files'] as List : const <Object?>[]).whereType<Json>().map(FoundFile.fromJson).toList(),
+        by: _str(j['by']),
+      );
+  final List<FoundFile> files;
+  final String by;
+}
+
 class SearchResult {
   const SearchResult({
     required this.ok,

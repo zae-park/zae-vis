@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
 import 'package:zaevis/backend/backend.dart';
+import 'package:zaevis/download.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
@@ -148,6 +149,14 @@ WorklogApi _fakeApi() => WorklogApi(
               'sources': [
                 {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · notes · 박재', 'passage': '색인할 파일이 빠져서'},
                 {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '색인을 처음부터 다시 만들기로'},
+              ],
+            });
+          case '/api/files':
+            posted.add(req);
+            return _json({
+              'by': 'name',
+              'files': [
+                {'path': 'inbox/transcripts/2026-11-02_1703_녹음.txt', 'name': '2026-11-02_1703_녹음.txt', 'bytes': 2048, 'date': '2026-11-02', 'kind': '전사본'},
               ],
             });
           case '/api/file':
@@ -391,6 +400,88 @@ void main() {
     expect(find.textContaining('색인할 파일이 빠져서 — 박재'), findsWidgets);
   });
 
+  testWidgets('a file request gets download buttons without an agent; "[2] 내려받기" takes the answer\'s source', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final saved = <String>[];
+    final original = Downloads.save;
+    Downloads.save = (api, path) async {
+      saved.add(path);
+      return '/Users/me/Downloads/${path.split('/').last}';
+    };
+    addTearDown(() => Downloads.save = original);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '11월 2일 전사본 txt로 다운받아줘');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+
+    expect(posted.where((r) => r.url.path == '/api/files').single.url.queryParameters['q'], '11월 2일 전사본 txt로 다운받아줘');
+    expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty, reason: 'a file request does not wake an agent');
+    expect(find.text('이 파일을 찾았습니다.'), findsOneWidget);
+    expect(find.text('2026-11-02_1703_녹음.txt'), findsOneWidget);
+    expect(find.textContaining('전사본 · 2.0 KB'), findsOneWidget);
+    await tester.tap(find.text('내려받기'));
+    await tester.pumpAndSettle();
+    expect(saved, ['inbox/transcripts/2026-11-02_1703_녹음.txt']);
+    expect(find.textContaining('저장했습니다: /Users/me/Downloads/2026-11-02_1703_녹음.txt'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '색인은 왜 미뤘지?');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '[2] 내려받기');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(posted.where((r) => r.url.path == '/api/files').length, 1, reason: '[2] is the answer\'s second source, found in the chat');
+    expect(find.text('위에 나온 파일입니다.'), findsOneWidget);
+    expect(find.text('2026-10.md'), findsOneWidget);
+    await tester.tap(find.text('내려받기').first); // the thread is reversed: the newest turn comes first
+    await tester.pumpAndSettle();
+    expect(saved.last, 'log/2026-10.md');
+  });
+
+  testWidgets('a keyword line shows hits; 답 받기 asks the same words; the file screen saves the original', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final saved = <String>[];
+    final original = Downloads.save;
+    Downloads.save = (api, path) async {
+      saved.add(path);
+      return null; // the user cancelled the dialog
+    };
+    addTearDown(() => Downloads.save = original);
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '색인');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(find.text('찾은 기록 2건'), findsOneWidget);
+    expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty, reason: 'keywords only search');
+
+    await tester.tap(find.text('답 받기'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.where((r) => r.url.path == '/api/ask').single.body), {'q': '색인', 'topK': 10});
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
+    expect(find.text('답 받기'), findsNothing);
+
+    await tester.tap(find.byTooltip('파일 내려받기').first);
+    await tester.pumpAndSettle();
+    expect(saved, ['sources/git/2026-10-09.md']);
+    expect(find.textContaining('저장했습니다'), findsNothing, reason: 'a cancelled dialog says nothing');
+
+    await tester.tap(find.text('git 커밋'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('내려받기'));
+    await tester.pumpAndSettle();
+    expect(saved.last, 'sources/git/2026-10-09.md');
+  });
+
   testWidgets('질문 mode is a conversation: bubbles, a follow-up carries the conversation id, [n] opens the source panel and the file', (tester) async {
     tester.view.physicalSize = const Size(1200, 700);
     tester.view.devicePixelRatio = 1;
@@ -398,9 +489,8 @@ void main() {
     posted.clear();
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
-    expect(find.text('검색한 문단만 근거로 답을 씁니다'), findsOneWidget);
+    expect(find.text('기록에 말을 거세요'), findsOneWidget);
     expect(find.textContaining('답은 Claude Code가 씁니다'), findsOneWidget);
     expect(find.text('새 대화'), findsWidgets); // header title + button
 
@@ -471,7 +561,6 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '색인?');
     await tester.testTextInput.receiveAction(TextInputAction.send);
@@ -506,7 +595,6 @@ void main() {
     });
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
     expect(find.text('서비스 순서'), findsOneWidget);
     expect(find.text('OpenRouter API · 사용량'), findsOneWidget);
@@ -550,13 +638,12 @@ void main() {
     addTearDown(() => mockAskAgent = 'claude');
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
-    await tester.tap(find.text('질문'));
     await tester.pumpAndSettle();
     expect(find.textContaining('답을 쓸 에이전트가 없습니다'), findsOneWidget);
     expect(find.text('Codex CLI: 로그인 필요: 터미널에서 codex login'), findsOneWidget);
     expect(find.text('설정 열기'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField), 'x');
+    await tester.enterText(find.byType(TextField), 'x는 왜?');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(find.textContaining('Claude Code·Codex·Gemini CLI 중 하나를 설치하세요'), findsOneWidget);
@@ -728,7 +815,7 @@ void main() {
     expect(find.text('기록 · 하루 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'), findsOneWidget, reason: 'memory tab header');
 
     await cmd(LogicalKeyboardKey.keyK);
-    expect(find.text('기록 전체를 뜻과 단어로 찾습니다'), findsOneWidget, reason: 'back on search');
+    expect(find.text('기록을 찾고, 묻고, 파일을 내려받습니다'), findsOneWidget, reason: 'back on search');
     final field = tester.widget<TextField>(find.byType(TextField).first);
     expect(field.focusNode?.hasFocus, isTrue, reason: 'search field focused');
 
@@ -1019,6 +1106,10 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pumpAndSettle();
 
+    expect(find.text('찾은 기록 2건'), findsOneWidget);
+    await tester.tap(find.text('모두 보기 (2건)'));
+    await tester.pumpAndSettle();
+    expect(find.text('"색인" 검색 결과'), findsOneWidget);
     expect(find.text('2건'), findsOneWidget);
     expect(find.widgetWithText(FilterChip, 'git 커밋 1'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilterChip, '한 줄 기록 1'));
