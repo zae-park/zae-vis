@@ -1,5 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ let root: string;
 const calls: string[] = [];
 let added: Array<Record<string, unknown>> = [];
 const queued: string[] = [];
+const voiceFiles: string[] = [];
 const relabeled: string[] = [];
 let indexOnInject = false;
 let embeddingOn = false;
@@ -62,6 +64,13 @@ before(async () => {
         return { dailyAt: p.dailyAt ?? "18:30", indexOnInject };
       },
       indexOnInject: () => indexOnInject,
+    },
+    voice: {
+      transcribe: async (f) => {
+        voiceFiles.push(f);
+        if (!existsSync(f)) throw new Error("no file");
+        return "가장 최근 회의록 줘";
+      },
     },
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), relabel: (p) => relabeled.push(p), jobs: () => [] },
     digest: {
@@ -294,4 +303,16 @@ test("PUT /settings takes a language code, and auto/user/a code for transcriptio
   await call("PUT", "/api/settings", { language: "English", transcribeLanguage: "ja" });
   await call("PUT", "/api/settings", { transcribeLanguage: "--rm" });
   assert.deepEqual(calls, ["language:en/auto", "language:-/user", "language:-/ja"]);
+});
+
+test("POST /voice turns speech into text and keeps nothing", async () => {
+  const wav = Buffer.alloc(4000, 1);
+  const r = await fetch(base + "/api/voice?name=voice.wav", { method: "POST", headers: { "x-zaevis": "1", "content-type": "audio/wav" }, body: wav });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.text, "가장 최근 회의록 줘");
+  assert.equal(typeof body.ms, "number");
+  assert.equal(existsSync(voiceFiles.at(-1)!), false, "the temporary audio is deleted");
+  assert.equal((await fetch(base + "/api/voice?name=a.wav", { method: "POST", headers: { "x-zaevis": "1" }, body: Buffer.alloc(10) })).status, 400, "no sound");
+  assert.equal((await fetch(base + "/api/voice?name=a.exe", { method: "POST", headers: { "x-zaevis": "1" }, body: wav })).status, 400);
 });

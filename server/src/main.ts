@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AskRunner } from "./ask.ts";
 import { jevJudge } from "./route.ts";
+import { VoiceTranscriber } from "./voice.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
@@ -48,6 +49,12 @@ rerank.applyToAutoragConfig(cfg.autoragConfig, cfg.rerank, rerank.getKey() !== n
 // Semantic search: a local embedding daemon the server keeps alive (idle-timeout 0) while it runs.
 const embedding = new EmbeddingDaemon({ idleTimeout: 0, log: (m) => console.log(m) });
 const queue = new TranscribeQueue();
+// the chat's microphone: a warm faster-whisper in the whisperX venv, started on the first command
+const voice = new VoiceTranscriber({
+  python: () => speakerPython(transcriptSettings().whisperxBin as string | undefined),
+  model: () => String(transcriptSettings().model ?? "large-v3-turbo"),
+  log: (m) => console.log(`[voice] ${m}`),
+});
 const digest = new DigestRunner({ notify });
 const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
@@ -269,6 +276,9 @@ const server = createApp({
     login: () => startHfLogin(),
     check: () => recheckHfModels(),
     logout: () => logoutHf(),
+  },
+  voice: {
+    transcribe: (file) => voice.transcribe(file, transcribeLanguageFor(cfg)),
   },
   audio: {
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),

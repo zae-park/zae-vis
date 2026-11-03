@@ -2,7 +2,8 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, extname, join, normalize, sep } from "node:path";
 import type { AskOutcome } from "./ask.ts";
 import type { RefreshPhase, SearchBackend } from "./autorag.ts";
@@ -86,6 +87,10 @@ export type AppOptions = {
     check(): Promise<HfStatus>;
     logout(): HfStatus;
   };
+  /** The chat's microphone: speech in a temporary file → text (voice.ts). Absent where whisperX cannot run. */
+  voice?: {
+    transcribe(file: string): Promise<string>;
+  };
   audio?: {
     dir(): string;
     enqueue(file: string): void;
@@ -140,6 +145,7 @@ const MIME: Record<string, string> = {
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const MAX_AUDIO = 1024 * 1024 * 1024; // 1 GB
+const MAX_VOICE = 10 * 1024 * 1024; // about 5 minutes of 16 kHz mono WAV
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -520,6 +526,39 @@ export function createApp(opts: AppOptions): Server {
             return send(res, 202, { file: basename(dest), queued: true });
           }
           return notFound(res);
+        }
+
+        case "POST /voice": {
+          // POST /api/voice?name=x.wav  (body: the recording) → { text, ms }
+          // Speech typed into the chat: the audio is a temporary file, deleted after reading; nothing is kept.
+          if (!opts.voice || arg) return notFound(res);
+          const ext = extname(url.searchParams.get("name") ?? "voice.wav").toLowerCase() || ".wav";
+          if (!AUDIO_EXT.has(ext)) throw new HttpError(400, `지원하지 않는 형식입니다: ${ext}`);
+          const dir = await mkdtemp(join(tmpdir(), "zaevis-voice-"));
+          const file = join(dir, `voice${ext}`);
+          const started = Date.now();
+          let text: string;
+          try {
+            let size = 0;
+            const out = createWriteStream(file);
+            try {
+              for await (const chunk of req) {
+                size += (chunk as Buffer).length;
+                if (size > MAX_VOICE) throw new HttpError(413, "음성이 너무 깁니다 (최대 약 5분)");
+                if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+              }
+              await new Promise<void>((r, j) => out.end((e?: Error | null) => (e ? j(e) : r())));
+            } catch (err) {
+              out.destroy();
+              throw err;
+            }
+            if (size < 1000) throw new HttpError(400, "녹음된 소리가 없습니다");
+            text = await opts.voice.transcribe(file);
+          } finally {
+            // gone before the reply: the recording never outlives the request
+            await rm(dir, { recursive: true, force: true });
+          }
+          return send(res, 200, { text, ms: Date.now() - started });
         }
 
         case "GET /sources":
