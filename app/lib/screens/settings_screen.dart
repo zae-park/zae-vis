@@ -677,12 +677,12 @@ class _Group extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (title != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text(title!, style: t.titleSmall?.copyWith(color: scheme.onSurfaceVariant))),
       if (description != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text(description!, style: t.bodySmall?.copyWith(color: scheme.outline))),
-      Container(
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: scheme.outlineVariant),
-        ),
+      // a Material, not a coloured box: ListTiles paint their ink on the nearest Material, and Flutter 3.4x asserts
+      // when a coloured DecoratedBox sits between them
+      Material(
+        color: scheme.surfaceContainerLowest,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: scheme.outlineVariant)),
+        clipBehavior: Clip.antiAlias,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
       ),
     ]);
