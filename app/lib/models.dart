@@ -727,6 +727,8 @@ class AppSettings {
     this.transcribeSpeed = 'quiet',
     this.theme = 'system',
     this.textScale = 1,
+    this.language = 'ko',
+    this.transcribeLanguage = 'user',
   });
 
   factory AppSettings.fromJson(Json j) {
@@ -750,6 +752,8 @@ class AppSettings {
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
       speakers: j['speakers'] is Json ? SpeakersStatus.fromJson(j['speakers'] as Json) : null,
       transcribeSpeed: _str(j['transcribeSpeed']) == 'fast' ? 'fast' : 'quiet',
+      language: _str(j['language']).isEmpty ? 'ko' : _str(j['language']),
+      transcribeLanguage: _str(j['transcribeLanguage']).isEmpty ? 'user' : _str(j['transcribeLanguage']),
       theme: j['appearance'] is Json ? _str((j['appearance'] as Json)['theme']) : 'system',
       textScale: j['appearance'] is Json && (j['appearance'] as Json)['textScale'] is num ? ((j['appearance'] as Json)['textScale'] as num).toDouble() : 1,
     );
@@ -764,6 +768,11 @@ class AppSettings {
   /// `appearance`: "system" | "light" | "dark", and the text size factor (see AppPrefs).
   final String theme;
   final double textScale;
+
+  /// The user's own language ("ko"), asked on first run; transcription follows it unless [transcribeLanguage] says
+  /// "auto" (whisper detects) or names another code.
+  final String language;
+  final String transcribeLanguage;
 
   final String dailyAt;
   final bool indexOnInject;

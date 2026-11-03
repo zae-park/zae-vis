@@ -27,6 +27,20 @@ test("the fast pass passes the thread count and leaves speakers and alignment ou
   assert.deepEqual(args.slice(args.indexOf("--threads"), args.indexOf("--threads") + 2), ["--threads", "14"]);
   assert.deepEqual(args.slice(args.indexOf("--vad_method"), args.indexOf("--vad_method") + 2), ["--vad_method", "silero"]);
   assert.deepEqual(args.slice(args.indexOf("--device"), args.indexOf("--device") + 2), ["--device", "cpu"]);
+  assert.equal(args.includes("--language"), false, "no language: whisper detects it");
+  const ko = transcribeLaunchArgs("/tmp/a.wav", "/tmp/out", { language: "ko" });
+  assert.deepEqual(ko.slice(ko.indexOf("--language"), ko.indexOf("--language") + 2), ["--language", "ko"]);
+});
+
+test("transcription language: the user's own by default, nothing for auto, or the one picked", async () => {
+  const { transcribeLanguageFor, normalizeLanguage } = await import("../src/config.ts");
+  assert.equal(transcribeLanguageFor({ language: "ko", transcribeLanguage: "user" }), "ko");
+  assert.equal(transcribeLanguageFor({ language: "en", transcribeLanguage: "user" }), "en");
+  assert.equal(transcribeLanguageFor({ language: "ko", transcribeLanguage: "auto" }), undefined);
+  assert.equal(transcribeLanguageFor({ language: "ko", transcribeLanguage: "ja" }), "ja");
+  assert.equal(normalizeLanguage("ko"), "ko");
+  assert.equal(normalizeLanguage("Korean"), null);
+  assert.equal(normalizeLanguage("../x"), null);
 });
 
 test("quiet transcription keeps to 4 threads; fast takes every core", async () => {

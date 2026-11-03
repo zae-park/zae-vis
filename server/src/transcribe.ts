@@ -21,6 +21,7 @@ export const AUDIO_EXT = new Set([".m4a", ".mp3", ".wav", ".aac", ".flac", ".ogg
 export const TEXT_EXT = new Set([".txt", ".md", ".vtt", ".srt"]);
 
 export type TranscribeOptions = {
+  /** A language code; undefined lets whisper detect it (설정 → 녹음 → 전사 언어 "자동 감지"). */
   language?: string;
   model?: string;
   whisperxBin?: string;
@@ -57,7 +58,7 @@ export function transcribeLaunchArgs(audio: string, outDir: string, opts: { mode
   return [
     audio,
     "--model", opts.model ?? "large-v3-turbo",
-    "--language", opts.language ?? "ko",
+    ...(opts.language ? ["--language", opts.language] : []),
     "--compute_type", "int8",
     "--device", "cpu",
     "--threads", String(opts.threads ?? transcribeThreads()),

@@ -12,7 +12,7 @@ import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
 import { copyFile, mkdir } from "node:fs/promises";
 import { basename, extname } from "node:path";
-import { loadConfig, loadSources, saveSourceSettings } from "./config.ts";
+import { loadConfig, loadSources, saveSourceSettings, transcribeLanguageFor } from "./config.ts";
 import { installSchedule, removeSchedule, scheduleStatus } from "./schedule.ts";
 import { listSources } from "./sources/index.ts";
 import { AUDIO_EXT, TEXT_EXT, transcribeFile, whisperxBin } from "./transcribe.ts";
@@ -255,7 +255,7 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
           const staged = freePath(audioDir, safeStem(basename(f)), ext);
           await copyFile(f, staged); // the original stays where it was
           const dest = await transcribeFile(staged, cfg.worklogDir, {
-            language: String(ts.language ?? "ko"),
+            language: transcribeLanguageFor(cfg),
             model: String(ts.model ?? "large-v3-turbo"),
             speakers: cfg.speakers,
             speed: cfg.transcribeSpeed,

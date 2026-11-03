@@ -11,7 +11,7 @@ import { AskRunner } from "./ask.ts";
 import { jevJudge } from "./route.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
-import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
+import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
 import * as datasources from "./datasources.ts";
 import { DigestRunner, detectAgents, noAgentReason, pickAgent } from "./digest.ts";
 import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
@@ -103,6 +103,8 @@ const server = createApp({
         notifications: cfg.notifications,
         hotkey: cfg.hotkey,
         appearance: cfg.appearance,
+        language: cfg.language,
+        transcribeLanguage: cfg.transcribeLanguage,
         rerank: rerank.status(cfg.rerank),
         tokenizer: tokenizer.status(),
       };
@@ -272,11 +274,11 @@ const server = createApp({
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),
     enqueue: (file) => {
       const ts = transcriptSettings();
-      queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), speakers: cfg.speakers, speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
+      queue.enqueue(file, cfg.worklogDir, { language: transcribeLanguageFor(cfg), model: String(ts.model ?? "large-v3-turbo"), speakers: cfg.speakers, speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
     },
     relabel: (path) => {
       const ts = transcriptSettings();
-      queue.enqueueRelabel(join(cfg.worklogDir, path), cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
+      queue.enqueueRelabel(join(cfg.worklogDir, path), cfg.worklogDir, { language: transcribeLanguageFor(cfg), model: String(ts.model ?? "large-v3-turbo"), speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
     },
     jobs: () => queue.jobs,
     cancel: (file) => queue.cancel(file),

@@ -6,7 +6,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { loadState, saveState, stateDir } from "./config.ts";
+import { loadState, normalizeLanguage, saveState, stateDir } from "./config.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 
 const WIN = process.platform === "win32";
@@ -20,6 +20,7 @@ export type SetupOptions = {
   skipRefresh?: boolean; // the app runs the first collect itself
   schedule?: boolean; // default true
   claudeMd?: boolean; // write CLAUDE.md into reposRoot
+  language?: string; // the user's own language ("ko"), asked by the wizard; default for transcription
 };
 
 export type SetupContext = {
@@ -153,7 +154,8 @@ export async function runSetup(opts: SetupOptions, ctx: SetupContext): Promise<v
   if (existsSync(configFile)) {
     log(`  = ${configFile} (있음, 건너뜀 — 바꾸려면 앱 설정 화면이나 파일을 직접 수정)`);
   } else {
-    writeFileSync(configFile, JSON.stringify({ worklogDir: worklog, reposRoot: repos, autoragConfig, port: 4710, dailyAt, indexOnInject: false }, null, 2) + "\n");
+    const language = normalizeLanguage(opts.language) ?? "ko";
+    writeFileSync(configFile, JSON.stringify({ worklogDir: worklog, reposRoot: repos, autoragConfig, port: 4710, dailyAt, indexOnInject: false, language }, null, 2) + "\n");
     log(`  + ${configFile}`);
   }
   const sourcesFile = join(state, "sources.json");
@@ -238,6 +240,7 @@ export function parseSetupArgs(argv: string[]): SetupOptions {
       case "--worklog": o.worklogDir = next(); break;
       case "--repos": o.reposRoot = next(); break;
       case "--daily-at": o.dailyAt = next(); break;
+      case "--language": o.language = next(); break;
       case "--disable": o.disabled!.push(next()); break;
       case "--no-autorag": o.autorag = false; break;
       case "--skip-refresh": o.skipRefresh = true; break;

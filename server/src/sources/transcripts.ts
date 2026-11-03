@@ -4,7 +4,7 @@
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { expandHome } from "../config.ts";
+import { expandHome, transcribeLanguageFor } from "../config.ts";
 import { hfStatus } from "../hf.ts";
 import { AUDIO_EXT, TEXT_EXT, datedStem, transcribeFile, TranscribeCancelled, whisperxBin } from "../transcribe.ts";
 import { addTo, dayKey, type Source } from "./types.ts";
@@ -25,7 +25,6 @@ export const transcriptsSource: Source = {
   options: [
     { key: "importDirs", label: "가져올 폴더 (전사 서비스 내보내기 경로)", kind: "paths" },
     { key: "audioDir", label: "전사할 녹음 폴더", kind: "path" },
-    { key: "language", label: "전사 언어", kind: "text" },
     { key: "model", label: "whisperX 모델", kind: "text" },
   ],
   async collect({ from, to, settings, config, log, tick }) {
@@ -79,7 +78,7 @@ export const transcriptsSource: Source = {
         try {
           log(where, null);
           const out = await transcribeFile(a, config.worklogDir, {
-            language: String(settings.language ?? "ko"),
+            language: transcribeLanguageFor(config),
             model: String(settings.model ?? "large-v3-turbo"),
             whisperxBin: settings.whisperxBin as string | undefined,
             speakers: config.speakers,

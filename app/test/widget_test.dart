@@ -849,6 +849,28 @@ void main() {
     expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.2}});
   });
 
+  testWidgets('transcription follows the user\'s language unless set to auto or another one', (tester) async {
+    tester.view.physicalSize = const Size(1300, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    expect(find.text('주로 쓰는 언어'), findsOneWidget);
+    expect(find.text('한국어'), findsOneWidget);
+
+    await _settingsSection(tester, '녹음');
+    expect(find.text('전사 언어'), findsOneWidget);
+    expect(find.text('주로 쓰는 언어(한국어)로 전사합니다. 일반에서 바꾸면 따라갑니다.'), findsOneWidget);
+    await tester.tap(find.text('내 언어 (한국어)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('자동 감지').last);
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.last.body), {'transcribeLanguage': 'auto'});
+  });
+
   testWidgets('settings shows the OpenRouter re-ranking section, off and local by default', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1;
@@ -1308,6 +1330,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(backend.runs.first, containsAllInOrder(['setup', '--yes', '--disable', 'shell-history']));
+    final setup = backend.runs.first;
+    expect(setup[setup.indexOf('--language') + 1], isNotEmpty, reason: 'the language asked on first run (from the system by default)');
     expect(backend.runs.first, isNot(contains('claude-code')));
     expect(posted.map((r) => r.url.path).toList(), ['/api/collect']);
     expect(find.text('준비됐습니다'), findsOneWidget);

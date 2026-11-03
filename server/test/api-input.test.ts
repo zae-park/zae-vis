@@ -56,6 +56,7 @@ before(async () => {
       get: async () => ({ dailyAt: "18:30", indexOnInject }),
       update: async (p) => {
         if (p.appearance) calls.push(`appearance:${JSON.stringify(p.appearance)}`);
+        if (p.language || p.transcribeLanguage) calls.push(`language:${p.language ?? "-"}/${p.transcribeLanguage ?? "-"}`);
         if (p.dailyAt && !/^\d{2}:\d{2}$/.test(p.dailyAt)) throw new Error("시각 형식");
         if (p.indexOnInject !== undefined) indexOnInject = p.indexOnInject;
         return { dailyAt: p.dailyAt ?? "18:30", indexOnInject };
@@ -272,4 +273,13 @@ test("PUT /settings appearance keeps only known themes and text sizes", async ()
   await call("PUT", "/api/settings", { appearance: { theme: "dark", textScale: 1.2 } });
   await call("PUT", "/api/settings", { appearance: { theme: "neon", textScale: 7 } });
   assert.deepEqual(calls, ['appearance:{"theme":"dark","textScale":1.2}', 'appearance:{"theme":"system","textScale":1}']);
+});
+
+test("PUT /settings takes a language code, and auto/user/a code for transcription", async () => {
+  calls.length = 0;
+  await call("PUT", "/api/settings", { language: "en", transcribeLanguage: "auto" });
+  await call("PUT", "/api/settings", { transcribeLanguage: "user" });
+  await call("PUT", "/api/settings", { language: "English", transcribeLanguage: "ja" });
+  await call("PUT", "/api/settings", { transcribeLanguage: "--rm" });
+  assert.deepEqual(calls, ["language:en/auto", "language:-/user", "language:-/ja"]);
 });

@@ -9,11 +9,15 @@ class SetupParams {
     required this.reposRoot,
     required this.dailyAt,
     this.disabledSources = const [],
+    this.language,
   });
   final String worklogDir;
   final String reposRoot;
   final String dailyAt; // "18:30"
   final List<String> disabledSources;
+
+  /// The user's own language ("ko"): the default for transcription.
+  final String? language;
 
   List<String> toArgs() => [
         'setup', '--yes', '--skip-refresh',
@@ -21,6 +25,7 @@ class SetupParams {
         '--repos', reposRoot,
         '--daily-at', dailyAt,
         for (final s in disabledSources) ...['--disable', s],
+        if (language != null) ...['--language', language!],
       ];
 }
 

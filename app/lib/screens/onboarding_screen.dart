@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../backend/backend.dart';
+import '../languages.dart';
 import '../theme.dart';
 
 /// First run of the packaged app: pick folders and sources, then setup + start + first collect.
@@ -35,6 +36,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   late final _repos = TextEditingController(text: widget.backend.home);
   final Set<String> _enabled = {for (final s in _sources) s.$1};
   TimeOfDay _dailyAt = const TimeOfDay(hour: 18, minute: 30);
+
+  /// The one thing asked about the user: the language they speak, for transcription. Starts from the system's.
+  String _language = systemLanguage();
 
   /// Korean morphological tokenizer for keyword search, installed before the first index so it never needs a rebuild.
   bool _kiwi = true;
@@ -73,6 +77,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       reposRoot: _repos.text.trim(),
       dailyAt: '${two(_dailyAt.hour)}:${two(_dailyAt.minute)}',
       disabledSources: [for (final s in _sources) if (!_enabled.contains(s.$1)) s.$1],
+      language: _language,
     );
     setState(() {
       _running = true;
@@ -167,6 +172,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   title: Text(s.$2),
                   subtitle: Text(s.$3),
                 ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.translate),
+                title: const Text('주로 쓰는 언어'),
+                subtitle: const Text('녹음을 이 언어로 전사합니다. 나중에 설정에서 바꾸거나 자동 감지로 둘 수 있습니다.'),
+                trailing: DropdownButton<String>(
+                  value: _language,
+                  underline: const SizedBox.shrink(),
+                  items: [for (final (code, name) in userLanguages) DropdownMenuItem(value: code, child: Text(name))],
+                  onChanged: _running ? null : (v) => setState(() => _language = v ?? _language),
+                ),
+              ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.schedule),

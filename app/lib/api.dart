@@ -432,7 +432,7 @@ class WorklogApi {
 
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
-  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths, Map<String, Object>? appearance}) async =>
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths, Map<String, Object>? appearance, String? language, String? transcribeLanguage}) async =>
       AppSettings.fromJson(
         await _send('PUT', '/settings', {
           if (dailyAt != null) 'dailyAt': dailyAt,
@@ -444,6 +444,8 @@ class WorklogApi {
           if (hotkey != null) 'hotkey': hotkey,
           if (memoryPaths != null) 'memoryPaths': memoryPaths,
           if (appearance != null) 'appearance': appearance,
+          if (language != null) 'language': language,
+          if (transcribeLanguage != null) 'transcribeLanguage': transcribeLanguage,
         }),
       );
 }

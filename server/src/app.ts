@@ -10,7 +10,7 @@ import type { HfStatus } from "./hf.ts";
 import type { CollectProgress } from "./sources/index.ts";
 import { AUDIO_EXT, audioForTranscript } from "./transcribe.ts";
 import { contentDisposition } from "./files.ts";
-import { normalizeAppearance, type Appearance } from "./config.ts";
+import { normalizeAppearance, normalizeLanguage, type Appearance } from "./config.ts";
 import { cleanSpeakerName, renameSpeakers, transcriptSpeakers } from "./diarize.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
@@ -34,7 +34,7 @@ export type AppOptions = {
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
-    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; appearance?: Appearance; memoryPaths?: string[] }): Promise<Record<string, unknown>>;
+    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; appearance?: Appearance; language?: string; transcribeLanguage?: string; memoryPaths?: string[] }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
   /** Weekly digest: agents found on this machine and the run itself. */
@@ -762,7 +762,7 @@ export function createApp(opts: AppOptions): Server {
           if (arg) return notFound(res);
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
-          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; appearance?: Appearance; memoryPaths?: string[] } = {};
+          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; appearance?: Appearance; language?: string; transcribeLanguage?: string; memoryPaths?: string[] } = {};
           if (typeof b.dailyAt === "string") patch.dailyAt = b.dailyAt;
           if (typeof b.indexOnInject === "boolean") patch.indexOnInject = b.indexOnInject;
           if (typeof b.localEmbedding === "boolean") patch.localEmbedding = b.localEmbedding;
@@ -772,6 +772,9 @@ export function createApp(opts: AppOptions): Server {
           if (typeof b.hotkey === "string" && /^[a-z0-9+]{0,60}$/i.test(b.hotkey)) patch.hotkey = b.hotkey; // "meta+shift+space", "" = default
           // { theme: system|light|dark, textScale } — unknown values fall back to the defaults
           if (b.appearance && typeof b.appearance === "object") patch.appearance = normalizeAppearance(b.appearance);
+          // language: the user's own ("ko"); transcribeLanguage: "user" | "auto" | a code. Anything else is ignored.
+          if (normalizeLanguage(b.language)) patch.language = normalizeLanguage(b.language)!;
+          if (b.transcribeLanguage === "user" || b.transcribeLanguage === "auto" || normalizeLanguage(b.transcribeLanguage)) patch.transcribeLanguage = String(b.transcribeLanguage);
           if (Array.isArray(b.memoryPaths)) patch.memoryPaths = b.memoryPaths.filter((x): x is string => typeof x === "string");
           try {
             const out = await opts.settings.update(patch);

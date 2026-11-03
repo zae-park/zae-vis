@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../app_prefs.dart';
+import '../languages.dart';
 import '../backend/backend.dart';
 import '../models.dart';
 import '../shortcuts.dart';
@@ -110,9 +111,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths}) async {
+  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths, String? language, String? transcribeLanguage}) async {
     try {
-      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, speakers: speakers, transcribeSpeed: transcribeSpeed, hotkey: hotkey, memoryPaths: memoryPaths);
+      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, speakers: speakers, transcribeSpeed: transcribeSpeed, hotkey: hotkey, memoryPaths: memoryPaths, language: language, transcribeLanguage: transcribeLanguage);
       if (hotkey != null) await GlobalHotkey.update(hotkey);
       if (mounted) toast(context, memoryPaths != null ? '폴더를 색인에 넣었습니다. 처음부터 다시 색인합니다.' : '저장했습니다');
     } on ApiException catch (e) {
@@ -293,6 +294,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ]),
       ),
+      _Group(title: '언어', children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.translate),
+          title: const Text('주로 쓰는 언어'),
+          subtitle: const Text('처음 시작할 때 고른 언어입니다. 녹음 전사가 기본으로 이 언어를 씁니다.'),
+          trailing: _Choice<String>(value: s.language, items: userLanguages, onChanged: (v) => _update(language: v)),
+        ),
+      ]),
       _Group(title: '알림', children: [
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -347,6 +357,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: !s.whisperx && _managed
               ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
               : null,
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.translate),
+          title: const Text('전사 언어'),
+          subtitle: Text(switch (s.transcribeLanguage) {
+            'user' => '주로 쓰는 언어(${languageName(s.language)})로 전사합니다. 일반에서 바꾸면 따라갑니다.',
+            'auto' => '녹음 앞부분으로 언어를 알아냅니다. 여러 언어 녹음에 맞지만, 다른 언어 낱말이 많이 섞이면 잘못 고를 수 있습니다.',
+            _ => '항상 ${languageName(s.transcribeLanguage)}로 전사합니다.',
+          }),
+          trailing: _Choice<String>(
+            value: s.transcribeLanguage,
+            items: [('user', '내 언어 (${languageName(s.language)})'), ('auto', '자동 감지'), ...userLanguages],
+            onChanged: (v) => _update(transcribeLanguage: v),
+          ),
         ),
         if (s.whisperx)
           SwitchListTile(

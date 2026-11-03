@@ -11,8 +11,8 @@ const { excludeFromGit, parseSetupArgs, runSetup, which } = await import("../src
 const { renderWinTask } = await import("../src/schedule.ts");
 
 test("setup: parses the wizard's flags, ignores the retired e-mail ones", () => {
-  const o = parseSetupArgs(["--yes", "--skip-refresh", "--worklog", "/w", "--repos", "/r", "--email", "x@y", "--any-author", "--daily-at", "07:00", "--disable", "git", "--disable", "shell-history", "--no-schedule"]);
-  assert.deepEqual(o, { disabled: ["git", "shell-history"], skipRefresh: true, worklogDir: "/w", reposRoot: "/r", dailyAt: "07:00", schedule: false });
+  const o = parseSetupArgs(["--yes", "--skip-refresh", "--worklog", "/w", "--repos", "/r", "--email", "x@y", "--any-author", "--daily-at", "07:00", "--disable", "git", "--disable", "shell-history", "--no-schedule", "--language", "ja"]);
+  assert.deepEqual(o, { disabled: ["git", "shell-history"], skipRefresh: true, worklogDir: "/w", reposRoot: "/r", dailyAt: "07:00", schedule: false, language: "ja" });
   assert.throws(() => parseSetupArgs(["--bogus"]), /알 수 없는 옵션/);
 });
 
@@ -20,7 +20,7 @@ test("setup: creates the worklog tree, templates, config and state without AutoR
   const home = await mkdtemp(join(tmpdir(), "zv-setup-home-"));
   const lines: string[] = [];
   const root = join(import.meta.dirname, "..", "..");
-  await runSetup({ worklogDir: join(home, "worklog"), reposRoot: home, dailyAt: "18:30", disabled: ["shell-history"], autorag: false, schedule: false, skipRefresh: true }, { root, home, log: (l) => lines.push(l) });
+  await runSetup({ worklogDir: join(home, "worklog"), reposRoot: home, dailyAt: "18:30", disabled: ["shell-history"], autorag: false, schedule: false, skipRefresh: true, language: "en" }, { root, home, log: (l) => lines.push(l) });
   const w = join(home, "worklog");
   for (const d of ["inbox/transcripts", "inbox/audio", "processed/audio", "log", "projects", "summaries", "sources"]) assert.ok(existsSync(join(w, d)), d);
   assert.match(await readFile(join(w, "README.md"), "utf8"), new RegExp(home.replaceAll("\\", "\\\\")), "template placeholders filled");
@@ -29,6 +29,7 @@ test("setup: creates the worklog tree, templates, config and state without AutoR
   const cfg = JSON.parse(await readFile(join(process.env.ZAEVIS_HOME!, "config.json"), "utf8"));
   assert.equal(cfg.worklogDir, w);
   assert.equal(cfg.dailyAt, "18:30");
+  assert.equal(cfg.language, "en", "the wizard's language is the user's default for transcription");
   const sources = JSON.parse(await readFile(join(process.env.ZAEVIS_HOME!, "sources.json"), "utf8"));
   assert.deepEqual(sources, { "shell-history": { enabled: false }, custom: [] });
   assert.ok(existsSync(join(process.env.ZAEVIS_HOME!, "weekly-task-prompt.md")));
