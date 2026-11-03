@@ -781,5 +781,14 @@
   "reviewGroupsHint": "Grouped by project. Checking a project takes its log lines and its project page together; expand it to pick single lines.",
   "reviewNoProject": "No project",
   "reviewGroupLines": "{chosen}/{lines} log lines",
-  "reviewGroupPage": "page {badge}"
+  "reviewGroupPage": "page {badge}",
+  "onbFirstDigestTitle": "Try a first digest",
+  "onbFirstDigestBody": "{agent} reads what was just collected and proposes log lines and project status. It takes a few minutes; the memory tab shows its progress, and you review the proposal when it is done.",
+  "onbFirstDigestButton": "Start the first digest",
+  "onbFirstDigestStarted": "The first digest has started. The memory tab shows its progress, and a proposal to review appears when it is done.",
+  "onbFirstDigestNoAgent": "No agent can digest yet, so the first digest is skipped. Sign in to a CLI such as Claude Code, then use 'Digest now' in the memory tab.",
+  "askBasis": "Based on: {knowledge} digested · {raw} raw",
+  "askBasisRawOnly": "No digested records matched, so only raw sources were used. Digesting in the memory tab makes the basis shorter and clearer.",
+  "askSourceKnowledge": "Digested record",
+  "askSourceRaw": "Raw source"
 }

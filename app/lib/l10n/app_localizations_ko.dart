@@ -2762,4 +2762,38 @@ class AppLocalizationsKo extends AppLocalizations {
   String reviewGroupPage(String badge) {
     return '페이지 $badge';
   }
+
+  @override
+  String get onbFirstDigestTitle => '첫 정리 해 보기';
+
+  @override
+  String onbFirstDigestBody(String agent) {
+    return '$agent가 방금 모은 원본을 읽고 로그 줄·프로젝트 상태 제안을 만듭니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 끝나면 검토해 적용하면 됩니다.';
+  }
+
+  @override
+  String get onbFirstDigestButton => '첫 정리 시작';
+
+  @override
+  String get onbFirstDigestStarted =>
+      '첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 검토할 제안이 생깁니다.';
+
+  @override
+  String get onbFirstDigestNoAgent =>
+      '정리할 에이전트가 없어 첫 정리는 건너뜁니다. Claude Code 같은 CLI에 로그인한 뒤 메모리 탭의 \'지금 정리하기\'로 하면 됩니다.';
+
+  @override
+  String askBasis(int knowledge, int raw) {
+    return '근거: 정리된 기록 $knowledge · 원본 $raw';
+  }
+
+  @override
+  String get askBasisRawOnly =>
+      '정리된 기록이 없어 원본만 근거로 썼습니다. 메모리 탭에서 정리하면 근거가 짧고 분명해집니다.';
+
+  @override
+  String get askSourceKnowledge => '정리된 기록';
+
+  @override
+  String get askSourceRaw => '원본';
 }

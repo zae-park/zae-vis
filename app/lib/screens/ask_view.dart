@@ -19,6 +19,9 @@ import 'file_screen.dart';
 import 'review_screen.dart';
 import 'search_screen.dart';
 
+/// A digested record (what the weekly digest and reports write) rather than collected raw material.
+bool isKnowledgePath(String path) => RegExp(r'^(log|projects|summaries|reports)/').hasMatch(path);
+
 const agentTitles = {'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter'};
 
 /// "Codex CLI" or "Claude Code 할당량 → Codex CLI가 작성" when an earlier stop was skipped.
@@ -763,6 +766,17 @@ class _AnswerBubble extends StatelessWidget {
           Text(context.l10n.askSources, style: t.labelSmall?.copyWith(color: scheme.outline)),
           for (final s in result.sources) _SourceChip(source: s, selected: selected == s.n, onTap: () => onCite(s.n)),
         ]),
+        if (result.sources.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          // digested records (log, projects, summaries, reports) against raw collected material
+          Text(
+            [
+              context.l10n.askBasis(result.sources.where((s) => isKnowledgePath(s.path)).length, result.sources.where((s) => !isKnowledgePath(s.path)).length),
+              if (!result.sources.any((s) => isKnowledgePath(s.path))) context.l10n.askBasisRawOnly,
+            ].join(' · '),
+            style: t.labelSmall?.copyWith(color: scheme.outline),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(context.l10n.askAnswerMeta(_who(context.l10n, result, agent), (result.ms / 1000).toStringAsFixed(1), result.sources.length), style: t.labelSmall?.copyWith(color: scheme.outline)),
       ]),
@@ -1009,6 +1023,10 @@ class _SourceChip extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Text('${source.n}', style: t.labelSmall?.copyWith(fontWeight: FontWeight.w800, color: scheme.primary)),
+              if (isKnowledgePath(source.path)) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.bookmark, size: 12, color: scheme.primary, semanticLabel: context.l10n.askSourceKnowledge),
+              ],
               const SizedBox(width: 6),
               Text(label, style: t.labelSmall),
             ]),

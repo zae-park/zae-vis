@@ -1117,9 +1117,9 @@ class _AgentOrder extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         buildDefaultDragHandles: false,
         padding: const EdgeInsets.symmetric(vertical: 4),
-        onReorder: (oldIndex, newIndex) {
+        // onReorderItem hands over the index after the moved block is taken out (no newIndex - 1 here)
+        onReorderItem: (oldIndex, newIndex) {
           if (!enabled) return;
-          if (newIndex > oldIndex) newIndex -= 1;
           final ids = [for (final a in agents) a.id];
           final moved = ids.removeAt(oldIndex);
           ids.insert(newIndex, moved);

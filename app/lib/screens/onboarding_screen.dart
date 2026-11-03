@@ -5,6 +5,8 @@ import '../api.dart';
 import '../backend/backend.dart';
 import '../l10n/l10n.dart';
 import '../languages.dart';
+import '../widgets/input_dialogs.dart' show toast;
+import '../models.dart';
 import '../theme.dart';
 
 /// First run of the packaged app: pick folders and sources, then setup + start + first collect.
@@ -150,6 +152,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   subtitle: Text(step.$2),
                 ),
               const SizedBox(height: 12),
+              _FirstDigest(api: widget.api),
+              const SizedBox(height: 12),
               FilledButton.icon(onPressed: widget.onDone, icon: const Icon(Icons.arrow_forward), label: Text(l.onboardingOpenApp)),
             ],
             if (problem != null) ...[
@@ -235,6 +239,76 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// "첫 정리 해 보기": without it the first digest waits for Monday and the memory stays empty until then. Starts the
+/// digest on what the first collection gathered; the app's knowledge panel shows it running and then the review.
+class _FirstDigest extends StatefulWidget {
+  const _FirstDigest({required this.api});
+  final WorklogApi api;
+
+  @override
+  State<_FirstDigest> createState() => _FirstDigestState();
+}
+
+class _FirstDigestState extends State<_FirstDigest> {
+  late final Future<DigestStatus> _status = widget.api.digest();
+  bool _starting = false;
+  bool _started = false;
+
+  Future<void> _start() async {
+    setState(() => _starting = true);
+    try {
+      await widget.api.runDigest();
+      if (mounted) setState(() => _started = true);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return FutureBuilder<DigestStatus>(
+      future: _status,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) return const SizedBox.shrink();
+        final s = snap.data;
+        final agent = s == null ? null : s.agents.where((a) => a.id == s.chosen).firstOrNull;
+        final Widget body;
+        if (_started) {
+          body = Row(children: [
+            Icon(Icons.check_circle_outline, color: scheme.primary),
+            const SizedBox(width: 10),
+            Expanded(child: Text(l.onbFirstDigestStarted, style: t.bodyMedium)),
+          ]);
+        } else if (agent == null) {
+          body = Text(l.onbFirstDigestNoAgent, style: t.bodyMedium?.copyWith(color: scheme.outline));
+        } else {
+          body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(l.onbFirstDigestTitle, style: t.titleSmall),
+            const SizedBox(height: 4),
+            Text(l.onbFirstDigestBody(agent.title), style: t.bodyMedium),
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(
+              onPressed: _starting ? null : _start,
+              icon: _starting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.auto_awesome),
+              label: Text(l.onbFirstDigestButton),
+            ),
+          ]);
+        }
+        return Material(
+          color: scheme.surfaceContainerLow,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: scheme.outlineVariant)),
+          child: Padding(padding: const EdgeInsets.all(14), child: body),
+        );
+      },
     );
   }
 }

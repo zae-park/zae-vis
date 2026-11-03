@@ -2951,4 +2951,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String reviewGroupPage(String badge) {
     return 'page $badge';
   }
+
+  @override
+  String get onbFirstDigestTitle => 'Try a first digest';
+
+  @override
+  String onbFirstDigestBody(String agent) {
+    return '$agent reads what was just collected and proposes log lines and project status. It takes a few minutes; the memory tab shows its progress, and you review the proposal when it is done.';
+  }
+
+  @override
+  String get onbFirstDigestButton => 'Start the first digest';
+
+  @override
+  String get onbFirstDigestStarted =>
+      'The first digest has started. The memory tab shows its progress, and a proposal to review appears when it is done.';
+
+  @override
+  String get onbFirstDigestNoAgent =>
+      'No agent can digest yet, so the first digest is skipped. Sign in to a CLI such as Claude Code, then use \'Digest now\' in the memory tab.';
+
+  @override
+  String askBasis(int knowledge, int raw) {
+    return 'Based on: $knowledge digested · $raw raw';
+  }
+
+  @override
+  String get askBasisRawOnly =>
+      'No digested records matched, so only raw sources were used. Digesting in the memory tab makes the basis shorter and clearer.';
+
+  @override
+  String get askSourceKnowledge => 'Digested record';
+
+  @override
+  String get askSourceRaw => 'Raw source';
 }

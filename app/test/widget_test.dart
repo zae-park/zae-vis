@@ -13,6 +13,7 @@ import 'package:zaevis/download.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
+import 'package:zaevis/screens/ask_view.dart' show isKnowledgePath;
 import 'package:zaevis/screens/file_screen.dart';
 import 'package:zaevis/screens/settings_screen.dart';
 import 'package:zaevis/screens/search_screen.dart';
@@ -466,6 +467,15 @@ class _FakeRecorder implements Recorder {
 }
 
 void main() {
+  test('isKnowledgePath: what the digest and reports write, not what was collected', () {
+    for (final p in ['log/2026-10.md', 'projects/crea.md', 'summaries/2026-10.md', 'reports/weekly/2026-W44.md']) {
+      expect(isKnowledgePath(p), isTrue, reason: p);
+    }
+    for (final p in ['sources/git/2026-10-09.md', 'inbox/transcripts/a.txt', 'processed/transcripts/a.txt', '/Users/me/vault/note.md']) {
+      expect(isKnowledgePath(p), isFalse, reason: p);
+    }
+  });
+
   testWidgets('search shows numbered hits', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -654,6 +664,7 @@ void main() {
     expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
     expect(find.text('2026-10-09 · git 커밋 · notes · 박재'), findsOneWidget); // source chip
     expect(find.textContaining('Claude Code · 12.3초'), findsOneWidget);
+    expect(find.text('근거: 정리된 기록 1 · 원본 1'), findsOneWidget, reason: 'log/ is digested, sources/git is raw');
     expect(find.byType(TextField), findsOneWidget, reason: 'the composer stays at the bottom');
 
     // hover a [2] mark: the tooltip previews the passage
@@ -1444,7 +1455,16 @@ void main() {
     expect(find.text('메모리 탭에서 기록'), findsOneWidget);
     expect(find.text('리포트 켜기'), findsOneWidget);
     expect(find.text('시작'), findsNothing);
+    // the first digest need not wait for Monday
+    expect(find.text('첫 정리 해 보기'), findsOneWidget);
+    expect(find.textContaining('Claude Code가 방금 모은 원본을 읽고'), findsOneWidget);
+    await tester.ensureVisible(find.text('첫 정리 시작'));
+    await tester.tap(find.text('첫 정리 시작'));
+    await tester.pumpAndSettle();
+    expect(posted.map((r) => r.url.path).toList(), ['/api/collect', '/api/digest/run']);
+    expect(find.textContaining('첫 정리를 시작했습니다'), findsOneWidget);
     expect(done, isFalse);
+    await tester.ensureVisible(find.text('앱 열기'));
     await tester.tap(find.text('앱 열기'));
     expect(done, isTrue);
   });

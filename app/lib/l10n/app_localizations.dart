@@ -4790,6 +4790,60 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'페이지 {badge}'**
   String reviewGroupPage(String badge);
+
+  /// No description provided for @onbFirstDigestTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'첫 정리 해 보기'**
+  String get onbFirstDigestTitle;
+
+  /// No description provided for @onbFirstDigestBody.
+  ///
+  /// In ko, this message translates to:
+  /// **'{agent}가 방금 모은 원본을 읽고 로그 줄·프로젝트 상태 제안을 만듭니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 끝나면 검토해 적용하면 됩니다.'**
+  String onbFirstDigestBody(String agent);
+
+  /// No description provided for @onbFirstDigestButton.
+  ///
+  /// In ko, this message translates to:
+  /// **'첫 정리 시작'**
+  String get onbFirstDigestButton;
+
+  /// No description provided for @onbFirstDigestStarted.
+  ///
+  /// In ko, this message translates to:
+  /// **'첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 검토할 제안이 생깁니다.'**
+  String get onbFirstDigestStarted;
+
+  /// No description provided for @onbFirstDigestNoAgent.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리할 에이전트가 없어 첫 정리는 건너뜁니다. Claude Code 같은 CLI에 로그인한 뒤 메모리 탭의 \'지금 정리하기\'로 하면 됩니다.'**
+  String get onbFirstDigestNoAgent;
+
+  /// No description provided for @askBasis.
+  ///
+  /// In ko, this message translates to:
+  /// **'근거: 정리된 기록 {knowledge} · 원본 {raw}'**
+  String askBasis(int knowledge, int raw);
+
+  /// No description provided for @askBasisRawOnly.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리된 기록이 없어 원본만 근거로 썼습니다. 메모리 탭에서 정리하면 근거가 짧고 분명해집니다.'**
+  String get askBasisRawOnly;
+
+  /// No description provided for @askSourceKnowledge.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리된 기록'**
+  String get askSourceKnowledge;
+
+  /// No description provided for @askSourceRaw.
+  ///
+  /// In ko, this message translates to:
+  /// **'원본'**
+  String get askSourceRaw;
 }
 
 class _AppLocalizationsDelegate
