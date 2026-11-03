@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'l10n/l10n.dart';
+
 /// Keyboard shortcuts, in one place so the menu, the settings page and the handlers agree.
 ///
 /// In-app (⌘ on macOS/web, Ctrl elsewhere):  ⌘K 검색 · ⌘N 한 줄 기록 · ⌘⇧R 녹음 · ⌘1–5 탭 · ⌘, 설정
@@ -38,14 +40,17 @@ class AppShortcuts {
   ].map(mod).toList();
 
   /// For the settings page. [hotkey] is the stored global hotkey spec ("" = platform default).
-  static List<(String, String)> describe({String hotkey = ''}) => [
-        ('${modLabel}K', '검색으로 이동해 입력'),
-        ('${modLabel}N', '한 줄 기록'),
-        ('$modLabel⇧R', '녹음'),
-        ('${modLabel}1 … ${modLabel}4', '검색 · 메모리 · 리포트 · 연결 탭'),
-        ('$modLabel,', '설정'),
-        if (desktop) (HotkeySpec.label(hotkey), '어디서든 창을 띄우고 한 줄 기록 (전역)'),
-      ];
+  static List<(String, String)> describe({String hotkey = ''}) {
+    final l = l10nNow;
+    return [
+      ('${modLabel}K', l.shortcutSearch),
+      ('${modLabel}N', l.shortcutNewLog),
+      ('$modLabel⇧R', l.shortcutRecord),
+      ('${modLabel}1 … ${modLabel}4', l.shortcutTabs),
+      ('$modLabel,', l.shortcutSettings),
+      if (desktop) (HotkeySpec.label(hotkey), l.shortcutGlobal),
+    ];
+  }
 }
 
 /// The global hotkey as text, the way the server stores it: lowercase modifier and key names joined

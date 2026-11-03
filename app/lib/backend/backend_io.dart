@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:zaevis/update_apply.dart';
 
+import '../l10n/l10n.dart';
 import 'backend.dart';
 
 /// The packaged app's own backend: a Node runtime, the server and the CLI shipped next to the app.
@@ -78,7 +79,7 @@ class IoBackend implements Backend {
   @override
   String? get problem {
     if (Platform.isMacOS && Platform.resolvedExecutable.contains('/AppTranslocation/')) {
-      return 'zaevis를 Applications 폴더로 옮긴 뒤 다시 여세요. (지금은 다운로드한 위치에서 임시로 실행 중이라 매일 수집 예약을 만들 수 없습니다)';
+      return l10nNow.backendTranslocated;
     }
     return null;
   }
@@ -107,7 +108,7 @@ class IoBackend implements Backend {
 
   @override
   Stream<String> run(List<String> args) {
-    if (payload == null) return Stream<String>.error(StateError('앱 설치본이 아닙니다'));
+    if (payload == null) return Stream<String>.error(StateError(l10nNow.backendNotInstalled));
     final out = StreamController<String>();
     () async {
       try {
@@ -119,7 +120,7 @@ class IoBackend implements Backend {
             s.transform(const Utf8Decoder(allowMalformed: true)).transform(const LineSplitter()).forEach(out.add),
         ];
         final code = (await Future.wait<Object?>([proc.exitCode, ...done])).first! as int;
-        if (code != 0) out.addError(ProcessException('zaevis', args, '종료 코드 $code', code));
+        if (code != 0) out.addError(ProcessException('zaevis', args, l10nNow.backendExitCode(code), code));
       } catch (e) {
         out.addError(e);
       } finally {
@@ -150,12 +151,12 @@ class IoBackend implements Backend {
   Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {
     final blocked = problem;
     if (blocked != null) throw StateError(blocked);
-    if (payload == null) throw StateError('설치본에서만 업데이트할 수 있습니다.');
+    if (payload == null) throw StateError(l10nNow.backendUpdateInstalledOnly);
     final dir = Directory('${Directory.systemTemp.path}${Platform.pathSeparator}zaevis-update');
     dir.createSync(recursive: true);
     if (Platform.isMacOS) {
       final bundle = macAppBundle(Platform.resolvedExecutable);
-      if (bundle == null) throw StateError('설치본에서만 업데이트할 수 있습니다.');
+      if (bundle == null) throw StateError(l10nNow.backendUpdateInstalledOnly);
       final dmg = File('${dir.path}${Platform.pathSeparator}zaevis.dmg');
       await downloadTo(Uri.parse(url), dmg, onProgress);
       onProgress(null);
@@ -181,7 +182,7 @@ class IoBackend implements Backend {
       await Process.start(exe.path, windowsSilentArgs, mode: ProcessStartMode.detached);
       return;
     }
-    throw StateError('이 운영체제에서는 자동 업데이트를 지원하지 않습니다.');
+    throw StateError(l10nNow.backendUpdateUnsupportedOs);
   }
 }
 

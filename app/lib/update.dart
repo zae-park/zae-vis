@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'l10n/l10n.dart';
 import 'update_arch_stub.dart' if (dart.library.io) 'update_arch_io.dart';
 
 export 'folder_ack_stub.dart' if (dart.library.io) 'folder_ack_io.dart';
@@ -102,9 +103,9 @@ Future<UpdateOffer?> fetchUpdate(String localVersion, {http.Client? client}) asy
   final http.Client c = client ?? http.Client();
   try {
     final res = await c.get(Uri.parse(releaseApi), headers: const {'user-agent': 'zaevis', 'accept': 'application/vnd.github+json'});
-    if (res.statusCode != 200) throw StateError('GitHub 응답 ${res.statusCode}');
+    if (res.statusCode != 200) throw StateError(l10nNow.updateGithubStatus(res.statusCode));
     final body = jsonDecode(res.body);
-    if (body is! Map<String, dynamic>) throw StateError('릴리스 정보를 읽지 못했습니다');
+    if (body is! Map<String, dynamic>) throw StateError(l10nNow.updateBadRelease);
     return offerFromRelease(localVersion, body, os: hostOs(), arch: hostArch());
   } finally {
     if (own) c.close();
@@ -229,6 +230,7 @@ class UpdateNotice extends StatelessWidget {
     final download = offer.downloadUrl != null;
     final busy = phase != UpdatePhase.idle;
     final known = progress != null && progress! >= 0;
+    final l = context.l10n;
     final card = Material(
       color: scheme.surfaceContainerLowest,
       elevation: 3,
@@ -247,13 +249,13 @@ class UpdateNotice extends StatelessWidget {
               Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.system_update_alt, size: 18, color: scheme.primary),
                 const SizedBox(width: 8),
-                Flexible(child: Tooltip(message: '${offer.local.label} → ${offer.remote.label}', child: Text('새 버전이 있습니다', style: t.bodyMedium))),
+                Flexible(child: Tooltip(message: '${offer.local.label} → ${offer.remote.label}', child: Text(l.updateAvailable, style: t.bodyMedium))),
                 if (download && !busy) ...[
                   const SizedBox(width: 10),
                   FilledButton(
                     onPressed: onUpdate,
                     style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 12)),
-                    child: const Text('업데이트'),
+                    child: Text(l.updateButton),
                   ),
                 ] else
                   const SizedBox(width: 6),
@@ -263,12 +265,12 @@ class UpdateNotice extends StatelessWidget {
                 LinearProgressIndicator(value: known ? progress : null),
                 Padding(
                   padding: const EdgeInsets.only(top: 2, bottom: 2),
-                  child: Text(known ? '받는 중 ${(progress! * 100).round()}%' : '받는 중', style: t.bodySmall),
+                  child: Text(known ? l.updateDownloadingPercent((progress! * 100).round()) : l.updateDownloading, style: t.bodySmall),
                 ),
               ] else if (phase == UpdatePhase.installing)
-                Text('설치하고 다시 여는 중…', style: t.bodySmall)
+                Text(l.updateInstalling, style: t.bodySmall)
               else if (!download)
-                Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
+                Text(l.updateNoInstaller, style: t.bodySmall),
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 8, bottom: 2),
@@ -287,7 +289,7 @@ class UpdateNotice extends StatelessWidget {
         top: 0,
         right: 0,
         child: Tooltip(
-          message: '나중에',
+          message: l.updateLater,
           child: Material(
             color: scheme.surfaceContainerLowest,
             shape: CircleBorder(side: BorderSide(color: scheme.outlineVariant)),
@@ -314,6 +316,7 @@ class AccessNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
+    final l = context.l10n;
     return Material(
       color: scheme.surfaceContainerLowest,
       elevation: 3,
@@ -330,16 +333,16 @@ class AccessNotice extends StatelessWidget {
             Row(children: [
               Icon(Icons.notifications_none, size: 18, color: scheme.primary),
               const SizedBox(width: 6),
-              Text('알림', style: t.labelMedium?.copyWith(color: scheme.primary)),
+              Text(l.updateNotice, style: t.labelMedium?.copyWith(color: scheme.primary)),
             ]),
             const SizedBox(height: 6),
-            Text('매일 18:30에 폴더 접근을 묻습니다', style: t.titleSmall),
+            Text(l.updateFolderTitle, style: t.titleSmall),
             const SizedBox(height: 4),
-            Text('데스크탑, 문서, 다운로드, 사진, 음악, 보관함을 저장소 탐색이 하나씩 열고 있습니다. 커밋을 모으는 데는 필요 없습니다.', style: t.bodySmall),
+            Text(l.updateFolderBody, style: t.bodySmall),
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerRight,
-              child: FilledButton(onPressed: onApply, child: const Text('한 번에 빼기')),
+              child: FilledButton(onPressed: onApply, child: Text(l.updateFolderApply)),
             ),
           ]),
         ),

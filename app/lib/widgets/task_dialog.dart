@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../backend/backend.dart';
+import '../l10n/l10n.dart';
 import '../theme.dart';
 
 /// Runs `zaevis <args>` from the app bundle. The log floats at the bottom right and can be dragged,
@@ -67,9 +68,9 @@ class _TaskFloaterState extends State<_TaskFloater> {
       await widget.backend.run(widget.args).forEach(_add);
       if (widget.then != null) await widget.backend.run(widget.then!).forEach(_add);
       _ok = true;
-      if (mounted) setState(() => _done = '완료');
+      if (mounted) setState(() => _done = context.l10n.commonDone);
     } catch (e) {
-      if (mounted) setState(() => _done = '실패: $e');
+      if (mounted) setState(() => _done = context.l10n.uiTaskFailed('$e'));
     }
   }
 
@@ -147,7 +148,7 @@ class _TaskFloaterState extends State<_TaskFloater> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: running ? null : () => widget.onDone(_ok),
-                    child: Text(running ? '받는 중' : '${_done!} · 닫기'),
+                    child: Text(running ? context.l10n.uiDownloading : context.l10n.uiTaskClose(_done!)),
                   ),
                 ),
               ]),

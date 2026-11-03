@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
+import 'l10n/l10n.dart';
 import 'models.dart';
 
 /// Server address. Override at build time with
@@ -51,7 +52,7 @@ class WorklogApi {
     try {
       res = await _client.get(_uri(path, query));
     } catch (_) {
-      throw ApiException(0, '서버에 연결할 수 없습니다: $baseUrl');
+      throw ApiException(0, l10nNow.apiCannotConnect(baseUrl));
     }
     return _decode(res);
   }
@@ -70,15 +71,15 @@ class WorklogApi {
           code = j['error'] is String ? j['error'] as String : null;
         }
       } catch (_) {}
-      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? '찾을 수 없습니다' : '요청이 실패했습니다'), rail: rail, code: code);
+      throw ApiException(res.statusCode, message ?? (res.statusCode == 404 ? l10nNow.apiNotFound : l10nNow.apiRequestFailed), rail: rail, code: code);
     }
     final Object? decoded;
     try {
       decoded = jsonDecode(body);
     } on FormatException {
-      throw ApiException(res.statusCode, '응답 형식이 올바르지 않습니다');
+      throw ApiException(res.statusCode, l10nNow.apiBadResponse);
     }
-    if (decoded is! Json) throw ApiException(res.statusCode, '응답 형식이 올바르지 않습니다');
+    if (decoded is! Json) throw ApiException(res.statusCode, l10nNow.apiBadResponse);
     return decoded;
   }
 
@@ -194,7 +195,7 @@ class WorklogApi {
     try {
       res = await _client.get(downloadUri(path));
     } catch (_) {
-      throw ApiException(0, '서버에 연결할 수 없습니다: $baseUrl');
+      throw ApiException(0, l10nNow.apiCannotConnect(baseUrl));
     }
     if (res.statusCode >= 400) _decode(res); // throws with the server's message
     return res.bodyBytes;
@@ -210,7 +211,7 @@ class WorklogApi {
         ..body = jsonEncode(body ?? const <String, dynamic>{});
       res = await http.Response.fromStream(await _client.send(req));
     } catch (_) {
-      throw ApiException(0, '서버에 연결할 수 없습니다: $baseUrl');
+      throw ApiException(0, l10nNow.apiCannotConnect(baseUrl));
     }
     return _decode(res);
   }
@@ -246,7 +247,7 @@ class WorklogApi {
       unawaited(req.sink.close()); // completes only once the body is read; don't block on it
       res = await http.Response.fromStream(await sending);
     } catch (_) {
-      throw ApiException(0, '업로드에 실패했습니다: $baseUrl');
+      throw ApiException(0, l10nNow.apiUploadFailed(baseUrl));
     }
     return (_decode(res)['file'] as String?) ?? name;
   }

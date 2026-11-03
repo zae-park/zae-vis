@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 
 import 'api.dart';
+import 'l10n/l10n.dart';
 
 /// Asks where to save (starting in ~/Downloads), then writes the server's bytes there unchanged.
 Future<String?> saveWorklogFile(WorklogApi api, String path) async {
@@ -10,7 +11,7 @@ Future<String?> saveWorklogFile(WorklogApi api, String path) async {
   final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
   final downloads = home == null ? null : '$home${Platform.pathSeparator}Downloads';
   final dest = await FilePicker.platform.saveFile(
-    dialogTitle: '파일 저장',
+    dialogTitle: l10nNow.apiSaveFileTitle,
     fileName: name,
     initialDirectory: downloads != null && Directory(downloads).existsSync() ? downloads : null,
   );

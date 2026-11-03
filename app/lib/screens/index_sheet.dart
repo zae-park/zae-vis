@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../backend/backend.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../widgets/common.dart';
 import '../widgets/task_dialog.dart';
@@ -68,7 +69,7 @@ class _IndexSheetState extends State<IndexSheet> {
 
   /// `zaevis ext install kiwi` through the bundle; the row then shows that a rebuild is owed.
   Future<void> _installKiwi() async {
-    await runBackendTask(context, widget.backend!, '한국어 형태소 분석 (Kiwi) 설치', const ['ext', 'install', 'kiwi']);
+    await runBackendTask(context, widget.backend!, context.l10n.indexKiwiInstallTitle, const ['ext', 'install', 'kiwi']);
     if (mounted) await _fetch();
   }
 
@@ -89,6 +90,7 @@ class _IndexSheetState extends State<IndexSheet> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     final s = _status;
     return SafeArea(
       child: Padding(
@@ -98,15 +100,15 @@ class _IndexSheetState extends State<IndexSheet> {
             : s == null
                 ? const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()))
                 : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('검색 색인 (AutoRAG Lite)', style: t.titleLarge),
+                    Text(l.indexTitle, style: t.titleLarge),
                     const SizedBox(height: 12),
                     if (s.refreshing) _Progress(status: s, startedAt: _startedAt) else ...[
-                      _row('상태', _justFinished ? '색인 완료' : _stateLabel(s.state)),
-                      _row('최신 여부', s.stale ? '새 파일이 있음 — 다시 색인 필요' : '최신'),
+                      _row(l.indexStatus, _justFinished ? l.indexDone : _stateLabel(l, s.state)),
+                      _row(l.indexFreshness, s.stale ? l.indexStale : l.indexUpToDate),
                     ],
-                    if (s.embedding != null) _row('의미 검색', s.embedding!.label),
+                    if (s.embedding != null) _row(l.indexSemantic, s.embedding!.label),
                     if (s.tokenizer != null) _tokenizerRow(context, s.tokenizer!, s.refreshing),
-                    if (s.lastError != null && !s.refreshing) _row('마지막 오류', s.lastError!),
+                    if (s.lastError != null && !s.refreshing) _row(l.indexLastError, s.lastError!),
                     for (final m in s.messages.take(4))
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
@@ -115,7 +117,7 @@ class _IndexSheetState extends State<IndexSheet> {
                     if (s.messages.length > 4)
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
-                        child: Text('· 외 ${s.messages.length - 4}건', style: t.bodySmall),
+                        child: Text(l.indexMoreMessages(s.messages.length - 4), style: t.bodySmall),
                       ),
                     const SizedBox(height: 16),
                     Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -124,29 +126,29 @@ class _IndexSheetState extends State<IndexSheet> {
                         icon: s.refreshing
                             ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                             : const Icon(Icons.sync),
-                        label: Text(s.refreshing ? '색인 중…' : '색인 갱신'),
+                        label: Text(s.refreshing ? l.indexRefreshing : l.indexRefresh),
                       ),
                       OutlinedButton(
                         onPressed: s.refreshing ? null : () => _refresh(force: true),
-                        child: const Text('처음부터 다시'),
+                        child: Text(l.indexRebuild),
                       ),
                       if (_justFinished) Icon(Icons.check_circle, color: scheme.primary, size: 20),
                     ]),
                     const SizedBox(height: 8),
-                    Text(s.refreshing ? '창을 닫아도 색인은 계속됩니다.' : '처음 색인은 임베딩을 만드느라 몇 분 걸릴 수 있습니다.', style: t.bodySmall),
+                    Text(s.refreshing ? l.indexKeepsRunning : l.indexFirstSlow, style: t.bodySmall),
                   ]),
       ),
     );
   }
 
-  String _stateLabel(String state) => switch (state) {
-        'fresh' || 'ready' || 'succeeded' || 'completed' || 'success' => '준비됨',
-        'failed' => '실패',
-        'never' || '' => '아직 색인 안 함',
-        'idle' => '대기',
-        'not-configured' => 'AutoRAG 미설정',
-        'unavailable' => '연결 실패',
-        'running' || 'refreshing' || 'indexing' => '색인 중…',
+  String _stateLabel(AppLocalizations l, String state) => switch (state) {
+        'fresh' || 'ready' || 'succeeded' || 'completed' || 'success' => l.indexStateReady,
+        'failed' => l.commonFailed,
+        'never' || '' => l.indexStateNever,
+        'idle' => l.indexStateIdle,
+        'not-configured' => l.indexStateNotConfigured,
+        'unavailable' => l.indexStateUnavailable,
+        'running' || 'refreshing' || 'indexing' => l.indexRefreshing,
         _ => state,
       };
 
@@ -157,13 +159,13 @@ class _IndexSheetState extends State<IndexSheet> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SizedBox(width: 96, child: Text('키워드 분석', style: TextStyle(fontWeight: FontWeight.w600))),
+        SizedBox(width: 96, child: Text(context.l10n.indexKeywords, style: const TextStyle(fontWeight: FontWeight.w600))),
         Expanded(
           child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
             SelectableText(ts.label, style: ts.needsReindex && !refreshing ? TextStyle(color: scheme.primary) : null),
-            if (canInstall) OutlinedButton(onPressed: refreshing ? null : _installKiwi, child: const Text('Kiwi 설치')),
+            if (canInstall) OutlinedButton(onPressed: refreshing ? null : _installKiwi, child: Text(context.l10n.indexInstallKiwi)),
             if (!ts.kiwi.installed && !canInstall && ts.kiwi.installable && widget.backend == null)
-              Text("설치: 터미널에서 'zaevis ext install kiwi'", style: Theme.of(context).textTheme.bodySmall),
+              Text(context.l10n.indexKiwiTerminalHint("'zaevis ext install kiwi'"), style: Theme.of(context).textTheme.bodySmall),
           ]),
         ),
       ]),
@@ -189,29 +191,30 @@ class _Progress extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     final p = status.progress;
     final fraction = p?.fraction;
     final elapsed = startedAt == null ? null : DateTime.now().difference(startedAt!);
-    final elapsedText = elapsed == null ? '' : elapsed.inMinutes >= 1 ? ' · ${elapsed.inMinutes}분 ${elapsed.inSeconds % 60}초' : ' · ${elapsed.inSeconds}초';
+    final elapsedText = elapsed == null ? '' : elapsed.inMinutes >= 1 ? ' · ${l.collectSpanMinSec(elapsed.inMinutes, elapsed.inSeconds % 60)}' : ' · ${l.collectSpanSec(elapsed.inSeconds)}';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(color: scheme.primaryContainer.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(10)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Expanded(child: Text(p?.label ?? '색인 시작 중', style: t.titleSmall)),
+          Expanded(child: Text(p?.label ?? l.indexStarting, style: t.titleSmall)),
           Text(fraction == null ? elapsedText.replaceFirst(' · ', '') : '${(fraction * 100).round()}%$elapsedText', style: t.labelMedium),
         ]),
         const SizedBox(height: 10),
         ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: fraction, minHeight: 8)),
         const SizedBox(height: 8),
-        Text(_steps(p?.phase ?? ''), style: t.bodySmall),
+        Text(_steps(l, p?.phase ?? ''), style: t.bodySmall),
       ]),
     );
   }
 
   /// "본문 읽기 → 임베딩·색인 → 마무리" with the current step marked.
-  String _steps(String phase) {
-    const steps = [('parsed', '본문 읽기'), ('minsync', '임베딩·색인'), ('finalizing', '마무리')];
+  String _steps(AppLocalizations l, String phase) {
+    final steps = [('parsed', l.indexStepRead), ('minsync', l.indexStepEmbed), ('finalizing', l.indexStepFinish)];
     final current = switch (phase) {
       'parsed' || '' => 0,
       'minsync' => 1,

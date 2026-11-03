@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -51,7 +52,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
         processed: _processed,
       );
       if (!mounted) return;
-      toast(context, '적용했습니다: 로그 ${_lines.length}줄 · 프로젝트 ${_projects.length}개');
+      toast(context, context.l10n.reviewApplied(_lines.length, _projects.length));
       Navigator.pop(context, true);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -67,11 +68,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('이 정리 결과를 버릴까요?'),
-        content: const Text('worklog에는 아무것도 쓰지 않습니다. 다음 정리에서 같은 원본을 다시 읽습니다.'),
+        title: Text(context.l10n.reviewDismissTitle),
+        content: Text(context.l10n.reviewDismissBody),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('버리기')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(context.l10n.reviewDismiss)),
         ],
       ),
     );
@@ -80,7 +81,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     try {
       await widget.api.dismissProposal(widget.id);
       if (!mounted) return;
-      toast(context, '버렸습니다');
+      toast(context, context.l10n.reviewDismissed);
       Navigator.pop(context, true);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -94,7 +95,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('정리 결과 검토')),
+      appBar: AppBar(title: Text(context.l10n.reviewTitle)),
       body: FutureBuilder<Proposal>(
         future: _future,
         builder: (context, snap) {
@@ -107,16 +108,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
             Expanded(
               child: Readable(
                 child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 24), children: [
-                  Text('${_agentLabel(p.agent)} · $when${p.pending ? '' : ' · ${_statusLabel(p.status)}'}', style: t.bodySmall),
+                  Text('${_agentLabel(p.agent)} · $when${p.pending ? '' : ' · ${_statusLabel(context.l10n, p.status)}'}', style: t.bodySmall),
                   const SizedBox(height: 4),
-                  Text('에이전트가 쓰려던 내용입니다. 남길 것만 고르고 적용하세요. 고르지 않은 것은 worklog에 들어가지 않습니다.', style: t.bodySmall),
+                  Text(context.l10n.reviewIntro, style: t.bodySmall),
                   if (p.removedLines.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(color: scheme.errorContainer.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(8)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('에이전트가 지우려던 줄 ${p.removedLines.length}개 — 적용해도 지워지지 않습니다', style: t.labelLarge?.copyWith(color: scheme.error)),
+                        Text(context.l10n.reviewRemoved(p.removedLines.length), style: t.labelLarge?.copyWith(color: scheme.error)),
                         for (final l in p.removedLines.take(10))
                           Padding(padding: const EdgeInsets.only(top: 4), child: Text('${l.month} · ${l.entry.text}', style: t.bodySmall, maxLines: 2, overflow: TextOverflow.ellipsis)),
                       ]),
@@ -125,13 +126,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   const SizedBox(height: 16),
                   // ── log lines ───────────────────────────────────────────
                   SectionHeader(
-                    '로그 줄 (${_lines.length}/${p.logLines.length})',
-                    subtitle: p.logLines.isEmpty ? '새 줄 없음' : null,
+                    context.l10n.reviewLogLines(_lines.length, p.logLines.length),
+                    subtitle: p.logLines.isEmpty ? context.l10n.reviewNoNewLines : null,
                     trailing: p.logLines.isEmpty
                         ? null
                         : TextButton(
                             onPressed: () => setState(() => _lines.length == p.logLines.length ? _lines.clear() : _lines.addAll(List.generate(p.logLines.length, (i) => i))),
-                            child: Text(_lines.length == p.logLines.length ? '모두 해제' : '모두 선택'),
+                            child: Text(_lines.length == p.logLines.length ? context.l10n.reviewDeselectAll : context.l10n.reviewSelectAll),
                           ),
                   ),
                   for (final month in p.logLines.map((l) => l.month).toSet()) ...[
@@ -141,11 +142,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   ],
                   const SizedBox(height: 16),
                   // ── projects ────────────────────────────────────────────
-                  SectionHeader('프로젝트 (${_projects.length}/${p.projects.length})', subtitle: p.projects.isEmpty ? '바뀐 프로젝트 없음' : null),
+                  SectionHeader(context.l10n.reviewProjects(_projects.length, p.projects.length), subtitle: p.projects.isEmpty ? context.l10n.reviewNoProjects : null),
                   for (final pr in p.projects)
                     _FileTile(
                       title: pr.slug,
-                      badge: pr.isNew ? '새 파일' : '변경',
+                      badge: pr.isNew ? context.l10n.reviewNewFile : context.l10n.reviewChanged,
                       before: pr.before,
                       after: pr.after,
                       checked: _projects.contains(pr.slug),
@@ -153,24 +154,24 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     ),
                   const SizedBox(height: 16),
                   // ── summaries ───────────────────────────────────────────
-                  SectionHeader('월간 정리 (${p.summaries.length})', subtitle: p.summaries.isEmpty ? '바뀐 정리 없음' : null),
+                  SectionHeader(context.l10n.reviewSummaries(p.summaries.length), subtitle: p.summaries.isEmpty ? context.l10n.reviewNoSummaries : null),
                   if (p.summaries.isNotEmpty)
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('월간 정리 변경을 적용'),
+                      title: Text(context.l10n.reviewApplySummaries),
                       subtitle: Text(p.summaries.map((s) => s.path).join(', ')),
                       value: _summaries,
                       onChanged: (v) => setState(() => _summaries = v),
                     ),
-                  for (final s in p.summaries) _FileTile(title: s.path, badge: s.before == null ? '새 파일' : '변경', before: s.before, after: s.after),
+                  for (final s in p.summaries) _FileTile(title: s.path, badge: s.before == null ? context.l10n.reviewNewFile : context.l10n.reviewChanged, before: s.before, after: s.after),
                   const SizedBox(height: 16),
                   // ── processed inbox files ───────────────────────────────
-                  SectionHeader('처리된 inbox 파일 (${p.processed.length})', subtitle: p.processed.isEmpty ? '없음' : null),
+                  SectionHeader(context.l10n.reviewProcessed(p.processed.length), subtitle: p.processed.isEmpty ? context.l10n.commonNone : null),
                   if (p.processed.isNotEmpty)
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('읽은 inbox 파일을 processed/로 옮김'),
-                      subtitle: Text('${p.processed.map((m) => m.from.split('/').last).take(5).join(', ')}${p.processed.length > 5 ? ' 외 ${p.processed.length - 5}' : ''}\n끄면 다음 정리에서 다시 읽습니다.'),
+                      title: Text(context.l10n.reviewMoveProcessed),
+                      subtitle: Text('${p.processed.map((m) => m.from.split('/').last).take(5).join(', ')}${p.processed.length > 5 ? ' ${context.l10n.reviewMore(p.processed.length - 5)}' : ''}\n${context.l10n.reviewProcessedHint}'),
                       value: _processed,
                       onChanged: (v) => setState(() => _processed = v),
                     ),
@@ -178,7 +179,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     const SizedBox(height: 16),
                     ExpansionTile(
                       tilePadding: EdgeInsets.zero,
-                      title: Text('에이전트 보고', style: t.titleSmall),
+                      title: Text(context.l10n.reviewAgentReport, style: t.titleSmall),
                       children: [
                         SelectableText(p.report.length > 4000 ? '…${p.report.substring(p.report.length - 4000)}' : p.report, style: ZaevisTheme.mono.copyWith(fontSize: 12), minLines: 1),
                       ],
@@ -196,13 +197,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                     child: Row(children: [
-                      Expanded(child: Text('선택 ${_chosen(p)}개', style: t.bodyMedium)),
-                      TextButton(onPressed: _busy ? null : _dismiss, child: Text('버리기', style: TextStyle(color: scheme.error))),
+                      Expanded(child: Text(context.l10n.reviewSelected(_chosen(p)), style: t.bodyMedium)),
+                      TextButton(onPressed: _busy ? null : _dismiss, child: Text(context.l10n.reviewDismiss, style: TextStyle(color: scheme.error))),
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: _busy || _chosen(p) == 0 ? null : () => _apply(p),
                         icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check),
-                        label: const Text('선택한 것 적용'),
+                        label: Text(context.l10n.reviewApply),
                       ),
                     ]),
                   ),
@@ -222,9 +223,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
         _ => id,
       };
 
-  static String _statusLabel(String s) => switch (s) {
-        'applied' => '적용됨',
-        'dismissed' => '버림',
+  static String _statusLabel(AppLocalizations l, String s) => switch (s) {
+        'applied' => l.reviewStatusApplied,
+        'dismissed' => l.reviewStatusDismissed,
         _ => s,
       };
 }
@@ -256,7 +257,7 @@ class _LineTile extends StatelessWidget {
                 for (final p in e.projects) Text(p, style: t.labelMedium?.copyWith(color: scheme.primary)),
               ]),
             Text.rich(inlineSpan(context, e.text, base: t.bodyMedium)),
-            if (e.source != null) Text('출처 ${e.source}', style: t.bodySmall?.copyWith(color: scheme.outline)),
+            if (e.source != null) Text(context.l10n.logSource(e.source!), style: t.bodySmall?.copyWith(color: scheme.outline)),
           ]),
         ),
       ]),
@@ -288,15 +289,15 @@ class _FileTile extends StatelessWidget {
           const SizedBox(width: 8),
           Chip(label: Text(badge), visualDensity: VisualDensity.compact, labelStyle: t.labelSmall),
         ]),
-        subtitle: Text('${after.split('\n').length}줄${before != null ? ' (이전 ${before!.split('\n').length}줄)' : ''}', style: t.bodySmall),
+        subtitle: Text('${context.l10n.reviewLineCount(after.split('\n').length)}${before != null ? ' ${context.l10n.reviewPrevLineCount(before!.split('\n').length)}' : ''}', style: t.bodySmall),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('제안', style: t.labelLarge?.copyWith(color: scheme.primary)),
+          Text(context.l10n.reviewProposed, style: t.labelLarge?.copyWith(color: scheme.primary)),
           MarkdownView(after),
           if (before != null) ...[
             const Divider(),
-            Text('현재', style: t.labelLarge?.copyWith(color: scheme.outline)),
+            Text(context.l10n.reviewCurrent, style: t.labelLarge?.copyWith(color: scheme.outline)),
             Opacity(opacity: 0.65, child: MarkdownView(before!)),
           ],
         ],

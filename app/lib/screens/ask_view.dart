@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_rail.dart';
@@ -16,11 +17,11 @@ import 'search_screen.dart';
 const agentTitles = {'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter'};
 
 /// "Codex CLI" or "Claude Code 할당량 → Codex CLI가 작성" when an earlier stop was skipped.
-String _who(AskResult result, String fallback) {
+String _who(AppLocalizations l, AskResult result, String fallback) {
   final skips = result.rail.where((s) => s.state == 'quota').map((s) => s.title).toList();
   final wrote = result.rail.where((s) => s.state == 'wrote').map((s) => s.title).firstOrNull ?? fallback;
   if (skips.isEmpty) return wrote;
-  return '${skips.join(', ')} 할당량 → $wrote가 작성';
+  return l.askQuotaHandoff(skips.join(', '), wrote);
 }
 
 /// One exchange in the thread: the line the user sent, the search hits it found at once, and what the server made of
@@ -404,10 +405,10 @@ class _AskViewState extends State<AskView> {
             onSubmitted: _send,
             decoration: InputDecoration(
               hintText: c.openClarify != null
-                  ? '위 질문에 답해 주세요 (고르거나 직접 적기)'
+                  ? context.l10n.askHintClarify
                   : continuing
-                      ? '이어서… ("그건 왜?", "[2] 내려받기"처럼 짧게 이어도 됩니다)'
-                      : '찾을 말, 질문, 또는 "11월 2일 전사본 내려받기"',
+                      ? context.l10n.askHintContinue
+                      : context.l10n.askHintFirst,
               prefixIcon: const Icon(Icons.search),
               isDense: true,
             ),
@@ -417,7 +418,7 @@ class _AskViewState extends State<AskView> {
         FilledButton.icon(
           onPressed: c.busy ? null : _send,
           icon: c.busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send),
-          label: Text(c.answering ? '답하는 중' : c.busy ? '찾는 중' : '보내기'),
+          label: Text(c.answering ? context.l10n.askAnswering : c.busy ? context.l10n.askSearching : context.l10n.askSend),
         ),
       ]),
     );
@@ -439,7 +440,7 @@ class AskHeader extends StatelessWidget {
       builder: (context, _) => Row(children: [
         Expanded(
           child: Text(
-            c.turns.isEmpty ? '새 대화' : c.turns.first.question,
+            c.turns.isEmpty ? context.l10n.askNewConversation : c.turns.first.question,
             style: t.titleSmall,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -450,7 +451,7 @@ class AskHeader extends StatelessWidget {
           builder: (context, snap) {
             final convs = snap.data?.conversations ?? const <ConversationSummary>[];
             return PopupMenuButton<String>(
-              tooltip: '이전 대화',
+              tooltip: context.l10n.askHistory,
               enabled: convs.isNotEmpty,
               icon: const Icon(Icons.history),
               onSelected: c.load,
@@ -461,7 +462,7 @@ class AskHeader extends StatelessWidget {
                     child: ListTile(
                       dense: true,
                       title: Text(cv.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('${cv.turns}턴 · ${cv.updatedAt?.toLocal().toString().split('.').first ?? ''}'),
+                      subtitle: Text(context.l10n.askConversationMeta(cv.turns, cv.updatedAt?.toLocal().toString().split('.').first ?? '')),
                       trailing: cv.id == c.conversationId ? Icon(Icons.check, color: scheme.primary, size: 18) : null,
                     ),
                   ),
@@ -470,8 +471,8 @@ class AskHeader extends StatelessWidget {
           },
         ),
         if (c.conversationId != null)
-          IconButton(tooltip: '이 대화 지우기', icon: const Icon(Icons.delete_outline), onPressed: c.busy ? null : c.deleteCurrent),
-        TextButton.icon(onPressed: c.turns.isEmpty || c.busy ? null : c.newConversation, icon: const Icon(Icons.add_comment_outlined, size: 18), label: const Text('새 대화')),
+          IconButton(tooltip: context.l10n.askDeleteConversation, icon: const Icon(Icons.delete_outline), onPressed: c.busy ? null : c.deleteCurrent),
+        TextButton.icon(onPressed: c.turns.isEmpty || c.busy ? null : c.newConversation, icon: const Icon(Icons.add_comment_outlined, size: 18), label: Text(context.l10n.askNewConversation)),
       ]),
     );
   }
@@ -494,17 +495,14 @@ class _Intro extends StatelessWidget {
         final agent = st?.chosenAgent;
         final noAgent = snap.connectionState == ConnectionState.done && !snap.hasError && st?.chosen == null;
         return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const EmptyPane('기록에 말을 거세요\n'
-              '단어를 넣으면 로그 · 프로젝트 · 리포트 · 전사본 · 수집 원본에서 바로 찾습니다. '
-              '"색인은 왜 미뤘지?"처럼 물으면 찾은 문단만 근거로 에이전트가 출처 [번호]를 달아 답합니다. '
-              '"11월 2일 전사본 내려받기"처럼 말하면 그 파일을 내려받을 수 있습니다. 에이전트는 파일을 읽기만 합니다.', icon: Icons.forum_outlined),
-          if (agent != null) Text('답은 ${agent.title}가 씁니다 · ${agent.detail}', style: t.bodySmall?.copyWith(color: scheme.outline)),
+          EmptyPane(context.l10n.askIntro, icon: Icons.forum_outlined),
+          if (agent != null) Text(context.l10n.askAnswerBy(agent.title, agent.detail), style: t.bodySmall?.copyWith(color: scheme.outline)),
           if (st != null && st.rail.isNotEmpty) AgentRail(stops: st.rail),
           for (final a in st?.agents.where((a) => a.needsLogin) ?? const <AgentInfo>[])
             Text('${a.title}: ${a.loginNote}', style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
           if (noAgent) ...[
-            Text('답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.', style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
-            if (onOpenSettings != null) Padding(padding: const EdgeInsets.only(top: 10), child: FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined), label: const Text('설정 열기'))),
+            Text(context.l10n.askNoAgent, style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
+            if (onOpenSettings != null) Padding(padding: const EdgeInsets.only(top: 10), child: FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined), label: Text(context.l10n.askOpenSettings))),
           ],
           const SizedBox(height: 24),
         ]);
@@ -557,7 +555,7 @@ class _PendingBubble extends StatelessWidget {
           FutureBuilder<AskStatus>(
             future: status,
             builder: (context, snap) => Text(
-                stopping ? '멈추는 중…' : '${snap.data?.chosenAgent?.title ?? '에이전트'}가 기록을 읽고 답을 쓰는 중… (수십 초)',
+                stopping ? context.l10n.askStopping : context.l10n.askWriting(snap.data?.chosenAgent?.title ?? context.l10n.askAgentFallback),
                 style: t.bodyMedium),
           ),
           if (onStop != null) ...[
@@ -565,7 +563,7 @@ class _PendingBubble extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: stopping ? null : onStop,
               icon: const Icon(Icons.stop_circle_outlined, size: 18),
-              label: const Text('멈추기'),
+              label: Text(context.l10n.askStop),
             ),
           ],
         ]),
@@ -596,9 +594,9 @@ class _ErrorBubble extends StatelessWidget {
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
           if (noAgent && onOpenSettings != null)
-            FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined, size: 18), label: const Text('설정 열기'))
+            FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined, size: 18), label: Text(context.l10n.askOpenSettings))
           else
-            OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 18), label: const Text('다시 시도')),
+            OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 18), label: Text(context.l10n.commonRetry)),
         ]),
       ]),
     );
@@ -627,7 +625,7 @@ class _AnswerBubble extends StatelessWidget {
           Row(children: [
             Icon(Icons.help_outline, size: 18, color: scheme.primary),
             const SizedBox(width: 6),
-            Text('되묻기', style: t.labelMedium?.copyWith(color: scheme.primary, fontWeight: FontWeight.w700)),
+            Text(context.l10n.askClarifyTitle, style: t.labelMedium?.copyWith(color: scheme.primary, fontWeight: FontWeight.w700)),
           ]),
           const SizedBox(height: 6),
           SelectableText(clarify.question, style: t.bodyLarge, minLines: 1),
@@ -638,7 +636,7 @@ class _AnswerBubble extends StatelessWidget {
             ]),
           ],
           const SizedBox(height: 8),
-          Text(onChoose == null ? '${_who(result, agent)} · 기록이 여러 갈래라 되물었습니다' : '고르거나 아래에 직접 적어 주세요 · ${_who(result, agent)}',
+          Text(onChoose == null ? context.l10n.askClarifyDone(_who(context.l10n, result, agent)) : context.l10n.askClarifyPrompt(_who(context.l10n, result, agent)),
               style: t.labelSmall?.copyWith(color: scheme.outline)),
         ]),
       );
@@ -649,11 +647,11 @@ class _AnswerBubble extends StatelessWidget {
         SelectableText.rich(citationSpan(context, result.answer, sources: result.sources, base: t.bodyLarge, selected: selected, onCite: onCite), minLines: 1, maxLines: 80),
         const SizedBox(height: 10),
         Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Text('근거', style: t.labelSmall?.copyWith(color: scheme.outline)),
+          Text(context.l10n.askSources, style: t.labelSmall?.copyWith(color: scheme.outline)),
           for (final s in result.sources) _SourceChip(source: s, selected: selected == s.n, onTap: () => onCite(s.n)),
         ]),
         const SizedBox(height: 6),
-        Text('${_who(result, agent)} · ${(result.ms / 1000).toStringAsFixed(1)}초 · 발췌 ${result.sources.length}개만 근거로 썼습니다', style: t.labelSmall?.copyWith(color: scheme.outline)),
+        Text(context.l10n.askAnswerMeta(_who(context.l10n, result, agent), (result.ms / 1000).toStringAsFixed(1), result.sources.length), style: t.labelSmall?.copyWith(color: scheme.outline)),
       ]),
     );
   }
@@ -682,7 +680,7 @@ class _SearchBubble extends StatelessWidget {
       return _Bubble(child: Row(mainAxisSize: MainAxisSize.min, children: [
         const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
         const SizedBox(width: 10),
-        Text('찾는 중…', style: t.bodyMedium),
+        Text(context.l10n.askSearchingEllipsis, style: t.bodyMedium),
       ]));
     }
     final err = turn.searchError;
@@ -697,13 +695,13 @@ class _SearchBubble extends StatelessWidget {
         child: TextButton.icon(
           onPressed: () => SearchResultsScreen.open(context, api, turn.question, r, index: index, inbox: inbox),
           icon: const Icon(Icons.filter_list, size: 16),
-          label: Text('찾은 기록 ${hits.length}건 모두 보기'),
+          label: Text(context.l10n.askSeeAllFound(hits.length)),
         ),
       );
     }
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(hits.isEmpty ? emptySearchNote(query: turn.question, total: 0, shown: 0, filtered: false, index: index, inbox: inbox) : '찾은 기록 ${hits.length}건',
+        Text(hits.isEmpty ? emptySearchNote(query: turn.question, total: 0, shown: 0, filtered: false, index: index, inbox: inbox) : context.l10n.askFound(hits.length),
             style: hits.isEmpty ? t.bodyMedium : t.labelMedium?.copyWith(color: scheme.outline)),
         for (final h in hits.take(shown)) ...[
           const SizedBox(height: 8),
@@ -718,12 +716,12 @@ class _SearchBubble extends StatelessWidget {
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 6, children: [
             if (onAnswer != null && hits.isNotEmpty)
-              FilledButton.tonalIcon(onPressed: onAnswer, icon: const Icon(Icons.question_answer_outlined, size: 18), label: const Text('답 받기')),
+              FilledButton.tonalIcon(onPressed: onAnswer, icon: const Icon(Icons.question_answer_outlined, size: 18), label: Text(context.l10n.askGetAnswer)),
             if (hits.length > 1)
               OutlinedButton.icon(
                 onPressed: () => SearchResultsScreen.open(context, api, turn.question, r, index: index, inbox: inbox),
                 icon: const Icon(Icons.filter_list, size: 18),
-                label: Text('모두 보기 (${hits.length}건)'),
+                label: Text(context.l10n.askSeeAll(hits.length)),
               ),
           ]),
         ],
@@ -745,7 +743,7 @@ class _FilesBubble extends StatelessWidget {
     final files = turn.files;
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(files.length == 1 ? '이 파일입니다.' : '파일 ${files.length}개입니다.', style: t.labelMedium?.copyWith(color: scheme.outline)),
+        Text(files.length == 1 ? context.l10n.askOneFile : context.l10n.askFiles(files.length), style: t.labelMedium?.copyWith(color: scheme.outline)),
         for (final f in files) ...[
           const SizedBox(height: 8),
           _FileRow(file: f, api: api),
@@ -778,9 +776,9 @@ class _FileRow extends StatelessWidget {
           ]),
         ),
         const SizedBox(width: 8),
-        TextButton(onPressed: () => FileScreen.open(context, api, file.path), child: const Text('열기')),
+        TextButton(onPressed: () => FileScreen.open(context, api, file.path), child: Text(context.l10n.askOpen)),
         const SizedBox(width: 4),
-        FilledButton.icon(onPressed: () => saveWorklogFile(context, api, file.path), icon: const Icon(Icons.download, size: 18), label: const Text('내려받기')),
+        FilledButton.icon(onPressed: () => saveWorklogFile(context, api, file.path), icon: const Icon(Icons.download, size: 18), label: Text(context.l10n.commonDownload)),
       ]),
     );
   }
@@ -799,9 +797,9 @@ class _StoppedBubble extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.stop_circle_outlined, size: 18, color: scheme.outline),
         const SizedBox(width: 8),
-        Text('멈췄습니다', style: t.bodyMedium?.copyWith(color: scheme.outline)),
+        Text(context.l10n.askStopped, style: t.bodyMedium?.copyWith(color: scheme.outline)),
         const SizedBox(width: 12),
-        TextButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 18), label: const Text('다시 묻기')),
+        TextButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 18), label: Text(context.l10n.askAskAgain)),
       ]),
     );
   }
@@ -839,7 +837,7 @@ InlineSpan sourceTooltip(BuildContext context, AskSource s) {
   return TextSpan(children: [
     TextSpan(text: '[${s.n}] ${s.label}\n', style: TextStyle(fontWeight: FontWeight.w700, color: scheme.onInverseSurface)),
     TextSpan(text: preview, style: TextStyle(color: scheme.onInverseSurface.withValues(alpha: 0.9))),
-    TextSpan(text: '\n\n누르면 전체 발췌와 원문', style: TextStyle(fontSize: 11, color: scheme.onInverseSurface.withValues(alpha: 0.7))),
+    TextSpan(text: '\n\n${context.l10n.askTooltipMore}', style: TextStyle(fontSize: 11, color: scheme.onInverseSurface.withValues(alpha: 0.7))),
   ]);
 }
 
@@ -958,10 +956,10 @@ class _SourcePanel extends StatelessWidget {
         Row(children: [
           CircleAvatar(radius: 12, backgroundColor: scheme.primary, child: Text('${s.n}', style: t.labelSmall?.copyWith(color: scheme.onPrimary))),
           const SizedBox(width: 8),
-          Expanded(child: Text('근거 ${idx + 1} / ${sources.length}', style: t.titleSmall)),
-          IconButton(tooltip: '이전 근거', icon: const Icon(Icons.chevron_left), onPressed: idx > 0 ? () => go(-1) : null, visualDensity: VisualDensity.compact),
-          IconButton(tooltip: '다음 근거', icon: const Icon(Icons.chevron_right), onPressed: idx < sources.length - 1 ? () => go(1) : null, visualDensity: VisualDensity.compact),
-          IconButton(tooltip: '닫기', icon: const Icon(Icons.close), onPressed: onClose, visualDensity: VisualDensity.compact),
+          Expanded(child: Text(context.l10n.askSourceIndex(idx + 1, sources.length), style: t.titleSmall)),
+          IconButton(tooltip: context.l10n.askPrevSource, icon: const Icon(Icons.chevron_left), onPressed: idx > 0 ? () => go(-1) : null, visualDensity: VisualDensity.compact),
+          IconButton(tooltip: context.l10n.askNextSource, icon: const Icon(Icons.chevron_right), onPressed: idx < sources.length - 1 ? () => go(1) : null, visualDensity: VisualDensity.compact),
+          IconButton(tooltip: context.l10n.commonClose, icon: const Icon(Icons.close), onPressed: onClose, visualDensity: VisualDensity.compact),
         ]),
         const SizedBox(height: 6),
         Text(s.label, style: t.titleSmall?.copyWith(color: scheme.primary)),
@@ -969,7 +967,7 @@ class _SourcePanel extends StatelessWidget {
         const Divider(height: 18),
         Expanded(
           child: SingleChildScrollView(
-            child: SelectableText(s.passage.isEmpty ? '(발췌 없음)' : s.passage, style: t.bodyMedium, minLines: 1),
+            child: SelectableText(s.passage.isEmpty ? context.l10n.askNoExcerpt : s.passage, style: t.bodyMedium, minLines: 1),
           ),
         ),
         const SizedBox(height: 10),
@@ -977,13 +975,13 @@ class _SourcePanel extends StatelessWidget {
           FilledButton.tonalIcon(
             onPressed: s.path.isEmpty ? null : () => FileScreen.open(context, api, s.path),
             icon: const Icon(Icons.open_in_new, size: 18),
-            label: const Text('원문 열기'),
+            label: Text(context.l10n.askOpenOriginal),
           ),
           const SizedBox(width: 8),
           OutlinedButton.icon(
             onPressed: s.path.isEmpty ? null : () => saveWorklogFile(context, api, s.path),
             icon: const Icon(Icons.download_outlined, size: 18),
-            label: const Text('내려받기'),
+            label: Text(context.l10n.commonDownload),
           ),
         ]),
       ]),

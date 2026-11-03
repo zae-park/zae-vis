@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../recording_trail.dart';
 import '../theme.dart';
@@ -27,7 +28,7 @@ class FileScreen extends StatelessWidget {
       appBar: AppBar(title: Text(path.split('/').last), actions: [
         Padding(
           padding: const EdgeInsets.only(right: 12),
-          child: TextButton.icon(onPressed: () => saveWorklogFile(context, api, path), icon: const Icon(Icons.download_outlined), label: const Text('내려받기')),
+          child: TextButton.icon(onPressed: () => saveWorklogFile(context, api, path), icon: const Icon(Icons.download_outlined), label: Text(context.l10n.commonDownload)),
         ),
       ], bottom: PreferredSize(
         preferredSize: const Size.fromHeight(20),
@@ -158,17 +159,17 @@ class _SpeakerBar extends StatelessWidget {
     final name = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('[$label] 이름'),
+        title: Text(context.l10n.fileSpeakerNameTitle(label)),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 20,
-          decoration: const InputDecoration(hintText: '예: 재박'),
+          decoration: InputDecoration(hintText: context.l10n.fileSpeakerNameHint),
           onSubmitted: (v) => Navigator.pop(context, v),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('바꾸기')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(context.l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: Text(context.l10n.commonChange)),
         ],
       ),
     );
@@ -176,7 +177,7 @@ class _SpeakerBar extends StatelessWidget {
     if (next.isEmpty || next == label || !context.mounted) return;
     try {
       await api.renameSpeakers(path, {label: next});
-      if (context.mounted) toast(context, '[$label]을 [$next](으)로 바꿨습니다');
+      if (context.mounted) toast(context, context.l10n.fileSpeakerRenamed(label, next));
       onRenamed();
     } on ApiException catch (e) {
       if (context.mounted) toast(context, e.message, error: true);
@@ -190,15 +191,15 @@ class _SpeakerBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        Text('화자', style: t.labelMedium?.copyWith(color: scheme.outline)),
+        Text(context.l10n.fileSpeakers, style: t.labelMedium?.copyWith(color: scheme.outline)),
         for (final s in speakers)
           ActionChip(
             avatar: const Icon(Icons.edit_outlined, size: 16),
             label: Text(s),
-            tooltip: '이름 붙이기',
+            tooltip: context.l10n.fileNameSpeaker,
             onPressed: () => _rename(context, s),
           ),
-        Text('누르면 이름을 붙입니다. 이 파일에 바로 반영됩니다.', style: t.bodySmall?.copyWith(color: scheme.outline)),
+        Text(context.l10n.fileSpeakersHint, style: t.bodySmall?.copyWith(color: scheme.outline)),
         pass,
       ]),
     );
@@ -254,7 +255,7 @@ class _SpeakerPassState extends State<SpeakerPass> {
     if (job != null && job.active) {
       _timer = Timer(widget.poll, _check);
     } else if (was != null && was.active && job?.state == 'done') {
-      toast(context, '화자를 붙였습니다');
+      toast(context, context.l10n.fileSpeakersDone);
       widget.onDone();
     }
   }
@@ -263,15 +264,15 @@ class _SpeakerPassState extends State<SpeakerPass> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(widget.labeled ? '화자를 다시 붙일까요?' : '화자를 붙일까요?'),
+        title: Text(widget.labeled ? context.l10n.fileRelabelTitle : context.l10n.fileLabelTitle),
         content: Text([
-          '남겨 둔 원본 녹음을 다시 인식해 말한 사람마다 [A], [B]로 나눕니다. 녹음 길이만큼 걸리고 그동안 CPU를 씁니다.',
-          if (widget.labeled) '붙여 둔 이름은 A, B로 돌아갑니다.',
-          '이 파일의 본문이 새 글로 바뀝니다.',
+          context.l10n.fileLabelBody,
+          if (widget.labeled) context.l10n.fileLabelBodyNames,
+          context.l10n.fileLabelBodyReplace,
         ].join('\n\n')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('붙이기')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(context.l10n.fileLabelConfirm)),
         ],
       ),
     );
@@ -299,19 +300,19 @@ class _SpeakerPassState extends State<SpeakerPass> {
       return Row(mainAxisSize: MainAxisSize.min, children: [
         SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, value: job.fraction)),
         const SizedBox(width: 8),
-        Flexible(child: Text(job.state == 'queued' ? '화자 붙이기 대기 중' : '화자 붙이는 중 · ${job.line ?? ''}', style: t.bodySmall?.copyWith(color: scheme.outline))),
+        Flexible(child: Text(job.state == 'queued' ? context.l10n.fileLabelQueued : context.l10n.fileLabeling(job.line ?? ''), style: t.bodySmall?.copyWith(color: scheme.outline))),
       ]);
     }
     final button = TextButton.icon(
       onPressed: _starting ? null : _start,
       icon: const Icon(Icons.record_voice_over_outlined, size: 18),
-      label: Text(widget.labeled ? '화자 다시 붙이기' : '화자 붙이기'),
+      label: Text(widget.labeled ? context.l10n.fileRelabel : context.l10n.fileLabel),
     );
     final failed = job?.state == 'failed' ? job!.error : null;
     return Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-      if (!widget.labeled) Text('말한 사람이 표시되지 않은 전사본입니다.', style: t.bodySmall?.copyWith(color: scheme.outline)),
+      if (!widget.labeled) Text(context.l10n.fileNoSpeakers, style: t.bodySmall?.copyWith(color: scheme.outline)),
       button,
-      if (failed != null) Text('지난번 실패: $failed', style: t.bodySmall?.copyWith(color: scheme.error)),
+      if (failed != null) Text(context.l10n.fileLastFailed(failed), style: t.bodySmall?.copyWith(color: scheme.error)),
     ]);
   }
 }

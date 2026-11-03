@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../recording/recorder.dart';
 import 'input_dialogs.dart' show toast;
 
@@ -67,7 +68,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
   double _level = 0;
   String? _error;
   String? _saved;
-  String _status = '전사 준비 중';
+  String _status = l10nNow.recordPreparing;
   double? _fraction;
   var _closed = false;
   final _stackKey = GlobalKey();
@@ -82,7 +83,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
     if (watch == null) return;
     _phase = _Phase.transcribing;
     _saved = watch;
-    _status = '전사 중…';
+    _status = l10nNow.recordTranscribing;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_closed) _follow(watch);
     });
@@ -115,7 +116,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
     setState(() => _error = null);
     try {
       if (!await widget.recorder.hasPermission()) {
-        setState(() => _error = '마이크 접근이 허용되지 않았습니다. 시스템 설정 → 개인정보 보호 및 보안 → 마이크에서 zaevis를 켜 주세요.');
+        setState(() => _error = context.l10n.recordMicDenied);
         return;
       }
       final stream = await widget.recorder.startStream();
@@ -124,13 +125,13 @@ class _RecordFloaterState extends State<_RecordFloater> {
       _sub = stream.listen((c) {
         _chunks.add(c);
         _level = pcm16Level(c);
-      }, onError: (Object e) => setState(() => _error = '녹음 오류: $e'));
+      }, onError: (Object e) => setState(() => _error = context.l10n.recordError('$e')));
       _tick = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (mounted) setState(() => _elapsed = DateTime.now().difference(_startedAt!));
       });
       setState(() => _phase = _Phase.recording);
     } catch (e) {
-      setState(() => _error = '녹음을 시작하지 못했습니다: $e');
+      setState(() => _error = context.l10n.recordStartFailed('$e'));
     }
   }
 
@@ -150,7 +151,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
       setState(() {
         _phase = _Phase.transcribing;
         _saved = saved;
-        _status = '전사 준비 중';
+        _status = context.l10n.recordPreparing;
         _fraction = null;
       });
       final job = await _readJob(saved);
@@ -183,14 +184,14 @@ class _RecordFloaterState extends State<_RecordFloater> {
       final current = job;
       if (current.state == 'failed') {
         if (mounted) setState(() {
-          _status = '전사 실패';
-          _error = current.error ?? '전사에 실패했습니다';
+          _status = context.l10n.recordTranscribeFailed;
+          _error = current.error ?? context.l10n.recordTranscribeFailedLong;
           _fraction = null;
         });
         return _Job.failed;
       }
       if (mounted) setState(() {
-        _status = current.line ?? (current.state == 'queued' ? '전사 대기' : '전사 중…');
+        _status = current.line ?? (current.state == 'queued' ? context.l10n.recordQueued : context.l10n.recordTranscribing);
         _fraction = current.fraction;
         _error = null;
       });
@@ -206,7 +207,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
     if (_stopping) return;
     _stopping = true;
     final saved = _saved;
-    if (mounted) setState(() => _status = '취소하는 중');
+    if (mounted) setState(() => _status = context.l10n.recordCancelling);
     if (saved != null) {
       try {
         await widget.api.cancelTranscription(saved);
@@ -280,21 +281,21 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 Row(children: [
                   GestureDetector(
                     onPanUpdate: _drag,
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.drag_indicator, size: 18),
-                      SizedBox(width: 4),
-                      Text('녹음'),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.drag_indicator, size: 18),
+                      const SizedBox(width: 4),
+                      Text(context.l10n.recordTitle),
                     ]),
                   ),
                   const Spacer(),
-                  IconButton(tooltip: '닫기', visualDensity: VisualDensity.compact, onPressed: _phase == _Phase.uploading ? null : _cancel, icon: const Icon(Icons.close, size: 18)),
+                  IconButton(tooltip: context.l10n.commonClose, visualDensity: VisualDensity.compact, onPressed: _phase == _Phase.uploading ? null : _cancel, icon: const Icon(Icons.close, size: 18)),
                 ]),
                 Text(
                   recording
                       ? mmss
                       : transcribing
                           ? _status
-                          : (_phase == _Phase.uploading ? '올리는 중…' : '눌러서 녹음 시작'),
+                          : (_phase == _Phase.uploading ? context.l10n.recordUploading : context.l10n.recordTapToStart),
                   style: t.titleSmall,
                 ),
                 const SizedBox(height: 8),
@@ -302,10 +303,10 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 const SizedBox(height: 8),
                 Text(
                   recording
-                      ? '중지하면 inbox에 올라가고, whisperX가 설치돼 있으면 바로 전사합니다.'
+                      ? context.l10n.recordHintRecording
                       : transcribing
-                          ? '오른쪽 위를 누르면 전사는 이어집니다. 녹음은 inbox에 남습니다.'
-                          : '16kHz 모노 WAV로 저장합니다. 1분에 약 2MB. 첫 녹음 때 마이크 권한을 묻습니다.',
+                          ? context.l10n.recordHintTranscribing
+                          : context.l10n.recordHintIdle,
                   style: t.bodySmall,
                 ),
                 if (_error != null) ...[
@@ -314,15 +315,15 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 ],
                 const SizedBox(height: 10),
                 Row(children: [
-                  if (!transcribing) TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: const Text('취소')),
+                  if (!transcribing) TextButton(onPressed: _phase == _Phase.uploading ? null : _cancel, child: Text(context.l10n.commonCancel)),
                   const Spacer(),
                   if (transcribing)
-                    FilledButton(onPressed: _stopping ? null : _stopTranscription, child: const Text('전사 취소')),
+                    FilledButton(onPressed: _stopping ? null : _stopTranscription, child: Text(context.l10n.recordCancelTranscription)),
                   if (!transcribing)
                     FilledButton.icon(
                       onPressed: _phase == _Phase.uploading ? null : (recording ? _stopAndUpload : _start),
                       icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record, size: 18),
-                      label: Text(recording ? '중지하고 올리기' : '녹음 시작'),
+                      label: Text(recording ? context.l10n.recordStopUpload : context.l10n.recordStart),
                     ),
                 ]),
               ]),
@@ -337,5 +338,5 @@ class _RecordFloaterState extends State<_RecordFloater> {
 /// Shared by the app bar button and the collect tab.
 Future<void> recordAndNotify(BuildContext context, WorklogApi api, {Recorder? recorder}) async {
   final saved = await showRecordDialog(context, api, recorder: recorder);
-  if (saved != null && context.mounted) toast(context, '녹음을 전사 대기열에 넣었습니다: $saved');
+  if (saved != null && context.mounted) toast(context, context.l10n.recordQueuedToast(saved));
 }

@@ -35,7 +35,7 @@ export type AppConfig = {
   speakers: boolean; // label who spoke in transcripts after the text is saved (default on, see diarize.ts)
   transcribeSpeed: "quiet" | "fast"; // whisperX CPU use: 4 threads (default) or every core (transcribe.ts)
   hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
-  appearance: Appearance; // the app's theme and text size, kept here so every window (macOS app, web) shares them
+  appearance: Appearance; // the app's theme, text size and language, kept here so every window (macOS app, web) shares them
   language: string; // the language the user mostly speaks and writes ("ko"), asked on first run; the default for transcription
   transcribeLanguage: string; // "user" (follow `language`, default) | "auto" (whisper detects) | a language code
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
@@ -184,15 +184,16 @@ export function transcribeLanguageFor(cfg: Pick<AppConfig, "language" | "transcr
   return normalizeLanguage(cfg.transcribeLanguage) ?? cfg.language;
 }
 
-export type Appearance = { theme: "system" | "light" | "dark"; textScale: number };
+export type Appearance = { theme: "system" | "light" | "dark"; textScale: number; locale: "system" | "ko" | "en" };
 /** Text sizes the app offers, as a factor of the default. */
 export const TEXT_SCALES = [0.9, 1, 1.1, 1.2, 1.3];
 
 export function normalizeAppearance(raw: unknown): Appearance {
-  const a = (raw && typeof raw === "object" ? raw : {}) as { theme?: unknown; textScale?: unknown };
+  const a = (raw && typeof raw === "object" ? raw : {}) as { theme?: unknown; textScale?: unknown; locale?: unknown };
   const theme = a.theme === "light" || a.theme === "dark" ? a.theme : "system";
   const scale = typeof a.textScale === "number" && TEXT_SCALES.includes(a.textScale) ? a.textScale : 1;
-  return { theme, textScale: scale };
+  const locale = a.locale === "ko" || a.locale === "en" ? a.locale : "system";
+  return { theme, textScale: scale, locale };
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */

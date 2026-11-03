@@ -1,3 +1,4 @@
+import '../l10n/l10n.dart';
 import 'backend.dart';
 
 class _WebBackend implements Backend {
@@ -14,14 +15,14 @@ class _WebBackend implements Backend {
   @override
   bool get isConfigured => true;
   @override
-  Stream<String> run(List<String> args) => Stream<String>.error(UnsupportedError('브라우저에서는 실행할 수 없습니다'));
+  Stream<String> run(List<String> args) => Stream<String>.error(UnsupportedError(l10nNow.backendWebNoRun));
   @override
   Future<void> ensureServer() async {}
   @override
   Future<void> open(String target) async {}
   @override
   Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {
-    throw UnsupportedError('브라우저에서는 업데이트할 수 없습니다');
+    throw UnsupportedError(l10nNow.backendWebNoUpdate);
   }
 }
 

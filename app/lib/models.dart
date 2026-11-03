@@ -1,5 +1,7 @@
 // JSON models for the zaevis server API (server/src/app.ts).
 
+import 'l10n/l10n.dart';
+
 typedef Json = Map<String, dynamic>;
 
 String _str(Object? v) => v is String ? v : '';
@@ -279,12 +281,12 @@ class OriginFile {
   final int bytes;
 
   String get sourceLabel => switch (source) {
-        'git' => 'git 커밋',
-        'agent-sessions' => '에이전트 세션',
-        'claude-code' => 'Claude Code 세션',
-        'shell-history' => '셸 명령',
-        'transcripts' => '전사본',
-        'session-notes' => '세션 노트',
+        'git' => l10nNow.modelSourceGit,
+        'agent-sessions' => l10nNow.modelSourceAgentSessions,
+        'claude-code' => l10nNow.modelSourceClaudeCode,
+        'shell-history' => l10nNow.modelSourceShell,
+        'transcripts' => l10nNow.modelSourceTranscripts,
+        'session-notes' => l10nNow.modelSourceSessionNotes,
         _ => source,
       };
 }
@@ -425,10 +427,10 @@ class TokenizerStatus {
 
   /// One line for the index sheet and settings.
   String get label => morphemes
-      ? '형태소 분석 (Kiwi) — 인증서를 → 인증서처럼 조사·어미가 붙은 말도 찾습니다'
+      ? l10nNow.modelTokenizerMorphemes
       : kiwi.installed
-          ? (needsReindex ? 'Kiwi 설치됨 — 처음부터 다시 색인하면 형태소 분석이 켜집니다' : '아직 색인 전 — 다음 색인부터 형태소 분석')
-          : '공백 기준 — 조사·어미가 붙은 말(인증서를)은 검색어(인증서)와 맞지 않습니다';
+          ? (needsReindex ? l10nNow.modelTokenizerNeedsReindex : l10nNow.modelTokenizerNextIndex)
+          : l10nNow.modelTokenizerSimple;
 }
 
 /// The Kiwi library + model as the server found them (`zaevis ext install kiwi` puts them in <상태 폴더>/ext/kiwi).
@@ -481,10 +483,10 @@ class EmbeddingStatus {
   final String? error;
 
   String get label => switch (state) {
-        'ready' => '켜짐 — ${model ?? '로컬 모델'} (${device ?? 'cpu'})',
-        'starting' => '시작 중… 처음에는 모델(1.1GB)을 내려받습니다',
-        'failed' => '실패: ${error ?? ''}',
-        _ => available ? '꺼짐 — 키워드 검색만' : '사용 불가 (minsync 없음)',
+        'ready' => l10nNow.modelEmbeddingReady(model ?? l10nNow.modelEmbeddingLocalModel, device ?? 'cpu'),
+        'starting' => l10nNow.modelEmbeddingStarting,
+        'failed' => l10nNow.modelEmbeddingFailed(error ?? ''),
+        _ => available ? l10nNow.modelEmbeddingOff : l10nNow.modelEmbeddingUnavailable,
       };
 }
 
@@ -727,6 +729,7 @@ class AppSettings {
     this.transcribeSpeed = 'quiet',
     this.theme = 'system',
     this.textScale = 1,
+    this.locale = 'system',
     this.language = 'ko',
     this.transcribeLanguage = 'user',
   });
@@ -756,6 +759,7 @@ class AppSettings {
       transcribeLanguage: _str(j['transcribeLanguage']).isEmpty ? 'user' : _str(j['transcribeLanguage']),
       theme: j['appearance'] is Json ? _str((j['appearance'] as Json)['theme']) : 'system',
       textScale: j['appearance'] is Json && (j['appearance'] as Json)['textScale'] is num ? ((j['appearance'] as Json)['textScale'] as num).toDouble() : 1,
+      locale: switch (j['appearance'] is Json ? (j['appearance'] as Json)['locale'] : null) { 'ko' => 'ko', 'en' => 'en', _ => 'system' },
     );
   }
 
@@ -773,6 +777,9 @@ class AppSettings {
   /// "auto" (whisper detects) or names another code.
   final String language;
   final String transcribeLanguage;
+
+  /// `appearance.locale`: "system" | "ko" | "en".
+  final String locale;
 
   final String dailyAt;
   final bool indexOnInject;
@@ -874,7 +881,7 @@ class AgentInfo {
   bool get needsLogin => available && loggedIn == false;
 
   /// "로그인 필요: 터미널에서 claude login"
-  String get loginNote => '로그인 필요: ${loginHint ?? '터미널에서 로그인'}';
+  String get loginNote => l10nNow.modelLoginNeeded(loginHint ?? l10nNow.modelLoginInTerminal);
 }
 
 /// One stop on the agent rail: ready, writing, skipped for quota, or the one that wrote.
@@ -1114,16 +1121,17 @@ class IndexProgress {
 
   /// "본문 읽는 중 12/40 파일"
   String get label {
-    final files = total != null && scanned != null ? ' $scanned/$total 파일' : '';
-    final emb = synced != null ? ' $synced개' : '';
+    final l = l10nNow;
+    final files = total != null && scanned != null ? ' ${l.modelProgressFiles(scanned!, total!)}' : '';
+    final emb = synced != null ? ' ${l.modelProgressChunks(synced!)}' : '';
     return switch (phase) {
-      'parsed' => '본문 읽는 중$files',
-      'minsync' => '임베딩·색인 중$emb',
-      'datasources' => '커넥터 색인 중',
-      'jikji' => '키워드 색인 정리 중',
-      'everything' || 'fsearch' => '파일 이름 색인 중',
-      'finalizing' => '마무리 중',
-      '' => '준비 중',
+      'parsed' => '${l.modelProgressParsed}$files',
+      'minsync' => '${l.modelProgressEmbedding}$emb',
+      'datasources' => l.modelProgressDatasources,
+      'jikji' => l.modelProgressKeywords,
+      'everything' || 'fsearch' => l.modelProgressFileNames,
+      'finalizing' => l.modelProgressFinalizing,
+      '' => l.modelProgressPreparing,
       _ => phase,
     };
   }
@@ -1281,10 +1289,24 @@ const weekdayPresets = {
   'everyday': weekdayCodes,
 };
 
-String reportKindLabel(String kind) => switch (kind) { 'daily' => '일간', 'weekly' => '주간', 'monthly' => '월간', _ => kind };
+String reportKindLabel(String kind) =>
+    switch (kind) { 'daily' => l10nNow.modelKindDaily, 'weekly' => l10nNow.modelKindWeekly, 'monthly' => l10nNow.modelKindMonthly, _ => kind };
+
+/// The kind inside a sentence ("일간" / "daily").
+String reportKindWord(String kind) =>
+    switch (kind) { 'daily' => l10nNow.modelKindDailyWord, 'weekly' => l10nNow.modelKindWeeklyWord, 'monthly' => l10nNow.modelKindMonthlyWord, _ => kind };
 
 String weekdayLabel(String code) =>
-    const {'mon': '월', 'tue': '화', 'wed': '수', 'thu': '목', 'fri': '금', 'sat': '토', 'sun': '일'}[code] ?? code;
+    switch (code) {
+      'mon' => l10nNow.modelWeekdayMon,
+      'tue' => l10nNow.modelWeekdayTue,
+      'wed' => l10nNow.modelWeekdayWed,
+      'thu' => l10nNow.modelWeekdayThu,
+      'fri' => l10nNow.modelWeekdayFri,
+      'sat' => l10nNow.modelWeekdaySat,
+      'sun' => l10nNow.modelWeekdaySun,
+      _ => code,
+    };
 
 /// ISO week (Mon–Sun) of a day: the Thursday of the week decides the year.
 ({int year, int week}) isoWeekOf(DateTime d) {
@@ -1315,13 +1337,14 @@ class ReportChoice {
     final yesterday = now.subtract(const Duration(days: 1));
     final lastWeek = now.subtract(const Duration(days: 7));
     final lastMonth = DateTime(now.year, now.month - 1, 1);
+    final l = l10nNow;
     return [
-      ReportChoice('오늘', 'daily', dailyPeriod(now)),
-      ReportChoice('어제', 'daily', dailyPeriod(yesterday)),
-      ReportChoice('이번 주', 'weekly', weeklyPeriod(now)),
-      ReportChoice('지난주', 'weekly', weeklyPeriod(lastWeek)),
-      ReportChoice('이번 달', 'monthly', monthlyPeriod(now)),
-      ReportChoice('지난달', 'monthly', monthlyPeriod(lastMonth)),
+      ReportChoice(l.modelToday, 'daily', dailyPeriod(now)),
+      ReportChoice(l.modelYesterday, 'daily', dailyPeriod(yesterday)),
+      ReportChoice(l.modelThisWeek, 'weekly', weeklyPeriod(now)),
+      ReportChoice(l.modelLastWeek, 'weekly', weeklyPeriod(lastWeek)),
+      ReportChoice(l.modelThisMonth, 'monthly', monthlyPeriod(now)),
+      ReportChoice(l.modelLastMonth, 'monthly', monthlyPeriod(lastMonth)),
     ];
   }
 }

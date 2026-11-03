@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import 'common.dart';
 
@@ -82,8 +83,9 @@ class _AddLogDialogState extends State<_AddLogDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     return AlertDialog(
-      title: Text(widget.editing ? '줄 편집' : '한 줄 기록'),
+      title: Text(widget.editing ? l.inputEditLine : l.inputNewLog),
       content: SizedBox(
         width: 520,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -91,7 +93,7 @@ class _AddLogDialogState extends State<_AddLogDialog> {
             controller: _text,
             autofocus: true,
             maxLength: 500,
-            decoration: const InputDecoration(hintText: '무엇을 했고, 왜 그렇게 했는지'),
+            decoration: InputDecoration(hintText: l.inputLogHint),
             onSubmitted: (_) => _save(),
           ),
           if (widget.editing) ...[
@@ -99,11 +101,11 @@ class _AddLogDialogState extends State<_AddLogDialog> {
             Row(children: [
               SizedBox(
                 width: 120,
-                child: TextField(controller: _date, decoration: const InputDecoration(labelText: '날짜', hintText: 'MM-DD')),
+                child: TextField(controller: _date, decoration: InputDecoration(labelText: l.inputDate, hintText: 'MM-DD')),
               ),
               if (widget.entry!.source != null) ...[
                 const SizedBox(width: 12),
-                Expanded(child: Text('정리가 쓴 줄입니다. 출처(${widget.entry!.source})는 그대로 남습니다.', style: Theme.of(context).textTheme.bodySmall)),
+                Expanded(child: Text(l.inputDigestLine(widget.entry!.source!), style: Theme.of(context).textTheme.bodySmall)),
               ],
             ]),
           ],
@@ -119,7 +121,7 @@ class _AddLogDialogState extends State<_AddLogDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _project,
-            decoration: const InputDecoration(labelText: '프로젝트 (선택)', hintText: 'notes'),
+            decoration: InputDecoration(labelText: l.inputProject, hintText: 'notes'),
           ),
           if (widget.projects.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -135,8 +137,8 @@ class _AddLogDialogState extends State<_AddLogDialog> {
         ]),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-        FilledButton(onPressed: _saving ? null : _save, child: const Text('저장')),
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(l.commonCancel)),
+        FilledButton(onPressed: _saving ? null : _save, child: Text(l.commonSave)),
       ],
     );
   }
@@ -166,25 +168,26 @@ Future<String?> showPasteTranscriptDialog(BuildContext context, WorklogApi api) 
           }
         }
 
+        final l = context.l10n;
         return AlertDialog(
-          title: const Text('전사본 붙여넣기'),
+          title: Text(l.inputPasteTranscript),
           content: SizedBox(
             width: 640,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: '제목', hintText: '주간 정리 회의')),
+              TextField(controller: name, decoration: InputDecoration(labelText: l.inputTitle, hintText: l.inputTitleHint)),
               const SizedBox(height: 12),
               TextField(
                 controller: text,
                 minLines: 8,
                 maxLines: 16,
-                decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '전사 서비스에서 복사한 내용을 붙여넣으세요'),
+                decoration: InputDecoration(border: const OutlineInputBorder(), hintText: l.inputPasteHint),
               ),
               if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-            FilledButton(onPressed: saving ? null : save, child: const Text('저장')),
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(l.commonCancel)),
+            FilledButton(onPressed: saving ? null : save, child: Text(l.commonSave)),
           ],
         );
       });

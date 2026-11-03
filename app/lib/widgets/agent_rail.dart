@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../models.dart';
 
 /// The order of subscribed CLIs (OpenRouter last, marked as metered) and what each one did:
@@ -24,7 +25,7 @@ class AgentRail extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 6, bottom: 6),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('서비스 순서', style: t.labelSmall?.copyWith(color: scheme.outline)),
+        Text(context.l10n.railTitle, style: t.labelSmall?.copyWith(color: scheme.outline)),
         const SizedBox(height: 4),
         Wrap(spacing: 4, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children),
       ]),
@@ -40,14 +41,15 @@ class _Stop extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
+    final l = context.l10n;
     final (Color bg, Color fg, String label) = switch (stop.state) {
-      'running' => (scheme.primary, scheme.onPrimary, '${stop.title} · 작성 중'),
-      'wrote' => (scheme.primaryContainer, scheme.onPrimaryContainer, '${stop.title} · 작성'),
-      'quota' => (scheme.errorContainer, scheme.onErrorContainer, '${stop.title} · 할당량'),
-      'error' => (scheme.errorContainer, scheme.onErrorContainer, '${stop.title} · 실패'),
-      'login' => (scheme.errorContainer.withValues(alpha: 0.5), scheme.onErrorContainer, '${stop.title} · 로그인'),
-      'off' => (scheme.surfaceContainerHighest, scheme.outline, stop.metered ? '${stop.title} · 사용량' : stop.title),
-      _ => (scheme.surfaceContainerHighest, scheme.onSurface, stop.metered ? '${stop.title} · 사용량' : stop.title),
+      'running' => (scheme.primary, scheme.onPrimary, l.railRunning(stop.title)),
+      'wrote' => (scheme.primaryContainer, scheme.onPrimaryContainer, l.railWrote(stop.title)),
+      'quota' => (scheme.errorContainer, scheme.onErrorContainer, l.railQuota(stop.title)),
+      'error' => (scheme.errorContainer, scheme.onErrorContainer, l.railError(stop.title)),
+      'login' => (scheme.errorContainer.withValues(alpha: 0.5), scheme.onErrorContainer, l.railLogin(stop.title)),
+      'off' => (scheme.surfaceContainerHighest, scheme.outline, stop.metered ? l.railMetered(stop.title) : stop.title),
+      _ => (scheme.surfaceContainerHighest, scheme.onSurface, stop.metered ? l.railMetered(stop.title) : stop.title),
     };
     final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

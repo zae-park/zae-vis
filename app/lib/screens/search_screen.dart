@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../recording_trail.dart';
 import '../widgets/common.dart';
@@ -15,13 +16,17 @@ import 'file_screen.dart';
 
 /// Period filter for search hits, by the date in the hit's path.
 enum SearchPeriod {
-  all('전체'),
-  week('7일'),
-  month('30일'),
-  thisMonth('이번 달');
+  all,
+  week,
+  month,
+  thisMonth;
 
-  const SearchPeriod(this.label);
-  final String label;
+  String label(AppLocalizations l) => switch (this) {
+        all => l.searchPeriodAll,
+        week => l.searchPeriodWeek,
+        month => l.searchPeriodMonth,
+        thisMonth => l.searchPeriodThisMonth,
+      };
 
   /// Whether a hit dated [date] ("YYYY-MM-DD" or "YYYY-MM"; null = undated) passes, as of [now].
   bool accepts(String? date, DateTime now) {
@@ -160,7 +165,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
         .where((h) => _period.accepts(h.context?.date, now))
         .toList();
     return Scaffold(
-      appBar: AppBar(title: Text('"${widget.query}" 검색 결과')),
+      appBar: AppBar(title: Text(context.l10n.searchResultsTitle(widget.query))),
       body: Readable(
         child: Column(children: [
           const SizedBox(height: 8),
@@ -207,7 +212,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                 _kinds.clear();
                 _period = SearchPeriod.all;
               }),
-              child: const Text('필터 지우기'),
+              child: Text(context.l10n.searchClearFilters),
             ),
           ],
         ]),
@@ -246,7 +251,7 @@ class _Filters extends StatelessWidget {
             if (kinds.isNotEmpty) Container(width: 1, height: 20, color: scheme.outlineVariant, margin: const EdgeInsets.symmetric(horizontal: 4)),
             for (final p in SearchPeriod.values)
               ChoiceChip(
-                label: Text(p.label),
+                label: Text(p.label(context.l10n)),
                 selected: period == p,
                 visualDensity: VisualDensity.compact,
                 onSelected: (_) => onPeriod(p),
@@ -255,7 +260,7 @@ class _Filters extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.only(left: 8, top: 8),
-          child: Text(shown == total ? '$total건' : '$shown / $total건', style: t.labelMedium?.copyWith(color: scheme.outline)),
+          child: Text(shown == total ? context.l10n.searchCount(total) : context.l10n.searchCountOf(shown, total), style: t.labelMedium?.copyWith(color: scheme.outline)),
         ),
       ]),
     );
@@ -271,10 +276,10 @@ class SearchErrorNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      Text(result.needsRefresh ? '아직 색인이 없습니다. 색인을 먼저 만들어 주세요.' : (result.errorMessage ?? '검색에 실패했습니다')),
+      Text(result.needsRefresh ? context.l10n.searchNoIndex : (result.errorMessage ?? context.l10n.searchFailed)),
       if (onOpenIndex != null) ...[
         const SizedBox(height: 10),
-        FilledButton.tonalIcon(onPressed: onOpenIndex, icon: const Icon(Icons.sync, size: 18), label: const Text('색인 상태 열기')),
+        FilledButton.tonalIcon(onPressed: onOpenIndex, icon: const Icon(Icons.sync, size: 18), label: Text(context.l10n.searchOpenIndex)),
       ],
     ]);
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -15,7 +16,7 @@ class ProjectsScreen extends StatelessWidget {
     return AsyncView<List<Project>>(
       load: api.projects,
       builder: (context, projects, reload) {
-        if (projects.isEmpty) return const EmptyPane('projects/ 폴더에 프로젝트 파일이 없습니다.');
+        if (projects.isEmpty) return EmptyPane(context.l10n.projectsEmpty);
         return Readable(
           child: RefreshIndicator(
             onRefresh: () async => reload(),

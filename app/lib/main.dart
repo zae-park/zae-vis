@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'api.dart';
 import 'app_prefs.dart';
 import 'backend/backend.dart';
+import 'l10n/l10n.dart';
 import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
 import 'screens/memory_screen.dart';
@@ -37,7 +39,7 @@ class ZaevisApp extends StatefulWidget {
   /// Native menu bar and the system-wide hotkey (desktop builds only; tests turn it off).
   final bool desktopIntegration;
 
-  /// Theme and text size; the app makes its own, tests may pass one.
+  /// Theme, text size and language; the app makes its own, tests may pass one.
   final AppPrefs? prefs;
 
   @override
@@ -57,10 +59,17 @@ class _ZaevisAppState extends State<ZaevisApp> {
         theme: ZaevisTheme.of(Brightness.light),
         darkTheme: ZaevisTheme.of(Brightness.dark),
         themeMode: _prefs.themeMode,
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_prefs.textScale)),
-          child: child!,
-        ),
+        locale: _prefs.materialLocale,
+        supportedLocales: appLocales,
+        localizationsDelegates: const [AppLocalizations.delegate, ...GlobalMaterialLocalizations.delegates],
+        localeListResolutionCallback: (system, _) => resolveAppLocale('system', system ?? const []),
+        builder: (context, child) {
+          l10nNow = AppLocalizations.of(context)!;
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_prefs.textScale)),
+            child: child!,
+          );
+        },
         home: widget.backend == null
             ? HomeShell(api: widget.api, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs)
             : _BootGate(api: widget.api, backend: widget.backend!, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs),
@@ -99,10 +108,10 @@ class _BootGateState extends State<_BootGate> {
       future: _start(),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('zaevis 준비 중…'),
+          return Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(context.l10n.homeStarting),
           ])));
         }
         if (snap.hasError) {
@@ -113,11 +122,11 @@ class _BootGateState extends State<_BootGate> {
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.error_outline, size: 40),
                   const SizedBox(height: 12),
-                  Text('서버를 시작하지 못했습니다.\n${snap.error}', textAlign: TextAlign.center),
+                  Text(context.l10n.homeStartFailed('${snap.error}'), textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  const Text('로그: ~/.zaevis/server.log'),
+                  Text(context.l10n.homeServerLog('~/.zaevis/server.log')),
                   const SizedBox(height: 16),
-                  FilledButton(onPressed: () => setState(() => _starting = null), child: const Text('다시 시도')),
+                  FilledButton(onPressed: () => setState(() => _starting = null), child: Text(context.l10n.commonRetry)),
                 ]),
               ),
             ),
@@ -137,12 +146,14 @@ class _Dest {
   final String hint;
 }
 
-const _dests = [
-  _Dest('검색', Icons.search, Icons.search, '기록을 찾고, 묻고, 파일을 내려받습니다'),
-  _Dest('메모리', Icons.memory_outlined, Icons.memory, '기록 · 하루 · 프로젝트 상태 · 수집된 원본 — 이 앱이 아는 것 전부'),
-  _Dest('리포트', Icons.summarize_outlined, Icons.summarize, '일간 · 주간 · 월간 리포트'),
-  _Dest('연결', Icons.hub_outlined, Icons.hub, '데이터소스와 외부 서비스 연결, inbox, 바로 넣기'),
-];
+List<_Dest> _dests(AppLocalizations l) => [
+      _Dest(l.homeTabSearch, Icons.search, Icons.search, l.homeTabSearchHint),
+      _Dest(l.homeTabMemory, Icons.memory_outlined, Icons.memory, l.homeTabMemoryHint),
+      _Dest(l.homeTabReports, Icons.summarize_outlined, Icons.summarize, l.homeTabReportsHint),
+      _Dest(l.homeTabConnect, Icons.hub_outlined, Icons.hub, l.homeTabConnectHint),
+    ];
+
+const _destCount = 4;
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true, this.prefs});
@@ -219,7 +230,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _selectTab(int i) {
-    if (i >= 0 && i < _dests.length) setState(() => _index = i);
+    if (i >= 0 && i < _destCount) setState(() => _index = i);
   }
 
   void _openProject(String slug) => openProject(context, api, slug);
@@ -235,7 +246,7 @@ class _HomeShellState extends State<HomeShell> {
     if (!mounted) return;
     if (await showAddLogDialog(context, api, projects: projects)) {
       if (!mounted) return;
-      toast(context, '로그에 추가했습니다');
+      toast(context, context.l10n.homeLogAdded);
       setState(() => _generation++);
     }
   }
@@ -264,22 +275,24 @@ class _HomeShellState extends State<HomeShell> {
     );
     if (!_native || !AppShortcuts.nativeMenu) return shell;
     // macOS menu bar: the same actions, discoverable with their shortcuts (Windows/Linux: shortcuts only)
+    final l = context.l10n;
+    final dests = _dests(l);
     return PlatformMenuBar(
       menus: [
         PlatformMenu(label: 'zaevis', menus: [
-          PlatformMenuItem(label: '설정…', shortcut: AppShortcuts.settings, onSelected: _openSettings),
+          PlatformMenuItem(label: l.homeMenuSettings, shortcut: AppShortcuts.settings, onSelected: _openSettings),
           const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
           const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
         ]),
-        PlatformMenu(label: '기록', menus: [
-          PlatformMenuItem(label: '한 줄 기록', shortcut: AppShortcuts.newLog, onSelected: _addLog),
-          PlatformMenuItem(label: '녹음', shortcut: AppShortcuts.record, onSelected: _record),
+        PlatformMenu(label: l.homeMenuLog, menus: [
+          PlatformMenuItem(label: l.homeNewLog, shortcut: AppShortcuts.newLog, onSelected: _addLog),
+          PlatformMenuItem(label: l.homeRecord, shortcut: AppShortcuts.record, onSelected: _record),
         ]),
-        PlatformMenu(label: '보기', menus: [
-          PlatformMenuItem(label: '검색', shortcut: AppShortcuts.search, onSelected: _focusSearch),
+        PlatformMenu(label: l.homeMenuView, menus: [
+          PlatformMenuItem(label: l.commonSearch, shortcut: AppShortcuts.search, onSelected: _focusSearch),
           PlatformMenuItemGroup(members: [
-            for (var i = 0; i < _dests.length; i++)
-              PlatformMenuItem(label: _dests[i].label, shortcut: AppShortcuts.tabs[i], onSelected: () => _selectTab(i)),
+            for (var i = 0; i < dests.length; i++)
+              PlatformMenuItem(label: dests[i].label, shortcut: AppShortcuts.tabs[i], onSelected: () => _selectTab(i)),
           ]),
         ]),
       ],
@@ -291,7 +304,7 @@ class _HomeShellState extends State<HomeShell> {
     final wide = MediaQuery.sizeOf(context).width >= 760;
     final body = KeyedSubtree(key: ValueKey('$_index/$_generation'), child: _screen());
     final fab = _index == 1
-        ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: const Text('한 줄 기록'))
+        ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: Text(context.l10n.homeNewLog))
         : null;
     final scaffold = wide ? _wideScaffold(context, body, fab) : _narrowScaffold(context, body, fab);
     return ListenableBuilder(
@@ -337,7 +350,7 @@ class _HomeShellState extends State<HomeShell> {
           ),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _PageHeader(dest: _dests[_index]),
+              _PageHeader(dest: _dests(context.l10n)[_index]),
               Expanded(child: body),
             ]),
           ),
@@ -346,13 +359,15 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _narrowScaffold(BuildContext context, Widget body, Widget? fab) {
+    final l = context.l10n;
+    final dests = _dests(l);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_dests[_index].label),
+        title: Text(dests[_index].label),
         actions: [
-          IconButton(tooltip: '녹음', icon: const Icon(Icons.mic_none), onPressed: _record),
-          IconButton(tooltip: '검색 색인', icon: const Icon(Icons.storage_outlined), onPressed: () => IndexSheet.show(context, api, backend: widget.backend)),
-          IconButton(tooltip: '설정', icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
+          IconButton(tooltip: l.homeRecord, icon: const Icon(Icons.mic_none), onPressed: _record),
+          IconButton(tooltip: l.homeSearchIndex, icon: const Icon(Icons.storage_outlined), onPressed: () => IndexSheet.show(context, api, backend: widget.backend)),
+          IconButton(tooltip: l.commonSettings, icon: const Icon(Icons.settings_outlined), onPressed: _openSettings),
         ],
       ),
       floatingActionButton: fab,
@@ -361,7 +376,7 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [
-          for (final d in _dests)
+          for (final d in dests)
             NavigationDestination(icon: Icon(d.icon), selectedIcon: Icon(d.selectedIcon), label: d.label),
         ],
       ),
@@ -382,6 +397,8 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
+    final l = context.l10n;
+    final dests = _dests(l);
     return Container(
       width: 212,
       decoration: BoxDecoration(color: scheme.surfaceContainerLow, border: Border(right: BorderSide(color: scheme.outlineVariant))),
@@ -402,19 +419,19 @@ class _Sidebar extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('zaevis', style: t.titleMedium?.copyWith(letterSpacing: -0.3, height: 1.1), maxLines: 1, overflow: TextOverflow.fade, softWrap: false),
-                Text('작업 기록 · 지식', style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(l.homeTagline, style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
               ]),
             ),
           ]),
         ),
-        for (var i = 0; i < _dests.length; i++) _NavItem(dest: _dests[i], selected: i == index, onTap: () => onSelect(i)),
+        for (var i = 0; i < dests.length; i++) _NavItem(dest: dests[i], selected: i == index, onTap: () => onSelect(i)),
         const Spacer(),
-        Tooltip(message: '녹음', child: FilledButton.tonalIcon(onPressed: onRecord, icon: const Icon(Icons.mic, size: 18), label: const Text('녹음'))),
+        Tooltip(message: l.homeRecord, child: FilledButton.tonalIcon(onPressed: onRecord, icon: const Icon(Icons.mic, size: 18), label: Text(l.homeRecord))),
         const SizedBox(height: 6),
         Row(children: [
-          Expanded(child: _SmallAction(icon: Icons.storage_outlined, label: '색인', onTap: onIndex)),
+          Expanded(child: _SmallAction(icon: Icons.storage_outlined, label: l.homeIndex, onTap: onIndex)),
           const SizedBox(width: 6),
-          Expanded(child: _SmallAction(icon: Icons.settings_outlined, label: '설정', onTap: onSettings)),
+          Expanded(child: _SmallAction(icon: Icons.settings_outlined, label: l.commonSettings, onTap: onSettings)),
         ]),
       ]),
     );
@@ -475,7 +492,7 @@ class _SmallAction extends StatelessWidget {
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(icon, size: 18, color: scheme.onSurfaceVariant),
               const SizedBox(width: 6),
-              Text(label, style: t.labelMedium),
+              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.labelMedium)),
             ]),
           ),
         ),

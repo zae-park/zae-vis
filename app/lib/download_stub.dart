@@ -1,3 +1,4 @@
 import 'api.dart';
+import 'l10n/l10n.dart';
 
-Future<String?> saveWorklogFile(WorklogApi api, String path) async => throw UnsupportedError('이 환경에서는 파일을 저장할 수 없습니다');
+Future<String?> saveWorklogFile(WorklogApi api, String path) async => throw UnsupportedError(l10nNow.apiSaveUnsupported);

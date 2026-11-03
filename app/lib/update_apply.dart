@@ -4,6 +4,8 @@
 
 import 'dart:io';
 
+import 'l10n/l10n.dart';
+
 /// `…/zaevis.app/Contents/MacOS/zaevis` → `…/zaevis.app`. Null for a dev binary.
 String? macAppBundle(String executable) {
   final sep = Platform.pathSeparator;
@@ -33,12 +35,12 @@ Future<void> replaceMacApp({
 }) async {
   final runProc = run ?? Process.run;
   final src = appInMount(mount);
-  if (src == null) throw Exception('이미지 안에서 zaevis.app을 찾지 못했습니다.');
+  if (src == null) throw Exception(l10nNow.updateAppNotInImage);
   final copied = await runProc('ditto', [src.path, appBundle]);
-  if (copied.exitCode != 0) throw Exception('앱을 교체하지 못했습니다.\n${copied.stderr}'.trim());
+  if (copied.exitCode != 0) throw Exception('${l10nNow.updateReplaceFailed}\n${copied.stderr}'.trim());
   final cleared = await runProc('xattr', ['-dr', 'com.apple.quarantine', appBundle]);
   if (cleared.exitCode != 0) {
-    throw Exception('격리 표시를 지우지 못했습니다. 터미널에서 실행하세요.\n${quarantineClearCommand(appBundle)}\n${cleared.stderr}'.trim());
+    throw Exception('${l10nNow.updateQuarantineFailed}\n${quarantineClearCommand(appBundle)}\n${cleared.stderr}'.trim());
   }
 }
 
@@ -60,7 +62,7 @@ Future<void> installMacDmg({
   try {
     await runProc('xattr', ['-dr', 'com.apple.quarantine', dmg.path]);
     final attached = await runProc('hdiutil', ['attach', dmg.path, '-nobrowse', '-readonly', '-mountpoint', mount.path]);
-    if (attached.exitCode != 0) throw Exception('디스크 이미지를 열지 못했습니다.\n${attached.stderr}'.trim());
+    if (attached.exitCode != 0) throw Exception('${l10nNow.updateMountFailed}\n${attached.stderr}'.trim());
     await replaceMacApp(mount: mount, appBundle: appBundle, run: runProc);
   } finally {
     final detached = await runProc('hdiutil', ['detach', mount.path, '-quiet']);
@@ -85,7 +87,7 @@ Future<void> downloadTo(Uri url, File dest, void Function(double? progress) onPr
     req.headers.set(HttpHeaders.userAgentHeader, 'zaevis');
     req.headers.set(HttpHeaders.acceptHeader, 'application/octet-stream');
     final res = await req.close();
-    if (res.statusCode != 200) throw Exception('설치 파일을 받지 못했습니다 (${res.statusCode})');
+    if (res.statusCode != 200) throw Exception(l10nNow.updateDownloadFailed(res.statusCode));
     final total = res.contentLength;
     var got = 0;
     dest.parent.createSync(recursive: true);

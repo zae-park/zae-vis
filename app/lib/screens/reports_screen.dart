@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
@@ -51,7 +52,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<Report> Function() _loader() {
     final kind = _kind;
     final period = _period;
-    return () => period == null ? Future.error(ApiException(404, '리포트가 없습니다')) : widget.api.report(kind, period);
+    return () => period == null ? Future.error(ApiException(404, l10nNow.reportsNone)) : widget.api.report(kind, period);
   }
 
   Future<void> _refresh({bool initial = false, ReportRunning? justFinished}) async {
@@ -166,7 +167,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           _MakeNowButton(now: _now, enabled: running == null, onPick: _run),
           const SizedBox(width: 4),
           IconButton(
-            tooltip: '리포트 설정',
+            tooltip: context.l10n.reportsSettings,
             isSelected: _settingsOpen,
             icon: const Icon(Icons.tune),
             onPressed: () => setState(() => _settingsOpen = !_settingsOpen),
@@ -190,7 +191,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _body(List<ReportEntry> entries, bool wide, ReportRunning? running, ReportRun? failedHere, bool hasFile) {
     if (entries.isEmpty) {
       return EmptyPane(
-        '아직 ${reportKindLabel(_kind)} 리포트가 없습니다.\n"지금 만들기"로 바로 만들거나, 설정(⚙︎)에서 요일을 켜 두면 매일 수집 뒤 자동으로 만듭니다.',
+        context.l10n.reportsEmpty(reportKindWord(_kind)),
         icon: Icons.summarize_outlined,
       );
     }
@@ -218,7 +219,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             isExpanded: true,
             items: [
               for (final e in entries)
-                DropdownMenuItem(value: e.period, child: Text(e.period == unavailable ? '${e.period} · 서비스 없음' : e.period)),
+                DropdownMenuItem(value: e.period, child: Text(e.period == unavailable ? context.l10n.reportsPeriodNoService(e.period) : e.period)),
             ],
             onChanged: (p) => _select(_kind, p),
           ),
@@ -260,7 +261,7 @@ class _MakeNowButton extends StatelessWidget {
       builder: (context, controller, _) => FilledButton.tonalIcon(
         onPressed: enabled ? () => controller.isOpen ? controller.close() : controller.open() : null,
         icon: const Icon(Icons.auto_awesome, size: 18),
-        label: const Text('지금 만들기'),
+        label: Text(context.l10n.reportsMakeNow),
       ),
     );
   }
@@ -303,8 +304,8 @@ class _UnavailableCard extends StatelessWidget {
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(Icons.error_outline, color: scheme.error),
         const SizedBox(width: 10),
-        Expanded(child: Text(_noService ? '사용 가능한 서비스가 없었습니다' : '리포트를 만들지 못했습니다', style: t.titleSmall)),
-        TextButton.icon(onPressed: onRemake, icon: const Icon(Icons.refresh, size: 16), label: const Text('다시 만들기')),
+        Expanded(child: Text(_noService ? context.l10n.reportsNoServiceWas : context.l10n.reportsFailed, style: t.titleSmall)),
+        TextButton.icon(onPressed: onRemake, icon: const Icon(Icons.refresh, size: 16), label: Text(context.l10n.reportsRemake)),
       ]),
       if (run.error != null && run.error!.isNotEmpty) ...[
         const SizedBox(height: 6),
@@ -329,13 +330,13 @@ class _AgentLine extends StatelessWidget {
     final String text;
     final bool warn;
     if (chosen != null) {
-      text = '리포트는 ${chosen.title}가 씁니다 · ${chosen.detail}';
+      text = context.l10n.reportsWrittenBy(chosen.title, chosen.detail);
       warn = false;
     } else if (signedOut.isNotEmpty) {
       text = signedOut.map((a) => '${a.title}: ${a.loginNote}').join(' · ');
       warn = true;
     } else {
-      text = '쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.';
+      text = context.l10n.reportsNoAgent;
       warn = true;
     }
     return Padding(
@@ -355,7 +356,7 @@ class _RunningBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('${reportKindLabel(running.kind)} 리포트 ${running.period} 만드는 중… ${running.agent == null ? '' : '(${running.agent})'} 수십 초에서 몇 분 걸립니다.', style: t.bodySmall),
+        Text(context.l10n.reportsRunning(reportKindWord(running.kind), running.period, running.agent == null ? '' : '(${running.agent})'), style: t.bodySmall),
         const SizedBox(height: 6),
         const LinearProgressIndicator(),
       ]),
@@ -382,7 +383,7 @@ class _PeriodList extends StatelessWidget {
             selected: e.period == selected,
             title: Text(e.period),
             subtitle: Text(
-              e.period == unavailable ? '사용 가능한 서비스 없음' : (e.createdAt == null ? (e.agent ?? '정리') : '${e.createdAt!.toLocal().toString().substring(0, 16)}${e.agent == null ? '' : ' · ${e.agent}'}'),
+              e.period == unavailable ? context.l10n.reportsNoService : (e.createdAt == null ? (e.agent ?? context.l10n.reportsDigest) : '${e.createdAt!.toLocal().toString().substring(0, 16)}${e.agent == null ? '' : ' · ${e.agent}'}'),
               style: t.bodySmall,
             ),
             onTap: () => onSelect(e.period),
@@ -415,7 +416,7 @@ class _ReportBody extends StatelessWidget {
                   style: t.bodySmall?.copyWith(color: scheme.outline),
                 ),
               ),
-              TextButton.icon(onPressed: onRemake, icon: const Icon(Icons.refresh, size: 16), label: const Text('다시 만들기')),
+              TextButton.icon(onPressed: onRemake, icon: const Icon(Icons.refresh, size: 16), label: Text(context.l10n.reportsRemake)),
             ]),
             const SizedBox(height: 4),
             MarkdownView(r.markdown, onLink: onOpenProject),
@@ -436,11 +437,12 @@ class _SettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final preset = settings.dailyPreset;
+    final l = context.l10n;
     return Panel(children: [
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
-        title: const Text('일간 리포트'),
-        subtitle: Text('고른 요일의 하루를 그날 수집 뒤에 정리합니다 (아침에 돌면 전날).', style: t.bodySmall),
+        title: Text(l.reportsDaily),
+        subtitle: Text(l.reportsDailyHint, style: t.bodySmall),
         value: settings.dailyEnabled,
         onChanged: (v) => onSave(() => api.updateReportSettings(dailyEnabled: v)),
       ),
@@ -458,7 +460,7 @@ class _SettingsPanel extends StatelessWidget {
               },
             ),
           const SizedBox(width: 10),
-          for (final p in const [('weekdays', '주중'), ('weekend', '주말'), ('everyday', '매일')])
+          for (final p in [('weekdays', l.reportsWeekdays), ('weekend', l.reportsWeekend), ('everyday', l.reportsEveryday)])
             ChoiceChip(
               label: Text(p.$2),
               selected: preset == p.$1,
@@ -469,25 +471,25 @@ class _SettingsPanel extends StatelessWidget {
       ),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
-        title: const Text('주간 리포트'),
-        subtitle: Text('고른 요일에 그 전날이 든 주(월~일)를 정리합니다. 월요일이면 지난주.', style: t.bodySmall),
+        title: Text(l.reportsWeekly),
+        subtitle: Text(l.reportsWeeklyHint, style: t.bodySmall),
         value: settings.weeklyEnabled,
         onChanged: (v) => onSave(() => api.updateReportSettings(weeklyEnabled: v)),
         secondary: DropdownButton<String>(
           value: settings.weeklyDay,
-          items: [for (final d in weekdayCodes) DropdownMenuItem(value: d, child: Text('${weekdayLabel(d)}요일'))],
+          items: [for (final d in weekdayCodes) DropdownMenuItem(value: d, child: Text(l.reportsWeekdayName(weekdayLabel(d))))],
           onChanged: (d) => d == null ? null : onSave(() => api.updateReportSettings(weeklyDay: d)),
         ),
       ),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
-        title: const Text('월간 리포트'),
-        subtitle: Text('매달 고른 날에 지난달을 정리합니다 (summaries/YYYY-MM.md, 월간 정리 자리).', style: t.bodySmall),
+        title: Text(l.reportsMonthly),
+        subtitle: Text(l.reportsMonthlyHint, style: t.bodySmall),
         value: settings.monthlyEnabled,
         onChanged: (v) => onSave(() => api.updateReportSettings(monthlyEnabled: v)),
         secondary: DropdownButton<int>(
           value: settings.monthlyDay.clamp(1, 28),
-          items: [for (var d = 1; d <= 28; d++) DropdownMenuItem(value: d, child: Text('$d일'))],
+          items: [for (var d = 1; d <= 28; d++) DropdownMenuItem(value: d, child: Text(l.reportsMonthDay(d)))],
           onChanged: (d) => d == null ? null : onSave(() => api.updateReportSettings(monthlyDay: d)),
         ),
       ),

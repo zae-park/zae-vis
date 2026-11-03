@@ -272,7 +272,19 @@ test("PUT /settings appearance keeps only known themes and text sizes", async ()
   calls.length = 0;
   await call("PUT", "/api/settings", { appearance: { theme: "dark", textScale: 1.2 } });
   await call("PUT", "/api/settings", { appearance: { theme: "neon", textScale: 7 } });
-  assert.deepEqual(calls, ['appearance:{"theme":"dark","textScale":1.2}', 'appearance:{"theme":"system","textScale":1}']);
+  assert.deepEqual(calls, ['appearance:{"theme":"dark","textScale":1.2,"locale":"system"}', 'appearance:{"theme":"system","textScale":1,"locale":"system"}']);
+});
+
+test("PUT /settings appearance keeps the app language only when it is ko or en", async () => {
+  calls.length = 0;
+  await call("PUT", "/api/settings", { appearance: { theme: "light", textScale: 1, locale: "en" } });
+  await call("PUT", "/api/settings", { appearance: { theme: "light", textScale: 1, locale: "ko" } });
+  await call("PUT", "/api/settings", { appearance: { theme: "light", textScale: 1, locale: "fr" } });
+  assert.deepEqual(calls, [
+    'appearance:{"theme":"light","textScale":1,"locale":"en"}',
+    'appearance:{"theme":"light","textScale":1,"locale":"ko"}',
+    'appearance:{"theme":"light","textScale":1,"locale":"system"}',
+  ]);
 });
 
 test("PUT /settings takes a language code, and auto/user/a code for transcription", async () => {

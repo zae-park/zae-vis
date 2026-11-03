@@ -1,3 +1,4 @@
+import 'l10n/l10n.dart';
 import 'models.dart';
 
 /// Where one recording is on the way from the microphone to a memory citation.
@@ -26,6 +27,7 @@ List<RecordingTrail> recordingTrails({
   String? collectLine,
   int limit = 3,
 }) {
+  final l = l10nNow;
   final items = <RecordingTrail>[];
   final covered = <String>{};
 
@@ -34,7 +36,7 @@ List<RecordingTrail> recordingTrails({
     covered.add(live.$1);
     items.add(RecordingTrail(
       file: live.$1,
-      sentence: live.$2 == null || live.$2!.isEmpty ? '인식 중' : '인식 중 · ${live.$2}',
+      sentence: live.$2 == null || live.$2!.isEmpty ? l.trailRecognizing : l.trailRecognizingDetail(live.$2!),
       stage: RecordingStage.running,
     ));
   }
@@ -47,7 +49,7 @@ List<RecordingTrail> recordingTrails({
       covered.add(job.file);
       items.add(RecordingTrail(
         file: job.file,
-        sentence: job.state == 'queued' ? '대기 · 곧 화자를 붙입니다' : '화자 붙이는 중 · ${job.line ?? ''}',
+        sentence: job.state == 'queued' ? l.trailSpeakersQueued : l.trailSpeakersRunning(job.line ?? ''),
         stage: job.state == 'queued' ? RecordingStage.queued : RecordingStage.running,
         openPath: 'inbox/transcripts/${job.file}',
       ));
@@ -57,7 +59,7 @@ List<RecordingTrail> recordingTrails({
       covered.add(job.file);
       items.add(RecordingTrail(
         file: job.file,
-        sentence: job.state == 'queued' ? '대기 · 곧 전사를 시작합니다' : '인식 중 · ${job.line ?? '전사 중'}',
+        sentence: job.state == 'queued' ? l.trailQueued : l.trailRecognizingDetail(job.line ?? l.trailTranscribing),
         stage: job.state == 'queued' ? RecordingStage.queued : RecordingStage.running,
         watch: true,
       ));
@@ -65,7 +67,7 @@ List<RecordingTrail> recordingTrails({
       covered.add(job.file);
       items.add(RecordingTrail(
         file: job.file,
-        sentence: '전사 실패 · ${job.error ?? '다시 시도할 수 있습니다'}',
+        sentence: l.trailFailed(job.error ?? l.trailCanRetry),
         stage: RecordingStage.failed,
       ));
     }
@@ -74,7 +76,7 @@ List<RecordingTrail> recordingTrails({
   for (final audio in inbox.audio) {
     if (covered.contains(audio.name)) continue;
     covered.add(audio.name);
-    items.add(RecordingTrail(file: audio.name, sentence: '대기 · 다음 수집에서 전사됩니다', stage: RecordingStage.queued));
+    items.add(RecordingTrail(file: audio.name, sentence: l.trailNextCollect, stage: RecordingStage.queued));
   }
 
   for (final transcript in inbox.transcripts) {
@@ -99,7 +101,7 @@ List<RecordingTrail> recordingTrails({
 
 /// One line for a file screen. Processed transcripts already went through review.
 String? recordingSentenceForPath(String path, {Inbox? inbox, IndexStatus? index}) {
-  if (path.contains('processed/transcripts/')) return '출처 연결 · 정리에 반영된 전사입니다.';
+  if (path.contains('processed/transcripts/')) return l10nNow.trailLinked;
   if (!path.contains('inbox/transcripts/')) return null;
   final name = path.split('/').last;
   final file = inbox?.transcripts.where((t) => t.name == name);
@@ -118,9 +120,9 @@ RecordingStage transcriptStage(InboxFile file, IndexStatus? index) {
 
 String transcriptSentence(InboxFile file, IndexStatus? index) {
   return switch (transcriptStage(file, index)) {
-    RecordingStage.indexing => '색인 중 · 끝나면 검색됩니다',
-    RecordingStage.waitingDigest => '검색 가능 · 정리 대기. 주간 정리 뒤에 메모리 출처가 됩니다',
-    _ => '글 저장 · 다음 색인에 들어갑니다',
+    RecordingStage.indexing => l10nNow.trailIndexing,
+    RecordingStage.waitingDigest => l10nNow.trailWaitingDigest,
+    _ => l10nNow.trailSaved,
   };
 }
 
@@ -133,18 +135,19 @@ String emptySearchNote({
   IndexStatus? index,
   Inbox? inbox,
 }) {
+  final l = l10nNow;
   if (total > 0 && shown == 0 && filtered) {
-    return '전체 $total건 중 이 기간·출처에는 없습니다.';
+    return l.trailFilteredOut(total);
   }
-  if (index?.refreshing == true) return '색인 중입니다. 끝나면 다시 찾습니다.';
+  if (index?.refreshing == true) return l.trailSearchIndexing;
   final pending = _pendingTranscripts(inbox, index);
   if (pending.isNotEmpty) {
     final names = pending.take(3).map((f) => f.name).join(', ');
-    final more = pending.length > 3 ? ' 외 ${pending.length - 3}개' : '';
-    return '전사 ${pending.length}개가 방금 저장됐습니다. 색인이 끝나면 검색됩니다. $names$more';
+    final more = pending.length > 3 ? ' ${l.trailMore(pending.length - 3)}' : '';
+    return '${l.trailPendingTranscripts(pending.length)} $names$more';
   }
-  if (_latinQuery(query)) return '"$query"에 대한 결과가 없습니다. 기록은 한글로 남아 있는 경우가 많습니다. 한글로 물어보세요.';
-  return '"$query"에 대한 결과가 없습니다.';
+  if (_latinQuery(query)) return l.trailNoResultsLatin(query);
+  return l.trailNoResults(query);
 }
 
 List<InboxFile> _pendingTranscripts(Inbox? inbox, IndexStatus? index) {

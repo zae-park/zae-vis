@@ -544,7 +544,7 @@ void main() {
     await tester.tap(find.text('내려받기'));
     await tester.pumpAndSettle();
     expect(saved.last, 'sources/git/2026-10-09.md');
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('답 받기'));
@@ -656,7 +656,7 @@ void main() {
     await tester.tap(find.text('원문 열기'));
     await tester.pumpAndSettle();
     expect(find.text('2026-10-09.md'), findsOneWidget); // file screen title
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     // a follow-up stays in the same conversation
@@ -833,20 +833,52 @@ void main() {
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('시스템'));
+    await tester.tap(find.text('시스템').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('어둡게').last);
     await tester.pumpAndSettle();
     expect(prefs.themeMode, ThemeMode.dark);
     expect(Theme.of(tester.element(find.text('테마'))).brightness, Brightness.dark);
-    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.0}});
+    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.0, 'locale': 'system'}});
 
     await tester.tap(find.text('기본'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('크게').last);
     await tester.pumpAndSettle();
     expect(MediaQuery.textScalerOf(tester.element(find.text('테마'))).scale(10), closeTo(12, 0.01));
-    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.2}});
+    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.2, 'locale': 'system'}});
+  });
+
+  testWidgets('choosing English relabels the app at once and saves the language on the server', (tester) async {
+    tester.view.physicalSize = const Size(1300, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final prefs = AppPrefs();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), prefs: prefs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byType(SettingsScreen), matching: find.text('화면 언어')), findsOneWidget);
+
+    await tester.tap(find.text('시스템').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('English').last);
+    await tester.pumpAndSettle();
+    expect(prefs.locale, 'en');
+    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'system', 'textScale': 1.0, 'locale': 'en'}});
+    final settings = find.byType(SettingsScreen);
+    expect(find.descendant(of: settings, matching: find.text('Display language')), findsOneWidget);
+    expect(find.descendant(of: settings, matching: find.text('Theme')), findsOneWidget);
+    expect(find.descendant(of: settings, matching: find.text('화면 언어')), findsNothing);
+    expect(find.descendant(of: settings, matching: find.text('테마')), findsNothing);
+
+    await tester.tap(find.text('English').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('한국어').last);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: settings, matching: find.text('테마')), findsOneWidget);
+    expect(jsonDecode(posted.last.body)['appearance']['locale'], 'ko');
   });
 
   testWidgets('transcription follows the user\'s language unless set to auto or another one', (tester) async {
@@ -1760,7 +1792,7 @@ void main() {
     await tester.tap(find.textContaining('출처 2026-10-09_회의'));
     await tester.pumpAndSettle();
     expect(find.text('2026-10-09_회의.txt'), findsOneWidget); // file screen title
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('하루'));

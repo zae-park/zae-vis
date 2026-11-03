@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'markdown_view.dart';
@@ -34,11 +35,11 @@ class HitCard extends StatelessWidget {
                   child: Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                     for (var i = 0; i < labels.length; i++)
                       Text(labels[i], style: i == 0 ? t.titleSmall : t.bodyMedium?.copyWith(color: i == labels.length - 1 && ctx?.author != null ? scheme.tertiary : null)),
-                    if (hit.weak) Chip(label: const Text('약한 일치'), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, labelStyle: t.labelSmall),
+                    if (hit.weak) Chip(label: Text(context.l10n.uiWeakMatch), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, labelStyle: t.labelSmall),
                   ]),
                 ),
                 if (onDownload != null && hit.path.isNotEmpty)
-                  IconButton(tooltip: '파일 내려받기', icon: const Icon(Icons.download_outlined, size: 20), visualDensity: VisualDensity.compact, onPressed: onDownload),
+                  IconButton(tooltip: context.l10n.uiDownloadFile, icon: const Icon(Icons.download_outlined, size: 20), visualDensity: VisualDensity.compact, onPressed: onDownload),
               ]),
               if (hit.snippet.isNotEmpty) ...[
                 const SizedBox(height: 8),

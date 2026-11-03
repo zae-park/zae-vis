@@ -51,7 +51,7 @@
 | CLI | `zaevis ext install kiwi [--force]` | 한국어 형태소 분석기(Kiwi) 설치 (API 아님; 설정 → 검색·색인 창·마법사의 버튼이 번들 실행기로 돌림). `server/src/kiwi.ts`: 고정 버전(`KIWI_VERSION`)의 GitHub 릴리스 자산(mac arm64/x86_64, Linux x64/arm64, Windows x64 + 공용 모델)을 sha256 표와 대조해 받아 `~/.zaevis/ext/kiwi/{lib/libkiwi.dylib, models/cong/base, VERSION}`에 품(정적 라이브러리·헤더는 버림). 찾기 순서는 kiwi-rs·AutoRAG와 같음: `KIWI_*` 환경 변수(있으면 절대적) → ext/kiwi → `~/.local/kiwi` → 시스템 폴더. 서버(`main.ts`)와 일일 작업(`daily.ts`)이 autorag-mcp 자식 env에 경로를 넣는다. 질의 때도 Kiwi를 쓰므로 지우면 처음부터 다시 색인 |
 | CLI | `zaevis ext install <cli>` | 외부 소스 도구 설치 (API 아님; 앱 카드의 설치 버튼이 번들 실행기로 돌리고 로그를 보여 줌). 템플릿의 `cli.brew`(tap 포함) · `cli.release`(GitHub 최신 릴리스 자산 → `~/.zaevis/ext/bin`) · `cli.npm`(`~/.zaevis/ext/npm` prefix) 순. 검색 자식의 PATH는 `cliPath()`가 ext·brew·npm 폴더를 포함 |
 | POST | `/api/datasources/:name/sync` | 외부 소스 동기화 시작 (202; AutoRAG는 연결별 갱신이 없어 전체를 돈다). 색인 중이면 409 |
-| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인), `notifications`(시스템 알림, 기본 켬), `hotkey`(전역 단축키 스펙 `"meta+shift+space"` 꼴, `""`=플랫폼 기본), `appearance{ theme: system|light|dark, textScale: 0.9|1|1.1|1.2|1.3 }`(앱 화면, 모르는 값은 기본으로), `language`(사용자 언어 코드 `ko`, 첫 실행 `setup --language`), `transcribeLanguage`(`user` = language를 따름 · `auto` = whisper 감지 · 언어 코드). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`)와 `tokenizer`(`/api/index`와 같은 꼴) 포함 |
+| GET / PUT | `/api/settings` | 매일 실행 시각(launchd 재등록), 주입 즉시 색인, `localEmbedding`(의미 검색 켜기/끄기 — 켜면 데몬을 띄우고 처음부터 재색인), `notifications`(시스템 알림, 기본 켬), `hotkey`(전역 단축키 스펙 `"meta+shift+space"` 꼴, `""`=플랫폼 기본), `appearance{ theme: system|light|dark, textScale: 0.9|1|1.1|1.2|1.3, locale: system|ko|en }`(앱 화면·언어, 모르는 값은 기본으로), `language`(사용자 언어 코드 `ko`, 첫 실행 `setup --language`), `transcribeLanguage`(`user` = language를 따름 · `auto` = whisper 감지 · 언어 코드). GET에는 `rerank` 상태(`enabled, hasKey, keyHint, model, external`)와 `tokenizer`(`/api/index`와 같은 꼴) 포함 |
 | PUT | `/api/settings/rerank` | OpenRouter 재정렬 `{ enabled?, model?, apiKey? }` — `apiKey: ""`는 키 삭제. 키는 `secrets.json`(0600)에 저장되고 응답엔 끝 4자리만. AutoRAG 설정의 `rerank`를 다시 쓰고 검색 자식 프로세스를 재시작 |
 | POST | `/api/settings/rerank/test` | `{ apiKey? }` 키를 OpenRouter에 확인 (`{ ok, message }`), 저장하지 않음 |
 | GET / PUT | `/api/digest` | 주간 정리(지식화): 감지된 에이전트(`agents[]`: claude/codex/gemini CLI, openrouter 키 — 항목마다 `available`, `detail`(버전), `loggedIn: true|false|null`, `loginHint`. claude는 `claude auth status`의 JSON(없는 옛 버전은 `claude -p ok --max-turns 1`의 "Not logged in"), codex는 `~/.codex/auth.json`·`OPENAI_API_KEY`, gemini는 `~/.gemini/oauth_creds.json`·`GEMINI_API_KEY`; 바이너리별 10분 캐시. `pickAgent`는 `loggedIn: false`인 CLI를 건너뛰고, 에이전트 없음 메시지(`noAgentReason`)가 로그인만 필요한 CLI를 이름으로 알려 준다. `/api/ask`·`/api/reports`의 `agents`·`chosen`도 같은 감지), 설정(`agent: auto|…`, `model`, `weekly`, `review`), 실제로 돌 에이전트 `chosen`, 실행 중 여부, 마지막 실행 `last`(검토 모드면 `proposalId`) |
@@ -72,6 +72,16 @@ AutoRAG Lite 검색 응답 형태는 공개 계약이 아니라서 `normalizeSea
 1. `app/lib/api.dart`에 API 메서드 추가
 2. `app/lib/screens/`에 화면 추가
 3. `app/lib/main.dart`의 `_dests`와 `_screen()`에 등록
+4. 화면에 보이는 글은 `app/lib/l10n/app_ko.arb`(원본)와 `app_en.arb`에 같은 키로 넣고 `flutter gen-l10n`(또는 `flutter pub get`) 뒤 `context.l10n.키`로 씁니다. BuildContext가 없는 곳(모델·컨트롤러·`api.dart`)은 `l10nNow.키`
+
+### 언어 (l10n)
+
+앱은 한국어(기본)와 영어를 지원합니다. 설정 → 일반 → 언어 → 화면 언어(시스템·한국어·English)이고(같은 묶음의 '주로 쓰는 언어'는 전사 기본 언어 `language`로 별개), 값은 서버 `config.appearance.locale`에 저장돼 macOS 앱과 웹이 같은 언어를 씁니다. 시스템은 OS 언어가 한국어면 한국어, 그 밖에는 영어입니다(`l10n.dart resolveAppLocale`).
+
+- 구조: `app/l10n.yaml` + `flutter_localizations`/gen_l10n. 생성 파일 `app/lib/l10n/app_localizations*.dart`도 커밋합니다.
+- 테스트는 `test/flutter_test_config.dart`가 시스템 언어를 한국어로 두므로 한국어 문구로 찾습니다.
+- **아직 한국어로만 나오는 것**: 서버가 만들어 앱이 그대로 보여 주는 글 — API 오류의 `message`, 시스템 알림, 상태 문구(`hint`, `loginHint`, 색인·전사 진행 메시지, 데이터소스 템플릿 제목 등, `server/src` 약 530곳). 다음 단계는 서버가 사람이 읽는 문장 대신 코드(`code` + 인자)를 함께 보내고 앱이 그 코드를 ARB 문자열로 바꾸는 것, 또는 요청 헤더 `Accept-Language`(앱 locale)를 보고 서버가 문장을 고르는 것입니다. 알림은 앱 밖에서 뜨므로 서버가 `config.appearance.locale`을 읽어 고르면 됩니다.
+- 질문·리포트·정리 프롬프트와 그 결과(에이전트가 쓰는 글)는 언어 설정과 상관없이 한국어입니다.
 
 외부 패키지는 `http` 하나만 씁니다. Markdown은 `widgets/markdown_view.dart`의 작은 렌더러가 worklog에서 쓰는 문법(제목, 목록, 체크박스, 코드, `[[링크]]`, `#태그`)만 처리합니다.
 

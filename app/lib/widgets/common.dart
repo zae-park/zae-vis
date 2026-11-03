@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 
 /// Loads a value and shows spinner / error-with-retry / content.
 class AsyncView<T> extends StatefulWidget {
@@ -62,12 +63,12 @@ class ErrorPane extends StatelessWidget {
             Text('$error', textAlign: TextAlign.center),
             if (offline) ...[
               const SizedBox(height: 8),
-              Text('server 폴더에서 `npm start`로 서버를 실행했는지 확인하세요.',
+              Text(context.l10n.uiServerOffline,
                   style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
             ],
             if (onRetry != null) ...[
               const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onRetry, child: const Text('다시 시도')),
+              FilledButton.tonal(onPressed: onRetry, child: Text(context.l10n.commonRetry)),
             ],
           ],
         ),
@@ -181,10 +182,10 @@ Color tagColor(ColorScheme s, String tag) => switch (tag) {
     };
 
 String tagLabel(String tag) => switch (tag) {
-      'done' => '완료',
-      'decision' => '결정',
-      'blocked' => '막힘',
-      'learned' => '배움',
+      'done' => l10nNow.commonDone,
+      'decision' => l10nNow.uiTagDecision,
+      'blocked' => l10nNow.uiTagBlocked,
+      'learned' => l10nNow.uiTagLearned,
       _ => '#$tag',
     };
 

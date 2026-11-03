@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
@@ -31,7 +32,7 @@ class _LogScreenState extends State<LogScreen> {
           key: ValueKey('log$_generation'),
           load: widget.api.logMonths,
           builder: (context, months, _) => months.isEmpty
-              ? const EmptyPane('아직 로그가 없습니다. log/YYYY-MM.md에 한 줄을 적거나 주간 정리를 기다려 주세요.')
+              ? EmptyPane(context.l10n.logEmpty)
               : _MonthLog(api: widget.api, months: months, onOpenProject: widget.onOpenProject),
         ),
       ),
@@ -77,13 +78,13 @@ class _ProposalBannerState extends State<_ProposalBanner> {
                   Icon(Icons.rule, color: scheme.primary),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text('정리 제안 ${pending.length}건이 검토를 기다립니다 — 로그 $total줄. 고른 줄만 worklog에 들어갑니다.', style: t.bodyMedium),
+                    child: Text(context.l10n.logProposalBanner(pending.length, total), style: t.bodyMedium),
                   ),
                   FilledButton.tonal(
                     onPressed: () async {
                       if (await ReviewScreen.open(context, api, pending.first.id)) onChanged();
                     },
-                    child: const Text('검토하기'),
+                    child: Text(context.l10n.logReview),
                   ),
                 ]),
               ),
@@ -139,7 +140,7 @@ class _MonthLogState extends State<_MonthLog> {
                   onSelected: (on) => setState(() => on ? _selected.add(tag) : _selected.remove(tag)),
                 ),
               FilterChip(
-                label: const Text('내가 쓴 줄만'),
+                label: Text(context.l10n.logOnlyMine),
                 selected: _onlyMine,
                 onSelected: (on) => setState(() => _onlyMine = on),
               ),
@@ -156,7 +157,7 @@ class _MonthLogState extends State<_MonthLog> {
                   .toList()
                   .reversed
                   .toList();
-              if (shown.isEmpty) return const EmptyPane('조건에 맞는 로그가 없습니다.');
+              if (shown.isEmpty) return EmptyPane(context.l10n.logNoMatch);
               return RefreshIndicator(
                 onRefresh: () async => reload(),
                 child: ListView.separated(
@@ -189,7 +190,7 @@ class _EntryTile extends StatelessWidget {
     } catch (_) {}
     if (!context.mounted) return;
     if (await showEditLogDialog(context, api, month: month, entry: entry, projects: projects)) {
-      if (context.mounted) toast(context, '줄을 고쳤습니다');
+      if (context.mounted) toast(context, context.l10n.logEdited);
       onChanged();
     }
   }
@@ -207,7 +208,7 @@ class _EntryTile extends StatelessWidget {
     }
     if (!context.mounted) return;
     if (paths.isEmpty) {
-      toast(context, '원본 파일을 찾지 못했습니다: $src');
+      toast(context, context.l10n.logOriginNotFound(src));
       return;
     }
     FileScreen.open(context, api, paths.first);
@@ -217,18 +218,18 @@ class _EntryTile extends StatelessWidget {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('이 줄을 지울까요?'),
+        title: Text(context.l10n.logDeleteTitle),
         content: Text(entry.text, maxLines: 4, overflow: TextOverflow.ellipsis),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('지우기')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(context.l10n.commonClear)),
         ],
       ),
     );
     if (yes != true || !context.mounted) return;
     try {
       await api.deleteLog(month, entry.raw);
-      if (context.mounted) toast(context, '줄을 지웠습니다');
+      if (context.mounted) toast(context, context.l10n.logDeleted);
       onChanged();
     } on ApiException catch (e) {
       if (context.mounted) toast(context, e.message, error: true);
@@ -249,14 +250,14 @@ class _EntryTile extends StatelessWidget {
             Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
               // who wrote it: my own lines are never rewritten by the digest (it can only propose)
               Tooltip(
-                message: entry.byClaude ? '정리 에이전트가 원본에서 뽑아 쓴 줄 — 출처를 누르면 원본이 열립니다' : '내가 쓴 줄 — 정리 에이전트는 이 줄을 고치지 않습니다 (검토를 거쳐 제안만 합니다)',
+                message: entry.byClaude ? context.l10n.logByDigestTip : context.l10n.logMineTip,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(border: Border.all(color: entry.byClaude ? scheme.outlineVariant : scheme.primary.withValues(alpha: 0.5)), borderRadius: BorderRadius.circular(10)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(entry.byClaude ? Icons.auto_awesome : Icons.lock_outline, size: 11, color: entry.byClaude ? scheme.outline : scheme.primary),
                     const SizedBox(width: 3),
-                    Text(entry.byClaude ? '정리' : '내 기록', style: t.labelSmall?.copyWith(color: entry.byClaude ? scheme.outline : scheme.primary)),
+                    Text(entry.byClaude ? context.l10n.logDigest : context.l10n.logMine, style: t.labelSmall?.copyWith(color: entry.byClaude ? scheme.outline : scheme.primary)),
                   ]),
                 ),
               ),
@@ -286,19 +287,19 @@ class _EntryTile extends StatelessWidget {
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.subdirectory_arrow_right, size: 13, color: scheme.outline),
                     const SizedBox(width: 3),
-                    Flexible(child: Text('출처 ${entry.source}', style: t.bodySmall?.copyWith(color: scheme.primary, decoration: TextDecoration.underline, decorationColor: scheme.primary.withValues(alpha: 0.4)), overflow: TextOverflow.ellipsis)),
+                    Flexible(child: Text(context.l10n.logSource(entry.source!), style: t.bodySmall?.copyWith(color: scheme.primary, decoration: TextDecoration.underline, decorationColor: scheme.primary.withValues(alpha: 0.4)), overflow: TextOverflow.ellipsis)),
                   ]),
                 ),
               ),
           ]),
         ),
         PopupMenuButton<String>(
-          tooltip: '줄 메뉴',
+          tooltip: context.l10n.logMenu,
           icon: Icon(Icons.more_horiz, size: 18, color: scheme.outline),
           onSelected: (v) => v == 'edit' ? _edit(context) : _delete(context),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'edit', child: ListTile(dense: true, leading: Icon(Icons.edit_outlined), title: Text('편집'))),
-            PopupMenuItem(value: 'delete', child: ListTile(dense: true, leading: Icon(Icons.delete_outline), title: Text('지우기'))),
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'edit', child: ListTile(dense: true, leading: const Icon(Icons.edit_outlined), title: Text(context.l10n.logEdit))),
+            PopupMenuItem(value: 'delete', child: ListTile(dense: true, leading: const Icon(Icons.delete_outline), title: Text(context.l10n.commonClear))),
           ],
         ),
       ]),

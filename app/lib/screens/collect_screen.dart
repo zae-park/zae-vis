@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../api.dart';
 import '../backend/backend.dart';
+import '../l10n/l10n.dart';
 import '../models.dart';
 import '../recording_trail.dart';
 import '../widgets/task_dialog.dart';
@@ -15,13 +16,13 @@ import '../widgets/record_dialog.dart';
 import '../widgets/recording_trail_strip.dart';
 import 'file_screen.dart';
 
-String _ago(DateTime? t) {
-  if (t == null) return '아직 수집 안 함';
+String _ago(AppLocalizations l, DateTime? t) {
+  if (t == null) return l.collectNeverCollected;
   final d = DateTime.now().difference(t);
-  if (d.inMinutes < 1) return '방금';
-  if (d.inHours < 1) return '${d.inMinutes}분 전';
-  if (d.inDays < 1) return '${d.inHours}시간 전';
-  return '${d.inDays}일 전';
+  if (d.inMinutes < 1) return l.collectJustNow;
+  if (d.inHours < 1) return l.collectMinutesAgo(d.inMinutes);
+  if (d.inDays < 1) return l.collectHoursAgo(d.inHours);
+  return l.collectDaysAgo(d.inDays);
 }
 
 String _size(int b) => b >= 1 << 20 ? '${(b / (1 << 20)).toStringAsFixed(1)}MB' : '${(b / 1024).ceil()}KB';
@@ -92,7 +93,7 @@ class _CollectScreenState extends State<CollectScreen> {
   Future<void> _cancelTranscription(String file) async {
     try {
       await widget.api.cancelTranscription(file);
-      if (mounted) toast(context, '전사를 취소했습니다');
+      if (mounted) toast(context, context.l10n.collectTranscriptionCancelled);
     } on ApiException catch (e) {
       if (e.status != 404 && mounted) toast(context, e.message, error: true);
     }
@@ -115,20 +116,19 @@ class _CollectScreenState extends State<CollectScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('셸 설정에 한 줄 추가'),
-        content: const Text('~/.zshrc(또는 \$ZDOTDIR/.zshrc) 끝에 다음 한 줄을 붙입니다. 이미 켜져 있으면 그대로 둡니다.\n\n'
-            'setopt EXTENDED_HISTORY  # zaevis\n\n'
-            '새로 여는 터미널부터 명령을 친 시각이 남습니다. 시각이 없는 명령도 수집한 날에 모입니다.'),
+        title: Text(context.l10n.collectTimestampsTitle),
+        content: Text(context.l10n.collectTimestampsBody('\$ZDOTDIR', 'setopt EXTENDED_HISTORY  # zaevis')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('추가')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(context.l10n.commonCancel)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(context.l10n.commonAdd)),
         ],
       ),
     );
     if (ok != true || !mounted) return null;
+    final l = context.l10n;
     try {
       final r = await widget.api.enableShellTimestamps();
-      final note = r.changed ? '${r.file}에 추가했습니다. 새 터미널부터 시각이 남습니다.' : '${r.file}에 이미 켜져 있습니다. 새 터미널부터 시각이 남습니다.';
+      final note = r.changed ? l.collectTimestampsAdded(r.file) : l.collectTimestampsAlready(r.file);
       if (mounted) toast(context, note);
       return note;
     } on ApiException catch (e) {
@@ -144,6 +144,7 @@ class _CollectScreenState extends State<CollectScreen> {
     final inbox = _inbox;
     if (s == null || inbox == null) return const Center(child: CircularProgressIndicator());
 
+    final l = context.l10n;
     final trails = recordingTrails(inbox: inbox, index: _index, collectLine: s.progress?.currentLine);
     return Readable(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -163,10 +164,10 @@ class _CollectScreenState extends State<CollectScreen> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: SegmentedButton<_ConnectPane>(
-              segments: const [
-                ButtonSegment(value: _ConnectPane.now, label: Text('지금'), icon: Icon(Icons.inbox_outlined, size: 18)),
-                ButtonSegment(value: _ConnectPane.daily, label: Text('매일'), icon: Icon(Icons.event_repeat, size: 18)),
-                ButtonSegment(value: _ConnectPane.outside, label: Text('바깥'), icon: Icon(Icons.hub_outlined, size: 18)),
+              segments: [
+                ButtonSegment(value: _ConnectPane.now, label: Text(l.collectPaneNow), icon: const Icon(Icons.inbox_outlined, size: 18)),
+                ButtonSegment(value: _ConnectPane.daily, label: Text(l.collectPaneDaily), icon: const Icon(Icons.event_repeat, size: 18)),
+                ButtonSegment(value: _ConnectPane.outside, label: Text(l.collectPaneOutside), icon: const Icon(Icons.hub_outlined, size: 18)),
               ],
               selected: {_pane},
               showSelectedIcon: false,
@@ -181,23 +182,23 @@ class _CollectScreenState extends State<CollectScreen> {
             child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
           if (_pane == _ConnectPane.now) ...[
           // ── real-time input ─────────────────────────────────────────────
-          const SectionHeader('바로 넣기', subtitle: '저장하는 즉시 worklog에 들어갑니다. 검색에는 다음 색인 뒤에 잡힙니다.'),
+          SectionHeader(l.collectQuickTitle, subtitle: l.collectQuickHint),
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton.tonalIcon(
               onPressed: () async {
-                if (await showAddLogDialog(context, widget.api) && context.mounted) toast(context, '로그에 추가했습니다');
+                if (await showAddLogDialog(context, widget.api) && context.mounted) toast(context, l.collectAddedToLog);
               },
               icon: const Icon(Icons.edit_note),
-              label: const Text('한 줄 기록'),
+              label: Text(l.collectOneLine),
             ),
             FilledButton.tonalIcon(
               onPressed: () async {
                 final f = await showPasteTranscriptDialog(context, widget.api);
-                if (f != null && context.mounted) toast(context, 'inbox에 저장: $f');
+                if (f != null && context.mounted) toast(context, l.collectSavedToInbox(f));
                 await _load();
               },
               icon: const Icon(Icons.content_paste),
-              label: const Text('전사본 붙여넣기'),
+              label: Text(l.collectPasteTranscript),
             ),
             FilledButton.tonalIcon(
               onPressed: () async {
@@ -205,16 +206,16 @@ class _CollectScreenState extends State<CollectScreen> {
                 await _load();
               },
               icon: const Icon(Icons.mic),
-              label: const Text('녹음하기'),
+              label: Text(l.collectRecord),
             ),
             FilledButton.tonalIcon(
               onPressed: () async {
                 final n = await pickAndUploadAudio(context, widget.api);
-                if (n > 0 && context.mounted) toast(context, '녹음 $n개를 전사 대기열에 넣었습니다');
+                if (n > 0 && context.mounted) toast(context, l.collectQueuedRecordings(n));
                 await _load();
               },
               icon: const Icon(Icons.mic_none),
-              label: const Text('녹음 올리기 (whisperX)'),
+              label: Text(l.collectUploadRecordings),
             ),
           ]),
           const SizedBox(height: 16),
@@ -225,14 +226,14 @@ class _CollectScreenState extends State<CollectScreen> {
 
           // ── batch sources ────────────────────────────────────────────────
           SectionHeader(
-            '데이터소스',
-            subtitle: '매일 자동으로 모읍니다. 켜고 끄거나, 지금 바로 모을 수 있습니다.',
+            l.collectSourcesTitle,
+            subtitle: l.collectSourcesHint,
             trailing: FilledButton.icon(
-              onPressed: s.collecting ? null : () => _act(() => widget.api.collect(), done: '수집을 시작했습니다 (끝나면 색인까지)'),
+              onPressed: s.collecting ? null : () => _act(() => widget.api.collect(), done: l.collectStarted),
               icon: s.collecting
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.sync),
-              label: Text(s.collecting ? '수집 중…' : '지금 수집'),
+              label: Text(s.collecting ? l.collectCollecting : l.collectNow),
             ),
           ),
           if (s.collecting) _CollectLive(progress: s.progress, onCancel: _cancelTranscription),
@@ -246,12 +247,12 @@ class _CollectScreenState extends State<CollectScreen> {
                 key: ValueKey(src.name),
                 source: src,
                 busy: s.collecting,
-                live: s.progress?.steps.where((e) => e.name == src.name && e.state == 'running').map((e) => e.line ?? '${src.title} 수집 중').firstOrNull,
+                live: s.progress?.steps.where((e) => e.name == src.name && e.state == 'running').map((e) => e.line ?? l.collectSourceCollecting(src.title)).firstOrNull,
                 initiallyExpanded: src.name == _justAdded,
                 onToggle: (on) => _act(() => widget.api.setSourceEnabled(src.name, on)),
-                onCollect: () => _act(() => widget.api.collect(only: [src.name]), done: '${src.title} 수집을 시작했습니다'),
-                onSave: (settings) => _act(() => widget.api.saveSourceSettings(src.name, settings), done: '저장했습니다'),
-                onRemove: src.builtin ? null : () => _act(() => widget.api.removeSource(src.name), done: '삭제했습니다'),
+                onCollect: () => _act(() => widget.api.collect(only: [src.name]), done: l.collectSourceStarted(src.title)),
+                onSave: (settings) => _act(() => widget.api.saveSourceSettings(src.name, settings), done: l.commonSaved),
+                onRemove: src.builtin ? null : () => _act(() => widget.api.removeSource(src.name), done: l.collectDeleted),
                 onEnableTimestamps: src.name == 'shell-history' ? _enableTimestamps : null,
               ),
             ),
@@ -265,14 +266,14 @@ class _CollectScreenState extends State<CollectScreen> {
                 _pane = _ConnectPane.daily;
               });
               // collect right away so the user sees whether the command works, on the card below
-              await _act(() => widget.api.collect(only: [name]), done: '"$name" 커넥터를 추가하고 첫 수집을 시작했습니다. 결과는 카드에 표시됩니다.');
+              await _act(() => widget.api.collect(only: [name]), done: l.collectConnectorAdded(name));
             },
             icon: const Icon(Icons.add),
-            label: const Text('커넥터 추가'),
+            label: Text(l.collectAddConnector),
           ),
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text('Markdown이나 텍스트를 출력하는 명령이면 무엇이든 데이터소스가 됩니다 — 폴더의 노트, 캘린더, 사내 도구의 내보내기 스크립트.',
+            child: Text(l.collectAnyCommand,
                 style: Theme.of(context).textTheme.bodySmall),
           ),
           ],
@@ -281,13 +282,13 @@ class _CollectScreenState extends State<CollectScreen> {
           if (_pane == _ConnectPane.outside && _external != null && _external!.datasources.isNotEmpty) ...[
             const SizedBox(height: 28),
             SectionHeader(
-              '외부 소스 (AutoRAG)',
-              subtitle: 'Slack·Notion·Obsidian·GitHub 같은 곳을 AutoRAG가 직접 색인해 검색에 섞습니다. worklog에는 들어가지 않습니다.',
+              l.collectExternalTitle,
+              subtitle: l.collectExternalHint,
               trailing: _external!.syncing
-                  ? const Row(mainAxisSize: MainAxisSize.min, children: [
-                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                      SizedBox(width: 8),
-                      Text('동기화 중…'),
+                  ? Row(mainAxisSize: MainAxisSize.min, children: [
+                      const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      const SizedBox(width: 8),
+                      Text(l.collectSyncing),
                     ])
                   : null,
             ),
@@ -301,21 +302,21 @@ class _CollectScreenState extends State<CollectScreen> {
                   syncing: _external!.syncing,
                   onInstall: widget.backend?.managed == true && d.installKind != null && d.cliBin != null
                       ? () async {
-                          final ok = await runBackendTask(context, widget.backend!, '${d.title} 도구 설치 (${d.cliBin})', ['ext', 'install', d.cliBin!]);
-                          if (ok && context.mounted) toast(context, '${d.cliBin} 설치됨. 이제 그 도구에서 로그인·수집을 한 번 한 뒤 연결하세요.');
+                          final ok = await runBackendTask(context, widget.backend!, l.collectInstallTask(d.title, d.cliBin!), ['ext', 'install', d.cliBin!]);
+                          if (ok && context.mounted) toast(context, l.collectInstalled(d.cliBin!));
                           await _load();
                         }
                       : null,
-                  onToggle: (on) => _act(() => widget.api.saveDatasource(d.name, enabled: on), done: on ? '${d.title}을(를) 켰습니다. 동기화를 시작합니다.' : '${d.title}을(를) 껐습니다'),
+                  onToggle: (on) => _act(() => widget.api.saveDatasource(d.name, enabled: on), done: on ? l.collectExtOn(d.title) : l.collectExtOff(d.title)),
                   onSave: (connector, note, secrets) => _act(() => widget.api.saveDatasource(d.name, enabled: true, connector: connector, description: note, secrets: secrets),
-                      done: d.configured ? '저장했습니다. 동기화를 시작합니다.' : '${d.title}을(를) 연결했습니다. 첫 동기화를 시작합니다.'),
-                  onSync: () => _act(() => widget.api.syncDatasources(d.name), done: '외부 소스 동기화를 시작했습니다'),
-                  onRemove: () => _act(() => widget.api.removeDatasource(d.name), done: '${d.title} 연결을 지웠습니다'),
+                      done: d.configured ? l.collectSavedSyncing : l.collectExtConnected(d.title)),
+                  onSync: () => _act(() => widget.api.syncDatasources(d.name), done: l.collectExtSyncStarted),
+                  onRemove: () => _act(() => widget.api.removeDatasource(d.name), done: l.collectExtRemoved(d.title)),
                 ),
               ),
             ],
           if (_pane == _ConnectPane.outside && (_external == null || _external!.datasources.isEmpty))
-            Text('연결된 외부 소스가 없습니다.', style: Theme.of(context).textTheme.bodySmall),
+            Text(l.collectNoExternal, style: Theme.of(context).textTheme.bodySmall),
         ]),
           ),
         ),
@@ -333,11 +334,12 @@ class _InboxCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     Widget group(String title, List<InboxFile> files) => ExpansionTile(
           tilePadding: EdgeInsets.zero,
           title: Text('$title (${files.length})', style: t.titleSmall),
           children: [
-            if (files.isEmpty) Align(alignment: Alignment.centerLeft, child: Text('없음', style: t.bodySmall)),
+            if (files.isEmpty) Align(alignment: Alignment.centerLeft, child: Text(l.commonNone, style: t.bodySmall)),
             for (final f in files.take(20))
               ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(f.name), trailing: Text(_size(f.size), style: t.bodySmall)),
           ],
@@ -346,7 +348,7 @@ class _InboxCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(padding: const EdgeInsets.only(top: 8), child: Text('inbox — 다음 주간 정리에서 로그로 정리됩니다', style: t.labelLarge)),
+          Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.collectInboxTitle, style: t.labelLarge)),
           for (final j in inbox.jobs.take(5))
             ListTile(
               dense: true,
@@ -363,9 +365,9 @@ class _InboxCard extends StatelessWidget {
               subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(
                   j.error ?? j.line ?? j.result ?? switch (j.state) {
-                    'queued' => '전사 대기',
-                    'cancelled' => '취소했습니다',
-                    _ => '전사 중…',
+                    'queued' => l.collectTranscribeQueued,
+                    'cancelled' => l.collectCancelled,
+                    _ => l.collectTranscribing,
                   },
                   maxLines: 2,
                 ),
@@ -375,12 +377,12 @@ class _InboxCard extends StatelessWidget {
                 ],
               ]),
               trailing: (j.state == 'queued' || j.state == 'running') && onCancel != null
-                  ? TextButton(onPressed: () => onCancel!(j.file), child: const Text('취소'))
+                  ? TextButton(onPressed: () => onCancel!(j.file), child: Text(l.commonCancel))
                   : null,
             ),
-          group('전사본', inbox.transcripts),
-          group('전사 대기 녹음', inbox.audio),
-          group('Claude Code 세션 노트', inbox.sessions),
+          group(l.collectTranscripts, inbox.transcripts),
+          group(l.collectPendingAudio, inbox.audio),
+          group(l.collectSessionNotes, inbox.sessions),
         ]),
       ),
     );
@@ -423,24 +425,25 @@ class _CollectLiveState extends State<_CollectLive> {
     return name.isEmpty ? null : name;
   }
 
-  String _span(Duration d) {
+  String _span(AppLocalizations l, Duration d) {
     final m = d.inMinutes;
     final s = d.inSeconds % 60;
-    if (m >= 60) return '${m ~/ 60}시간 ${m % 60}분';
-    if (m >= 1) return '$m분 $s초';
-    return '$s초';
+    if (m >= 60) return l.collectSpanHourMin(m ~/ 60, m % 60);
+    if (m >= 1) return l.collectSpanMinSec(m, s);
+    return l.collectSpanSec(s);
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     final p = widget.progress;
     final now = DateTime.now();
     if (p == null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text('수집을 시작했습니다. 어느 단계인지 확인하는 중…', style: t.bodySmall),
+        child: Text(l.collectStartedChecking, style: t.bodySmall),
       );
     }
     final beatAge = now.difference(p.beat);
@@ -448,14 +451,14 @@ class _CollectLiveState extends State<_CollectLive> {
     final stale = beatAge > const Duration(seconds: 20);
     final quiet = !stale && quietAge > const Duration(seconds: 20);
     final headline = stale
-        ? '응답이 없습니다 · 마지막 신호 ${_span(beatAge)} 전'
+        ? l.collectNoResponse(_span(l, beatAge))
         : quiet
-            ? '진행 중 · 출력 없이 ${_span(quietAge)} · 전체 ${_span(now.difference(p.startedAt))}'
-            : '진행 중 · 전체 ${_span(now.difference(p.startedAt))}';
+            ? l.collectQuiet(_span(l, quietAge), _span(l, now.difference(p.startedAt)))
+            : l.collectRunning(_span(l, now.difference(p.startedAt)));
     final note = stale
-        ? '서버가 이 단계에서 더 이상 신호를 보내지 않습니다.'
+        ? l.collectStaleNote
         : quiet
-            ? '전사는 녹음이 길면 한동안 출력이 없습니다. 시간이 늘어나면 아직 그 단계에 있습니다.'
+            ? l.collectQuietNote
             : '';
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -470,7 +473,7 @@ class _CollectLiveState extends State<_CollectLive> {
           if (widget.onCancel != null)
             Align(
               alignment: Alignment.centerLeft,
-              child: TextButton(onPressed: () => widget.onCancel!(file), child: const Text('전사 취소')),
+              child: TextButton(onPressed: () => widget.onCancel!(file), child: Text(l.collectCancelTranscription)),
             ),
         if (note.isNotEmpty) Text(note, style: t.bodySmall),
         const SizedBox(height: 6),
@@ -493,7 +496,7 @@ class _CollectLiveState extends State<_CollectLive> {
                 child: Text(
                   [
                     step.title,
-                    if (step.state == 'running' && step.since != null) _span(now.difference(step.since!)),
+                    if (step.state == 'running' && step.since != null) _span(l, now.difference(step.since!)),
                     if (step.state == 'running' && step.line != null) step.line!,
                   ].join(' · '),
                   style: t.bodySmall?.copyWith(color: step.state == 'running' ? scheme.primary : null),
@@ -561,7 +564,8 @@ class _SourceCardState extends State<_SourceCard> {
     final s = widget.source;
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final status = widget.live ?? (s.lastOk == false ? (s.lastError ?? '실패') : [_ago(s.lastRun), if (s.lastNote != null) s.lastNote!].join(' · '));
+    final l = context.l10n;
+    final status = widget.live ?? (s.lastOk == false ? (s.lastError ?? l.commonFailed) : [_ago(l, s.lastRun), if (s.lastNote != null) s.lastNote!].join(' · '));
     return Card.outlined(
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
@@ -588,9 +592,9 @@ class _SourceCardState extends State<_SourceCard> {
                     if (note != null && mounted) setState(() => _timestampsNote = note);
                   },
                   icon: const Icon(Icons.schedule, size: 18),
-                  label: const Text('시각 기록 켜기'),
+                  label: Text(l.collectTimestampsOn),
                 ),
-                Text(_timestampsNote ?? '명령을 친 시각도 남기려면 켭니다. 켜지 않아도 명령은 모입니다.', style: t.bodySmall?.copyWith(color: _timestampsNote == null ? null : scheme.primary)),
+                Text(_timestampsNote ?? l.collectTimestampsHint, style: t.bodySmall?.copyWith(color: _timestampsNote == null ? null : scheme.primary)),
               ]),
             ),
           for (final o in s.options)
@@ -611,15 +615,15 @@ class _SourceCardState extends State<_SourceCard> {
                   minLines: o.kind == 'paths' ? 2 : 1,
                   maxLines: o.kind == 'paths' ? 5 : 1,
                   keyboardType: o.kind == 'number' ? TextInputType.number : null,
-                  decoration: InputDecoration(labelText: o.label, helperText: o.help ?? (o.kind == 'paths' ? '한 줄에 하나씩' : null), isDense: true),
+                  decoration: InputDecoration(labelText: o.label, helperText: o.help ?? (o.kind == 'paths' ? l.collectOnePerLine : null), isDense: true),
                 ),
               ),
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
-            FilledButton(onPressed: () => widget.onSave(_values()), child: const Text('저장')),
-            OutlinedButton(onPressed: widget.busy || !s.enabled ? null : widget.onCollect, child: const Text('이것만 수집')),
+            FilledButton(onPressed: () => widget.onSave(_values()), child: Text(l.commonSave)),
+            OutlinedButton(onPressed: widget.busy || !s.enabled ? null : widget.onCollect, child: Text(l.collectOnlyThis)),
             if (widget.onRemove != null)
-              TextButton(onPressed: widget.onRemove, child: Text('삭제', style: TextStyle(color: scheme.error))),
+              TextButton(onPressed: widget.onRemove, child: Text(l.commonDelete, style: TextStyle(color: scheme.error))),
           ]),
         ],
       ),
@@ -678,23 +682,23 @@ class _ExternalCardState extends State<_ExternalCard> {
 
   String _envName(DatasourceField f) => _field(f).text.trim().isEmpty ? (f.defaultValue ?? '') : _field(f).text.trim();
 
-  String _envStatus(ExternalDatasource d, DatasourceField f) {
+  String _envStatus(AppLocalizations l, ExternalDatasource d, DatasourceField f) {
     final e = d.env.where((x) => x.name == _envName(f)).firstOrNull;
-    if (e == null) return '아직 없음';
-    if (e.stored) return '저장됨 — 바꾸려면 새 값 입력';
-    return e.set ? '서버 환경에 있음' : '아직 없음';
+    if (e == null) return l.collectEnvNone;
+    if (e.stored) return l.collectEnvStored;
+    return e.set ? l.collectEnvInServer : l.collectEnvNone;
   }
 
-  String _status(ExternalDatasource d) {
+  String _status(AppLocalizations l, ExternalDatasource d) {
     if (d.unavailable != null) return d.unavailable!;
-    if (d.needsInstall) return '미설치 — ${d.cliBin} 명령이 없습니다';
-    if (!d.configured) return '연결 안 됨';
-    if (!d.enabled) return '꺼짐';
-    if (d.lastOk == false) return d.lastError ?? '동기화 실패';
-    final parts = <String>['연결됨'];
-    if (d.lastSync != null) parts.add('동기화 ${_ago(d.lastSync)}');
-    if (d.chunks != null) parts.add('조각 ${d.chunks}개');
-    if (d.autoragStatus == null && d.lastSync == null) parts.add('아직 동기화 안 함');
+    if (d.needsInstall) return l.collectNotInstalled('${d.cliBin}');
+    if (!d.configured) return l.collectNotConnected;
+    if (!d.enabled) return l.collectOff;
+    if (d.lastOk == false) return d.lastError ?? l.collectSyncFailed;
+    final parts = <String>[l.collectConnected];
+    if (d.lastSync != null) parts.add(l.collectSyncedAgo(_ago(l, d.lastSync)));
+    if (d.chunks != null) parts.add(l.collectChunks(d.chunks!));
+    if (d.autoragStatus == null && d.lastSync == null) parts.add(l.collectNeverSynced);
     return parts.join(' · ');
   }
 
@@ -703,6 +707,7 @@ class _ExternalCardState extends State<_ExternalCard> {
     final d = widget.source;
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final l = context.l10n;
     final failed = d.lastOk == false && d.enabled;
     final mono = TextStyle(fontFamily: 'monospace', fontSize: 13, color: scheme.onSurface);
     final Widget leading = Row(mainAxisSize: MainAxisSize.min, children: [
@@ -718,24 +723,24 @@ class _ExternalCardState extends State<_ExternalCard> {
       child: ExpansionTile(
         leading: leading,
         title: Text(d.title, style: t.titleSmall),
-        subtitle: Text(_status(d), maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: failed ? scheme.error : null)),
+        subtitle: Text(_status(l, d), maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodySmall?.copyWith(color: failed ? scheme.error : null)),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(d.description, style: t.bodySmall),
-          if (d.external != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('밖으로 나가는 것: ${d.external}', style: t.bodySmall?.copyWith(color: scheme.outline))),
-          if (d.auth != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('로그인·토큰: ${d.auth}', style: t.bodySmall?.copyWith(color: scheme.outline))),
+          if (d.external != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(l.collectOutbound('${d.external}'), style: t.bodySmall?.copyWith(color: scheme.outline))),
+          if (d.auth != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(l.collectAuth('${d.auth}'), style: t.bodySmall?.copyWith(color: scheme.outline))),
           if (d.needsInstall) ...[
             const SizedBox(height: 10),
             if (widget.onInstall != null) ...[
-              Text('${d.cliBin} 도구가 필요합니다. 설치하면 이 앱 안의 폴더(~/.zaevis/ext)에 들어가고, 관리자 권한은 필요 없습니다.', style: t.bodySmall),
+              Text(l.collectNeedsTool('${d.cliBin}'), style: t.bodySmall),
               const SizedBox(height: 8),
               Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                FilledButton.icon(onPressed: widget.onInstall, icon: const Icon(Icons.download, size: 18), label: Text('${d.cliBin} 설치')),
+                FilledButton.icon(onPressed: widget.onInstall, icon: const Icon(Icons.download, size: 18), label: Text(l.collectInstallBin('${d.cliBin}'))),
                 Text(d.install ?? '', style: mono.copyWith(fontSize: 11.5, color: scheme.outline)),
               ]),
             ] else ...[
-              Text('먼저 터미널에서 설치하고 로그인·수집을 한 번 해 두세요:', style: t.bodySmall),
+              Text(l.collectInstallFirst, style: t.bodySmall),
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
@@ -747,10 +752,10 @@ class _ExternalCardState extends State<_ExternalCard> {
               FilledButton.tonalIcon(
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: d.install ?? ''));
-                  if (context.mounted) toast(context, '설치 명령을 복사했습니다');
+                  if (context.mounted) toast(context, l.collectInstallCopied);
                 },
                 icon: const Icon(Icons.copy, size: 18),
-                label: const Text('설치 명령 복사'),
+                label: Text(l.collectCopyInstall),
               ),
             ],
             if (d.homepage != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(d.homepage!, style: t.bodySmall?.copyWith(color: scheme.outline))),
@@ -758,7 +763,7 @@ class _ExternalCardState extends State<_ExternalCard> {
             if (d.archive == false)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text('${d.cliBin}의 아카이브가 아직 없습니다. 먼저 ${d.cliBin}으로 로그인·수집을 한 번 하세요.', style: t.bodySmall?.copyWith(color: scheme.error)),
+                child: Text(l.collectNoArchive('${d.cliBin}'), style: t.bodySmall?.copyWith(color: scheme.error)),
               ),
             for (final f in d.fields) ...[
               Padding(
@@ -771,7 +776,7 @@ class _ExternalCardState extends State<_ExternalCard> {
                   decoration: InputDecoration(
                     labelText: f.required ? '${f.label} *' : f.label,
                     hintText: f.placeholder,
-                    helperText: f.help ?? (f.kind == 'list' ? '한 줄에 하나씩' : f.kind == 'env' ? '환경 변수 이름. 값은 아래 칸에' : null),
+                    helperText: f.help ?? (f.kind == 'list' ? l.collectOnePerLine : f.kind == 'env' ? l.collectEnvHelper : null),
                     helperMaxLines: 2,
                     isDense: true,
                   ),
@@ -786,9 +791,9 @@ class _ExternalCardState extends State<_ExternalCard> {
                     controller: _token(f),
                     obscureText: true,
                     decoration: InputDecoration(
-                      labelText: '토큰 값 (${_envName(f)})',
-                      hintText: _envStatus(d, f),
-                      helperText: '~/.zaevis/secrets.json(소유자만 읽기)에 저장되고 검색 프로세스에만 전달됩니다. 다시 표시되지 않습니다.',
+                      labelText: l.collectTokenLabel(_envName(f)),
+                      hintText: _envStatus(l, d, f),
+                      helperText: l.collectTokenHelper,
                       helperMaxLines: 2,
                       isDense: true,
                       prefixIcon: const Icon(Icons.key_outlined),
@@ -798,13 +803,13 @@ class _ExternalCardState extends State<_ExternalCard> {
             ],
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: TextField(controller: _note, decoration: const InputDecoration(labelText: '메모 (선택)', helperText: '이 연결이 무엇인지. 질문 모드의 에이전트에게도 보입니다.', isDense: true)),
+              child: TextField(controller: _note, decoration: InputDecoration(labelText: l.collectNoteLabel, helperText: l.collectNoteHelper, isDense: true)),
             ),
             const SizedBox(height: 12),
             Wrap(spacing: 8, children: [
-              FilledButton(onPressed: () => widget.onSave(_connector(), _note.text.trim(), _secrets()), child: Text(d.configured ? '저장' : '연결')),
-              if (d.configured) OutlinedButton(onPressed: widget.syncing || !d.enabled ? null : widget.onSync, child: const Text('지금 동기화')),
-              if (d.configured) TextButton(onPressed: widget.onRemove, child: Text('연결 삭제', style: TextStyle(color: scheme.error))),
+              FilledButton(onPressed: () => widget.onSave(_connector(), _note.text.trim(), _secrets()), child: Text(d.configured ? l.commonSave : l.collectConnect)),
+              if (d.configured) OutlinedButton(onPressed: widget.syncing || !d.enabled ? null : widget.onSync, child: Text(l.collectSyncNow)),
+              if (d.configured) TextButton(onPressed: widget.onRemove, child: Text(l.collectRemoveConnection, style: TextStyle(color: scheme.error))),
             ]),
           ],
         ],
@@ -826,26 +831,26 @@ class ConnectorPreset {
   /// What has to be installed for the command to work, if anything.
   final String? requires;
 
-  static const all = [
+  static List<ConnectorPreset> all(AppLocalizations l) => [
     ConnectorPreset(
       id: 'folder',
-      title: '폴더의 노트 (Markdown·텍스트)',
-      description: '폴더 안에서 수집 구간에 수정된 .md/.txt 파일을 통째로 가져옵니다. Obsidian 볼트, 메모 폴더에 맞습니다.',
+      title: l.collectPresetFolder,
+      description: l.collectPresetFolderHint,
       name: 'notes',
       command: "find ~/Notes -type f \\( -name '*.md' -o -name '*.txt' \\) -newermt {fromDate} -exec sh -c 'echo \"## \$1\"; cat \"\$1\"; echo' _ {} \\;",
     ),
     ConnectorPreset(
       id: 'calendar',
-      title: 'macOS 캘린더 일정',
-      description: '수집 구간의 캘린더 일정을 제목·시간·참석자와 함께 가져옵니다.',
+      title: l.collectPresetCalendar,
+      description: l.collectPresetCalendarHint,
       name: 'calendar',
       command: "icalBuddy -nc -nrd -b '- ' eventsFrom:{fromDate} to:{toDate}",
       requires: "brew install ical-buddy",
     ),
     ConnectorPreset(
       id: 'custom',
-      title: '직접 입력',
-      description: 'Markdown을 출력하는 아무 명령. 스크립트, curl, 사내 CLI…',
+      title: l.collectPresetCustom,
+      description: l.collectPresetCustomHint,
       name: '',
       command: '',
     ),
@@ -866,6 +871,7 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
       return StatefulBuilder(builder: (context, setLocal) {
         final t = Theme.of(context).textTheme;
         final scheme = Theme.of(context).colorScheme;
+        final l = context.l10n;
         void pick(ConnectorPreset p) => setLocal(() {
               chosen = p.id;
               name.text = p.name;
@@ -874,14 +880,14 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
               error = null;
             });
         return AlertDialog(
-          title: const Text('커넥터 추가'),
+          title: Text(l.collectAddConnector),
           content: SizedBox(
             width: 600,
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('1. 무엇을 모을지 고르세요', style: t.labelLarge),
+                Text(l.collectStep1, style: t.labelLarge),
                 const SizedBox(height: 6),
-                for (final p in ConnectorPreset.all)
+                for (final p in ConnectorPreset.all(l))
                   Card.outlined(
                     margin: const EdgeInsets.only(bottom: 6),
                     color: chosen == p.id ? scheme.primaryContainer.withValues(alpha: 0.35) : null,
@@ -889,36 +895,32 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
                       dense: true,
                       leading: Icon(chosen == p.id ? Icons.radio_button_checked : Icons.radio_button_off, color: chosen == p.id ? scheme.primary : scheme.outline),
                       title: Text(p.title),
-                      subtitle: Text([p.description, if (p.requires != null) '필요: ${p.requires}'].join('\n'), style: t.bodySmall),
+                      subtitle: Text([p.description, if (p.requires != null) l.collectRequires(p.requires!)].join('\n'), style: t.bodySmall),
                       onTap: () => pick(p),
                     ),
                   ),
                 if (chosen != null) ...[
                   const SizedBox(height: 10),
-                  Text('2. 확인하고 고치세요', style: t.labelLarge),
-                  TextField(controller: name, decoration: const InputDecoration(labelText: '이름 (영문 소문자·숫자·-)', hintText: 'my-notes')),
+                  Text(l.collectStep2, style: t.labelLarge),
+                  TextField(controller: name, decoration: InputDecoration(labelText: l.collectNameLabel, hintText: 'my-notes')),
                   TextField(
                     controller: command,
                     minLines: 1,
                     maxLines: 4,
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
                     decoration: InputDecoration(
-                      labelText: '명령',
+                      labelText: l.collectCommandLabel,
                       hintText: 'python3 ~/bin/export.py --since {from}',
-                      helperText: chosen == 'folder' ? '~/Notes 를 실제 폴더로 바꾸세요' : null,
+                      helperText: chosen == 'folder' ? l.collectNotesFolderHelper : null,
                     ),
                   ),
-                  TextField(controller: desc, decoration: const InputDecoration(labelText: '설명 (선택)')),
+                  TextField(controller: desc, decoration: InputDecoration(labelText: l.collectDescLabel)),
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(8)),
                     child: Text(
-                      '명령 안의 자리표시자는 수집 때 바뀝니다:\n'
-                      '  {fromDate} {toDate}  →  2026-10-20  (날짜만)\n'
-                      '  {from} {to}  →  2026-10-20T00:00:00.000Z  (ISO 시각)\n'
-                      '출력을 날짜별로 나누려면 줄 사이에 <!-- zaevis:date 2026-10-23 --> 를 넣으세요. 없으면 수집한 날의 기록이 됩니다.\n'
-                      '추가하면 바로 한 번 수집해 결과를 카드에 보여 줍니다.',
+                      l.collectPlaceholderHelp('{fromDate} {toDate}', '{from} {to}', '<!-- zaevis:date 2026-10-23 -->'),
                       style: t.bodySmall,
                     ),
                   ),
@@ -928,7 +930,7 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(l.commonCancel)),
             FilledButton(
               onPressed: chosen == null || busy
                   ? null
@@ -936,7 +938,7 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
                       final n = name.text.trim();
                       final c = command.text.trim();
                       if (n.isEmpty || c.isEmpty) {
-                        setLocal(() => error = '이름과 명령을 채워 주세요');
+                        setLocal(() => error = l.collectNeedNameCommand);
                         return;
                       }
                       setLocal(() => busy = true);
@@ -951,7 +953,7 @@ Future<String?> showAddSourceDialog(BuildContext context, WorklogApi api) async 
                         });
                       }
                     },
-              child: const Text('추가하고 수집'),
+              child: Text(l.collectAddAndCollect),
             ),
           ],
         );
