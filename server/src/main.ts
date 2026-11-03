@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AskRunner } from "./ask.ts";
+import { jevJudge } from "./route.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState } from "./config.ts";
@@ -187,12 +188,14 @@ const server = createApp({
       const agents = agentsInOrder(cfg.digest, await detectAgents());
       const chosen = pickAgent(cfg.digest, agents);
       const st = ask.status();
-      return { ...st, agents, chosen: chosen?.id ?? null, setting: { agent: cfg.digest.agent, model: cfg.digest.model }, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
+      // router: Jev decides what a chat line wants when an OpenRouter key is saved, else the answering agent does
+      return { ...st, agents, chosen: chosen?.id ?? null, router: rerank.getKey() ? "jev" : "agent", setting: { agent: cfg.digest.agent, model: cfg.digest.model }, rail: st.running?.rail?.length ? st.running.rail : plannedRail(cfg.digest, agents) };
     },
-    async run(q, topK, conversationId) {
+    async run(q, topK, conversationId, extra) {
       const agents = agentsInOrder(cfg.digest, await detectAgents());
       const agent = pickAgent(cfg.digest, agents);
-      return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId });
+      const key = rerank.getKey();
+      return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId, judge: key ? jevJudge(key) : null, shown: extra?.shown, force: extra?.force });
     },
     cancel: () => ask.cancel(),
     conversation: (id) => ask.store.get(id),

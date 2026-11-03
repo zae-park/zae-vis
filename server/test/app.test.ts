@@ -135,18 +135,6 @@ test("GET /file returns a worklog markdown file and rejects escapes", async () =
   assert.equal((await get("/api/file")).status, 400);
 });
 
-test("GET /files names worklog files from a sentence, else the files behind search hits", async () => {
-  const named = await get("/api/files?q=" + encodeURIComponent("9월 월간 정리 다운받아줘"));
-  assert.equal(named.status, 200);
-  assert.equal(named.body.by, "name");
-  assert.deepEqual(named.body.files.map((f: { path: string }) => f.path), ["summaries/2026-09.md"]);
-  assert.equal(named.body.files[0].kind, "월간 정리");
-  const viaSearch = await get("/api/files?q=" + encodeURIComponent("완료한 일 파일"));
-  assert.equal(viaSearch.body.by, "search");
-  assert.deepEqual(viaSearch.body.files.map((f: { path: string }) => f.path), ["log/2026-10.md"]);
-  assert.equal((await get("/api/files")).status, 400);
-});
-
 test("GET /download sends the file itself with its Korean name, and nothing outside the worklog", async () => {
   const r = await fetch(base + "/api/download?path=summaries/2026-09.md");
   assert.equal(r.status, 200);

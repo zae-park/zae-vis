@@ -22,13 +22,31 @@ import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
 import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
-import { filesNamedIn, listWorklogFiles } from "./files.ts";
+import { candidateFiles, candidateLines, foundFile, listWorklogFiles, type Candidate, type CatalogFile, type FoundFile } from "./files.ts";
+import { routeLine, type ChatIntent, type Judge } from "./route.ts";
 import { fallbackCandidates, plannedRail, quotaReason, replyQuota, withStop, type RailStop } from "./rail.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
 /** The agent's question back when the request could mean different things in the records. */
 export type Clarify = { question: string; options: string[] };
-export type AskResult = { q: string; answer: string; sources: AskSource[]; agent: AgentId; ms: number; at: string; conversationId: string; turn: number; rail?: RailStop[]; clarify?: Clarify };
+/** Who decided what the line wanted: Jev (OpenRouter key saved) or the answering agent itself. */
+export type AskRoute = { by: "jev" | "agent"; intent: ChatIntent; ms?: number };
+export type AskResult = {
+  q: string;
+  answer: string;
+  sources: AskSource[];
+  /** "jev" when Jev routed the line and no agent was called (a lookup, or files handed over). */
+  agent: AgentId | "jev";
+  ms: number;
+  at: string;
+  conversationId: string;
+  turn: number;
+  rail?: RailStop[];
+  clarify?: Clarify;
+  /** Files handed over for saving: the line asked for the files themselves. */
+  files?: FoundFile[];
+  route?: AskRoute;
+};
 export type Conversation = { id: string; title: string; createdAt: string; updatedAt: string; turns: AskResult[] };
 export type ConversationSummary = Pick<Conversation, "id" | "title" | "createdAt" | "updatedAt"> & { turns: number };
 export type AskError = { status: 400 | 404 | 409 | 502; error: "missing_query" | "no_hits" | "no_agent" | "busy" | "search_failed" | "agent_failed" | "cancelled"; message: string; rail?: RailStop[] };
@@ -64,13 +82,12 @@ export function pickSources(hits: SearchHit[], max = DEFAULT_TOP_K): AskSource[]
   }));
 }
 
-/** How much of the files a question names goes into the prompt. The prompt is a CLI argument, and Windows caps a
- * command line at 32K characters. */
+/** How much of whole files goes into one prompt. The prompt is a CLI argument, and Windows caps a command line at
+ * 32K characters. */
 export const NAMED_CHARS = process.platform === "win32" ? 12_000 : 40_000;
 
-/** Sources for the files [question] names ("가장 최근 회의록"), read whole up to [budget] characters in all. */
-export async function namedSources(worklogDir: string, question: string, now = new Date(), budget = NAMED_CHARS): Promise<AskSource[]> {
-  const files = filesNamedIn(await listWorklogFiles(worklogDir), question, now);
+/** Whole files as sources (a router or agent picked them), up to [budget] characters in all. */
+export async function fileSources(worklogDir: string, files: FoundFile[], budget = NAMED_CHARS): Promise<AskSource[]> {
   const out: AskSource[] = [];
   let left = budget;
   for (const f of files) {
@@ -95,8 +112,12 @@ const clipLabel = (s: string | null | undefined): string | null => (!s ? null : 
 
 export const CLARIFY_PREFIX = "되묻기:";
 
-export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<AskResult, "q" | "answer" | "clarify">[] = []): string {
-  const list = sources.map((s) => `[${s.n}] (${s.label}) ${s.path}\n${s.passage}`).join("\n\n");
+export const FILES_PREFIX = "파일:";
+export const READ_PREFIX = "읽기:";
+
+export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<AskResult, "q" | "answer" | "clarify">[] = [], extra: { files?: Candidate[]; canRead?: boolean } = {}): string {
+  const list = sources.map((s) => `[${s.n}] (${s.label}) ${s.path}\n${s.passage}`).join("\n\n") || "(검색된 발췌 없음)";
+  const files = extra.files ?? [];
   const prior = history.slice(-HISTORY_TURNS);
   // one question back per exchange: right after asking back, answer with the best reading
   const justAsked = !!history.at(-1)?.clarify;
@@ -109,6 +130,9 @@ export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<As
 - 각 문장 끝에 근거가 된 발췌 번호를 [n] 꼴로 단다. 여러 발췌가 근거면 [1][3]처럼 붙인다.
 - 발췌에 없는 내용은 쓰지 않는다. 발췌로 답할 수 없으면 "기록에서 근거를 찾지 못했습니다."라고 쓰고, 가장 가까운 내용이 있으면 그것만 한 문장으로 덧붙인다.
 - 파일을 열거나 명령을 실행하지 않는다. 서론·제목·인사 없이 답만 쓴다 (5문장 이내, 필요하면 짧은 목록).${prior.length ? "\n- 이전 대화의 맥락을 이어받되(예: \"그건\"이 가리키는 것), 근거는 이번 발췌에서만 든다." : ""}
+- 질문이 아니라 찾을 말만 있으면, 발췌가 보여 주는 것을 2~3문장으로 정리한다.${files.length ? `
+- 사용자가 내용이 아니라 파일 자체를 원하면(받기·저장·보내기 등), 답 대신 첫 줄에 "${FILES_PREFIX}"만 쓰고 다음 줄부터 "- 경로"를 아래 파일 목록에서 골라 1~5줄 적는다. 목록에 없는 경로는 쓰지 않는다.${extra.canRead ? `
+- 답하려면 목록에 있는 파일의 내용이 필요한데 발췌에 없으면(예: "가장 최근 회의 요약"), 답 대신 첫 줄에 "${READ_PREFIX}"만 쓰고 "- 경로"를 1~3줄 적는다. 그 파일 전체를 발췌에 붙여 다시 묻는다.` : ""}` : ""}
 ${justAsked
     ? "- 바로 앞에서 이미 되물었다. 이번에는 되묻지 말고 사용자의 답에 맞춰 답한다."
     : `- 질문이 가리키는 대상이 발췌에서 둘 이상으로 갈리고(다른 프로젝트·날짜·사람·회의 등) 어느 쪽이냐에 따라 답이 크게 달라질 때만, 답하지 말고 되묻는다. 형식: 첫 줄은 "${CLARIFY_PREFIX} " 뒤에 한 문장 질문, 다음 줄부터 "- 선택지 [n]"를 2~4줄 (선택지는 발췌에 나온 구체적인 대상의 짧은 이름만, 20자 안팎, 설명 없이). 하나로 좁혀지거나 차이가 작으면 되묻지 말고 답한다.`}
@@ -116,7 +140,23 @@ ${dialogue}
 질문: ${q}
 
 발췌:
-${list}`;
+${list}${files.length ? `
+
+파일 목록 (경로 · 날짜 · 종류 · 크기, 최근 것과 앞 화면·검색에 나온 것):
+${candidateLines(files)}` : ""}`;
+}
+
+/** "파일:\n- a.txt\n- b.md" (or "읽기:") → the paths, which [known] (the catalog) must contain. Null when the reply is not one. */
+export function parseDirective(text: string, prefix: string, known: Map<string, CatalogFile>): CatalogFile[] | null {
+  const lines = text.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  if (!(lines[0] ?? "").replace(/^\*\*|\*\*$/g, "").startsWith(prefix)) return null;
+  const out: CatalogFile[] = [];
+  for (const l of lines.slice(1)) {
+    const path = l.replace(/^([-*•]|\d+[.)])\s+/, "").replace(/(\s*\[\d+\])+$/, "").replace(/^`|`$/g, "").split(" · ")[0].trim();
+    const f = known.get(path);
+    if (f && !out.includes(f)) out.push(f);
+  }
+  return out;
 }
 
 const clipText = (s: string, max: number): string => (s.length > max ? s.slice(0, max).trimEnd() + "…" : s);
@@ -326,44 +366,104 @@ export class AskRunner {
   }
 
   /**
-   * One question at a time: a second one while an agent is working gets `busy`. With
-   * `conversationId` the question continues that conversation (404-ish `missing_query`
-   * is not raised for an unknown id: a new conversation starts instead).
+   * One chat line at a time: a second one while it is being handled gets `busy`. With `conversationId` the line
+   * continues that conversation (an unknown id starts a new one).
+   *
+   * Routing: with [judge] (an OpenRouter key is saved) Jev decides first — a lookup comes back with no answer and is
+   * not saved, files come back to save, and a question about one listed file reads that file whole. Without a judge,
+   * or when Jev is unsure, the agent decides inside its answer: "파일:" hands files over, "읽기:" asks for files to be
+   * read and the question is asked again with them (once). `force: "answer"` skips Jev ("답 받기" on a lookup).
    */
-  async ask(q: string, opts: { search: SearchBackend; agent: AgentInfo | null; setting: Pick<DigestSetting, "model"> & { agent?: DigestSetting["agent"] }; worklogDir: string; topK?: number; conversationId?: string; /** all detected agents, so the no-agent message can name one that only needs a login, and auto can fall through on quota */ agents?: AgentInfo[] }): Promise<AskOutcome> {
+  async ask(q: string, opts: {
+    search: SearchBackend;
+    agent: AgentInfo | null;
+    setting: Pick<DigestSetting, "model"> & { agent?: DigestSetting["agent"] };
+    worklogDir: string;
+    topK?: number;
+    conversationId?: string;
+    /** all detected agents, so the no-agent message can name one that only needs a login, and auto can fall through on quota */
+    agents?: AgentInfo[];
+    judge?: Judge | null;
+    /** What the chat showed last ("[2]" → path), so "[2] 받을래" can be resolved. */
+    shown?: Array<{ n: number; path: string }>;
+    force?: "answer";
+  }): Promise<AskOutcome> {
     const question = q.trim();
     if (!question) return { ok: false, status: 400, error: "missing_query", message: "질문을 입력하세요." };
-    if (!opts.agent) return { ok: false, status: 409, error: "no_agent", message: opts.agents ? `답을 쓸 ${noAgentReason(opts.agents)}` : NO_AGENT_MESSAGE };
+    const routing = !!opts.judge && opts.force !== "answer";
+    if (!opts.agent && !routing) return this.noAgent(opts.agents);
     if (this.running) return { ok: false, status: 409, error: "busy", message: `아직 답을 만드는 중입니다: "${this.running.q.slice(0, 40)}"` };
     const topK = Math.min(Math.max(opts.topK ?? DEFAULT_TOP_K, 1), MAX_TOP_K);
     const started = Date.now();
     const existing = opts.conversationId ? this.store.get(opts.conversationId) : null;
     const mode = opts.setting.agent;
-    const chain = mode === "auto" && opts.agents ? fallbackCandidates({ agent: "auto" }, opts.agents) : [opts.agent];
-    const rail = mode && opts.agents ? plannedRail({ agent: mode }, opts.agents) : plannedRail({ agent: opts.agent.id }, [opts.agent]);
-    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: chain[0]?.id ?? opts.agent.id, conversationId: existing?.id ?? null, rail };
+    const chain = !opts.agent ? [] : mode === "auto" && opts.agents ? fallbackCandidates({ agent: "auto" }, opts.agents) : [opts.agent];
+    const rail = !opts.agent ? [] : mode && opts.agents ? plannedRail({ agent: mode }, opts.agents) : plannedRail({ agent: opts.agent.id }, [opts.agent]);
+    this.running = { q: question, startedAt: new Date(started).toISOString(), agent: chain[0]?.id ?? "claude", conversationId: existing?.id ?? null, rail };
     const abort = new AbortController();
     this.abort = abort;
     const cancelled = (): AskOutcome => ({ ok: false, status: 409, error: "cancelled", message: "질문을 멈췄습니다.", rail: this.running?.rail });
     try {
       const previous = existing?.turns.at(-1);
       // fetch a few more than needed so weak hits can be dropped
-      const [r, named] = await Promise.all([
+      const [r, catalog] = await Promise.all([
         opts.search.search(searchQueryFor(question, previous?.q), Math.min(topK + 5, 50), PASSAGE_CHARS),
-        namedSources(opts.worklogDir, question).catch(() => [] as AskSource[]),
+        listWorklogFiles(opts.worklogDir).catch(() => [] as CatalogFile[]),
       ]);
       if (abort.signal.aborted) return cancelled();
-      if (!r.ok && !named.length) return { ok: false, status: 502, error: "search_failed", message: r.error?.message ?? "검색에 실패했습니다." };
-      const sources = mergeSources(named, r.ok ? pickSources(r.hits, topK) : [], topK);
-      if (!sources.length) return { ok: false, status: 404, error: "no_hits", message: `"${question}"과 관련된 기록을 찾지 못했습니다.` };
-      const prompt = buildAskPrompt(question, sources, existing?.turns ?? []);
-      this.opts.log?.(`질문 (${chain.map((a) => a.title).join(" → ")}, 발췌 ${sources.length}개): ${question}`);
-      let produced: { text: string; agent: AgentInfo; rail: RailStop[] };
-      try {
-        produced = await generateWithFallback(chain, prompt, opts.setting.model, opts.worklogDir, {
+      const known = new Map(catalog.map((f) => [f.path, f]));
+      const searched = r.ok ? pickSources(r.hits, topK) : [];
+      const candidates = candidateFiles(catalog, {
+        pinned: [
+          ...(opts.shown ?? []).map((s) => ({ path: s.path, note: `앞 화면 [${s.n}]` })),
+          ...searched.slice(0, 6).map((s) => ({ path: s.path, note: "검색" })),
+        ],
+      });
+      const history = existing?.turns ?? [];
+      const save = (result: Omit<AskResult, "conversationId" | "turn">): AskResult => {
+        const now = new Date();
+        const conv: Conversation = existing ?? { id: this.store.newId(now), title: clipText(question, 60), createdAt: now.toISOString(), updatedAt: now.toISOString(), turns: [] };
+        const full: AskResult = { ...result, conversationId: conv.id, turn: conv.turns.length };
+        conv.turns.push(full);
+        conv.updatedAt = now.toISOString();
+        try {
+          this.store.save(conv);
+        } catch (err) {
+          this.opts.log?.(`대화 저장 실패: ${(err as Error).message}`);
+        }
+        this.lastResult = full;
+        return full;
+      };
+      const handOver = (files: CatalogFile[]) => files.map(foundFile);
+
+      let named: AskSource[] = [];
+      let jevDecided = false;
+      if (routing) {
+        const route = await routeLine(opts.judge!, question, { candidates, previous: history });
+        if (abort.signal.aborted) return cancelled();
+        this.opts.log?.(`라우팅 (Jev): ${route ? `${route.intent}${route.files.length ? ` ${route.files.join(", ")}` : ""} ${route.ms}ms` : "판단 보류 → 에이전트"}`);
+        if (route?.intent === "search") {
+          // a lookup: the hits the app already shows are the reply; nothing to keep in the conversation
+          const now = new Date();
+          return { ok: true, result: { q: question, answer: "", sources: [], agent: "jev", ms: Date.now() - started, at: now.toISOString(), conversationId: existing?.id ?? "", turn: existing?.turns.length ?? 0, route: { by: "jev", intent: "search", ms: route.ms } } };
+        }
+        if (route?.intent === "files") {
+          const files = handOver(route.files.map((p) => known.get(p)!).filter(Boolean));
+          const answer = `${FILES_PREFIX}\n${files.map((f) => `- ${f.path}`).join("\n")}`;
+          return { ok: true, result: save({ q: question, answer, sources: [], agent: "jev", ms: Date.now() - started, at: new Date().toISOString(), files, route: { by: "jev", intent: "files", ms: route.ms } }) };
+        }
+        jevDecided = !!route;
+        if (route?.files.length) named = await fileSources(opts.worklogDir, handOver(route.files.map((p) => known.get(p)!).filter(Boolean)));
+      }
+      if (!opts.agent) return this.noAgent(opts.agents);
+      let sources = mergeSources(named, searched, topK);
+      if (!sources.length && !candidates.length) return { ok: false, status: 404, error: "no_hits", message: `"${question}"과 관련된 기록을 찾지 못했습니다.` };
+
+      const generate = async (prompt: string) =>
+        generateWithFallback(chain, prompt, opts.setting.model, opts.worklogDir, {
           ...this.opts,
           signal: abort.signal,
-          planned: rail,
+          planned: this.running?.rail ?? rail,
           onTrail: (stops) => {
             if (!this.running) return;
             this.running.rail = stops;
@@ -371,6 +471,19 @@ export class AskRunner {
             if (cur) this.running.agent = cur.id;
           },
         });
+      this.opts.log?.(`질문 (${chain.map((a) => a.title).join(" → ")}, 발췌 ${sources.length}개, 파일 ${candidates.length}개): ${question}`);
+      let produced: { text: string; agent: AgentInfo; rail: RailStop[] };
+      try {
+        produced = await generate(buildAskPrompt(question, sources, history, { files: candidates, canRead: !named.length }));
+        const toRead = named.length ? null : parseDirective(produced.text, READ_PREFIX, known);
+        if (toRead?.length && !abort.signal.aborted) {
+          // the agent asked for whole files: once, with them in front of the search passages
+          this.opts.log?.(`읽기 요청: ${toRead.map((f) => f.path).join(", ")}`);
+          named = await fileSources(opts.worklogDir, handOver(toRead.slice(0, 3)));
+          sources = mergeSources(named, searched, topK);
+          if (this.running) this.running.rail = (this.running.rail ?? []).map((s) => (s.state === "wrote" ? { ...s, state: "ready" as const } : s));
+          produced = await generate(buildAskPrompt(question, sources, history, { files: candidates, canRead: false }));
+        }
       } catch (err) {
         if (abort.signal.aborted || err instanceof Cancelled) return cancelled();
         this.opts.log?.(`질문 실패: ${(err as Error).message}`);
@@ -378,25 +491,30 @@ export class AskRunner {
         return { ok: false, status: 502, error: "agent_failed", message: (err as Error).message, ...(failed ? { rail: failed } : {}) };
       }
       if (abort.signal.aborted) return cancelled();
-      const now = new Date();
-      const conv: Conversation = existing ?? { id: this.store.newId(now), title: clipText(question, 60), createdAt: now.toISOString(), updatedAt: now.toISOString(), turns: [] };
-      const result: AskResult = { q: question, answer: produced.text, sources, agent: produced.agent.id, ms: Date.now() - started, at: now.toISOString(), conversationId: conv.id, turn: conv.turns.length, rail: produced.rail };
-      const clarify = parseClarify(produced.text);
-      if (clarify) result.clarify = clarify;
-      conv.turns.push(result);
-      conv.updatedAt = now.toISOString();
-      try {
-        this.store.save(conv);
-      } catch (err) {
-        this.opts.log?.(`대화 저장 실패: ${(err as Error).message}`);
-      }
-      this.lastResult = result;
+      const handed = parseDirective(produced.text, FILES_PREFIX, known);
+      const by: AskRoute["by"] = jevDecided ? "jev" : "agent";
+      const clarify = handed ? null : parseClarify(produced.text);
+      const result = save({
+        q: question,
+        answer: produced.text,
+        sources,
+        agent: produced.agent.id,
+        ms: Date.now() - started,
+        at: new Date().toISOString(),
+        rail: produced.rail,
+        ...(clarify ? { clarify } : {}),
+        ...(handed ? { files: handOver(handed), route: { by: "agent" as const, intent: "files" as const } } : { route: { by, intent: "answer" as const } }),
+      });
       this.opts.log?.(`답 (${result.ms}ms, ${produced.agent.title}): ${produced.text.slice(0, 120).replace(/\n/g, " ")}`);
       return { ok: true, result };
     } finally {
       this.running = null;
       if (this.abort === abort) this.abort = null;
     }
+  }
+
+  private noAgent(agents?: AgentInfo[]): AskOutcome {
+    return { ok: false, status: 409, error: "no_agent", message: agents ? `답을 쓸 ${noAgentReason(agents)}` : NO_AGENT_MESSAGE };
   }
 }
 

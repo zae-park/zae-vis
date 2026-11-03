@@ -55,7 +55,7 @@ class SearchScreen extends StatefulWidget {
 }
 
 /// One chat for everything: each line is searched at once, questions also get an answer, and file requests get
-/// download buttons (see chat_intent.dart). The full, filterable result list is a page behind "모두 보기".
+/// download buttons (the server decides which; see AskController.send). The full, filterable result list is a page behind "모두 보기".
 class _SearchScreenState extends State<SearchScreen> {
   Inbox? _inbox;
   IndexStatus? _index;

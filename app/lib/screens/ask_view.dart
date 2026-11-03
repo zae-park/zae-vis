@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
-import '../chat_intent.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets/agent_rail.dart';
@@ -24,20 +23,15 @@ String _who(AskResult result, String fallback) {
   return '${skips.join(', ')} 할당량 → $wrote가 작성';
 }
 
-/// One exchange in the thread: the line the user sent, then what it got — hits (검색), an answer (질문),
-/// or files to save (내려받기). A searched line can later get an answer too ("답 받기").
+/// One exchange in the thread: the line the user sent, the search hits it found at once, and what the server made of
+/// it — an answer, the files it asked for, or (Jev routed it as a lookup) nothing beyond the hits.
 class AskTurn {
-  AskTurn(this.question, {this.intent = ChatIntent.ask, this.result, this.error, this.rail = const []});
+  AskTurn(this.question, {this.result, this.error, this.rail = const []});
   final String question;
-  ChatIntent intent;
 
   SearchResult? search;
   Object? searchError;
   bool searching = false;
-
-  FileMatches? files;
-  Object? filesError;
-  bool finding = false;
 
   AskResult? result;
   Object? error;
@@ -51,10 +45,16 @@ class AskTurn {
   bool stopping = false;
 
   /// Waiting on the server for anything.
-  bool get pending => searching || finding || answering;
+  bool get pending => searching || answering;
 
-  /// An answer was asked for (in flight, written, failed or stopped).
-  bool get asked => answering || result != null || error != null || cancelled;
+  /// Jev took the line for a lookup: the hits are the reply, and "답 받기" asks for an answer anyway.
+  bool get lookup => result?.route == 'search';
+
+  /// Files handed over to save.
+  List<FoundFile> get files => result?.files ?? const [];
+
+  /// Something beyond the hits came back (or is coming): the hits then shrink to one line.
+  bool get answered => answering || cancelled || error != null || (result != null && !lookup);
 }
 
 /// A source the user is looking at: which turn, which [n].
@@ -110,32 +110,26 @@ class AskController extends ChangeNotifier {
   /// The agent's open question back, when the last thing in the chat is one.
   Clarify? get openClarify => turns.isEmpty ? null : turns.last.result?.clarify;
 
-  /// Sends a line: searches it, answers it when it reads as a question, or finds the files it asks for.
-  /// Right after the agent asked back, a line is the reply to it (an answer), unless it asks for a file.
+  /// Sends a line: the hits show at once, and the server decides what else it wants — an answer, files to save, or
+  /// nothing more (with an OpenRouter key Jev routes; otherwise the answering agent does). Right after the agent asked
+  /// back, the line is the reply to that question, so it goes straight to the agent.
   Future<void> send(String line) async {
     final q = line.trim();
     if (q.isEmpty || busy) return;
-    var intent = chatIntent(q);
-    if (openClarify != null && intent != ChatIntent.download) intent = ChatIntent.ask;
-    final turn = AskTurn(q, intent: intent);
+    final replying = openClarify != null;
+    final shown = _shown(turns.lastOrNull);
+    final turn = AskTurn(q);
     turns.add(turn);
     selected = null;
     notifyListeners();
-    switch (turn.intent) {
-      case ChatIntent.download:
-        await _findFiles(turn);
-      case ChatIntent.search:
-        await _search(turn);
-      case ChatIntent.ask:
-        await _answer(turn);
-    }
+    await Future.wait([_search(turn), _answer(turn, shown: shown, force: replying)]);
   }
 
-  /// "답 받기" on a searched line: asks the same words in the current conversation.
+  /// "답 받기" on a lookup: asks the same words for an answer, past the router.
   Future<void> answer(AskTurn turn) async {
-    if (busy || turn.asked) return;
-    turn.intent = ChatIntent.ask;
-    await _answer(turn);
+    if (busy || !turn.lookup) return;
+    turn.result = null;
+    await _answer(turn, force: true);
   }
 
   Future<void> _search(AskTurn turn) async {
@@ -152,53 +146,13 @@ class AskController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _findFiles(AskTurn turn) async {
-    final earlier = _pointedFiles(turn);
-    if (earlier != null) {
-      turn.files = FileMatches(files: earlier, by: 'chat');
-      notifyListeners();
-      return;
-    }
-    turn.finding = true;
-    notifyListeners();
-    try {
-      turn.files = await api.findFiles(turn.question);
-    } catch (e) {
-      turn.filesError = e;
-    } finally {
-      turn.finding = false;
-    }
-    notifyListeners();
-  }
-
-  /// Files the line points at in what the chat already showed: "[2] 내려받기" or "이거 txt로 받을래".
-  List<FoundFile>? _pointedFiles(AskTurn turn) {
-    final before = turns.takeWhile((t) => t != turn).toList().reversed;
-    FoundFile ref(String path, String kind) => FoundFile(path: path, name: path.split('/').last, bytes: 0, kind: kind);
-    final n = citedNumber(turn.question);
-    if (n != null) {
-      for (final t in before) {
-        final src = t.result?.sources.where((s) => s.n == n).firstOrNull;
-        if (src != null && src.path.isNotEmpty) return [ref(src.path, src.label)];
-        final hit = t.search?.hits.where((h) => h.number == n).firstOrNull;
-        if (hit != null && hit.path.isNotEmpty) return [ref(hit.path, hit.context?.sourceLabel ?? hit.title)];
-      }
-      return null;
-    }
-    if (!pointsBack(turn.question)) return null;
-    for (final t in before) {
-      final files = t.files?.files ?? const <FoundFile>[];
-      if (files.isNotEmpty) return files;
-      final paths = <String, String>{};
-      for (final s in t.result?.sources ?? const <AskSource>[]) {
-        if (s.path.isNotEmpty) paths.putIfAbsent(s.path, () => s.label);
-      }
-      for (final h in (t.search?.hits ?? const <SearchHit>[]).where((h) => !h.weak).take(3)) {
-        if (h.path.isNotEmpty) paths.putIfAbsent(h.path, () => h.context?.sourceLabel ?? h.title);
-      }
-      if (paths.isNotEmpty) return [for (final e in paths.entries) ref(e.key, e.value)];
-    }
-    return null;
+  /// What the last turn put on screen with numbers, so "[2] 받을래" can be resolved by the server.
+  static List<({int n, String path})> _shown(AskTurn? t) {
+    if (t == null) return const [];
+    final r = t.result;
+    if (r != null && r.sources.isNotEmpty && !t.lookup) return [for (final s in r.sources) if (s.path.isNotEmpty) (n: s.n, path: s.path)];
+    if (t.files.isNotEmpty) return [for (var i = 0; i < t.files.length; i++) (n: i + 1, path: t.files[i].path)];
+    return [for (final h in (t.search?.hits ?? const <SearchHit>[]).take(_SearchBubble.shown)) if (h.path.isNotEmpty) (n: h.number, path: h.path)];
   }
 
   /// 멈추기: asks the server to stop the agent; the waiting answer comes back as cancelled.
@@ -215,7 +169,7 @@ class AskController extends ChangeNotifier {
     }
   }
 
-  Future<void> _answer(AskTurn turn) async {
+  Future<void> _answer(AskTurn turn, {List<({int n, String path})> shown = const [], bool force = false}) async {
     turn
       ..answering = true
       ..cancelled = false
@@ -225,7 +179,7 @@ class AskController extends ChangeNotifier {
     notifyListeners();
     _watchRail();
     try {
-      final r = await api.ask(turn.question, conversationId: conversationId);
+      final r = await api.ask(turn.question, conversationId: conversationId, shown: shown, force: force);
       turn.result = r;
       turn.rail = r.rail;
       conversationId = r.conversationId.isEmpty ? conversationId : r.conversationId;
@@ -249,7 +203,7 @@ class AskController extends ChangeNotifier {
   /// Re-asks a failed or stopped answer in place.
   Future<void> retry(AskTurn turn) async {
     if ((turn.error == null && !turn.cancelled) || busy) return;
-    await _answer(turn);
+    await _answer(turn, force: true);
   }
 
   void newConversation() {
@@ -400,7 +354,6 @@ class _AskViewState extends State<AskView> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _QuestionBubble(text: t.question),
           const SizedBox(height: 8),
-          if (t.intent == ChatIntent.download) _FilesBubble(turn: t, api: c.api),
           if (t.searching || t.search != null || t.searchError != null)
             _SearchBubble(
               turn: t,
@@ -408,16 +361,18 @@ class _AskViewState extends State<AskView> {
               index: widget.index,
               inbox: widget.inbox,
               onOpenIndex: widget.onOpenIndex,
-              onAnswer: t.asked || c.busy ? null : () => c.answer(t),
+              compact: t.answered,
+              onAnswer: t.lookup && !c.busy ? () => c.answer(t) : null,
             ),
-          if (t.asked && (t.search != null || t.searchError != null)) const SizedBox(height: 8),
+          if (t.answered) const SizedBox(height: 8),
+          if (t.files.isNotEmpty) _FilesBubble(turn: t, api: c.api),
           if (t.answering)
             _PendingBubble(status: c.status, rail: c.liveRail, stopping: t.stopping, onStop: c.cancel)
           else if (t.cancelled)
             _StoppedBubble(onRetry: c.busy ? null : () => c.retry(t))
           else if (t.error != null)
             _ErrorBubble(error: t.error!, rail: t.rail, onRetry: () => c.retry(t), onOpenSettings: widget.onOpenSettings)
-          else if (t.result != null)
+          else if (t.result != null && !t.lookup && t.files.isEmpty)
             _AnswerBubble(
               result: t.result!,
               selected: c.selected?.turn == i ? c.selected!.n : null,
@@ -706,13 +661,16 @@ class _AnswerBubble extends StatelessWidget {
 
 /// The hits for a line: the first few as cards, then "모두 보기" (filters) and, when no answer was asked, "답 받기".
 class _SearchBubble extends StatelessWidget {
-  const _SearchBubble({required this.turn, required this.api, this.index, this.inbox, this.onOpenIndex, this.onAnswer});
+  const _SearchBubble({required this.turn, required this.api, this.index, this.inbox, this.onOpenIndex, this.onAnswer, this.compact = false});
   final AskTurn turn;
   final WorklogApi api;
   final IndexStatus? index;
   final Inbox? inbox;
   final VoidCallback? onOpenIndex;
   final VoidCallback? onAnswer;
+
+  /// An answer or files are the reply: the hits shrink to one line with "모두 보기".
+  final bool compact;
 
   static const shown = 4;
 
@@ -730,8 +688,19 @@ class _SearchBubble extends StatelessWidget {
     final err = turn.searchError;
     if (err != null) return _Bubble(color: scheme.errorContainer.withValues(alpha: 0.35), child: Text(err is ApiException ? err.message : '$err'));
     final r = turn.search!;
-    if (!r.ok) return _Bubble(child: SearchErrorNote(result: r, onOpenIndex: onOpenIndex));
+    if (!r.ok) return compact ? const SizedBox.shrink() : _Bubble(child: SearchErrorNote(result: r, onOpenIndex: onOpenIndex));
     final hits = r.hits;
+    if (compact) {
+      if (hits.isEmpty) return const SizedBox.shrink();
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => SearchResultsScreen.open(context, api, turn.question, r, index: index, inbox: inbox),
+          icon: const Icon(Icons.filter_list, size: 16),
+          label: Text('찾은 기록 ${hits.length}건 모두 보기'),
+        ),
+      );
+    }
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(hits.isEmpty ? emptySearchNote(query: turn.question, total: 0, shown: 0, filtered: false, index: index, inbox: inbox) : '찾은 기록 ${hits.length}건',
@@ -763,7 +732,7 @@ class _SearchBubble extends StatelessWidget {
   }
 }
 
-/// The files a line asked for, each with 열기 and 내려받기; or why none were found.
+/// The files a line asked for, each with 열기 and 내려받기.
 class _FilesBubble extends StatelessWidget {
   const _FilesBubble({required this.turn, required this.api});
   final AskTurn turn;
@@ -773,31 +742,11 @@ class _FilesBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    if (turn.finding) {
-      return _Bubble(child: Row(mainAxisSize: MainAxisSize.min, children: [
-        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-        const SizedBox(width: 10),
-        Text('파일을 찾는 중…', style: t.bodyMedium),
-      ]));
-    }
-    final err = turn.filesError;
-    if (err != null) return _Bubble(color: scheme.errorContainer.withValues(alpha: 0.35), child: Text(err is ApiException ? err.message : '$err'));
-    final m = turn.files;
-    if (m == null || m.files.isEmpty) {
-      return const _Bubble(
-        child: Text('그 파일을 찾지 못했습니다. 날짜와 종류("11월 2일 전사본", "어제 git 커밋")나 파일 이름으로 말해 주세요. '
-            '검색이나 답에 나온 것이면 "[2] 내려받기"처럼 번호로 가리켜도 됩니다.'),
-      );
-    }
-    final note = switch (m.by) {
-      'search' => '이름이나 날짜로 딱 맞는 파일이 없어, 검색에서 찾은 파일입니다.',
-      'chat' => '위에 나온 파일입니다.',
-      _ => m.files.length == 1 ? '이 파일을 찾았습니다.' : '파일 ${m.files.length}개를 찾았습니다.',
-    };
+    final files = turn.files;
     return _Bubble(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(note, style: t.labelMedium?.copyWith(color: scheme.outline)),
-        for (final f in m.files) ...[
+        Text(files.length == 1 ? '이 파일입니다.' : '파일 ${files.length}개입니다.', style: t.labelMedium?.copyWith(color: scheme.outline)),
+        for (final f in files) ...[
           const SizedBox(height: 8),
           _FileRow(file: f, api: api),
         ],

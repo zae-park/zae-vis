@@ -9,7 +9,7 @@ import type { RefreshPhase, SearchBackend } from "./autorag.ts";
 import type { HfStatus } from "./hf.ts";
 import type { CollectProgress } from "./sources/index.ts";
 import { AUDIO_EXT, audioForTranscript } from "./transcribe.ts";
-import { contentDisposition, findFiles, listWorklogFiles } from "./files.ts";
+import { contentDisposition } from "./files.ts";
 import { cleanSpeakerName, renameSpeakers, transcriptSpeakers } from "./diarize.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
@@ -52,7 +52,8 @@ export type AppOptions = {
   ask?: {
     /** Agents, which one would answer, whether one is answering now, and the last answer. */
     status(): Promise<Record<string, unknown>>;
-    run(q: string, topK?: number, conversationId?: string): Promise<AskOutcome>;
+    /** `shown`: what the chat showed last ("[2]" → path). `force: "answer"` skips the router ("답 받기"). */
+    run(q: string, topK?: number, conversationId?: string, extra?: { shown?: Array<{ n: number; path: string }>; force?: "answer" }): Promise<AskOutcome>;
     /** Stops the question in flight; false when none is running. Absent in tests that do not cancel. */
     cancel?(): boolean;
     /** One conversation with its turns, or null. */
@@ -304,7 +305,9 @@ export function createApp(opts: AppOptions): Server {
           return safe(() => opts.ask!.remove(arg)) ? send(res, 200, { ok: true }) : notFound(res);
 
         case "POST /ask": {
-          // POST /api/ask { q, topK?, conversationId? } → { answer, sources[{ n, path, label, passage }], agent, ms, conversationId, turn, clarify? }
+          // POST /api/ask { q, topK?, conversationId?, shown?[{ n, path }], force?: "answer" }
+          //   → { answer, sources[{ n, path, label, passage }], agent, ms, conversationId, turn, clarify?, files?[], route{ by, intent } }
+          // Every chat line comes here. route.intent "search" (Jev: a lookup) has no answer; "files" hands files over.
           // POST /api/ask/cancel → { cancelled } — the waiting POST /api/ask then answers 409 { error: "cancelled" }
           if (opts.ask && arg === "cancel") return send(res, 200, { cancelled: opts.ask.cancel?.() ?? false });
           if (!opts.ask || arg) return notFound(res);
@@ -313,7 +316,13 @@ export function createApp(opts: AppOptions): Server {
           if (!q) return send(res, 400, { error: "missing_query", message: "질문을 입력하세요." });
           const topK = typeof b.topK === "number" && Number.isFinite(b.topK) ? b.topK : undefined;
           const conversationId = typeof b.conversationId === "string" && b.conversationId ? b.conversationId : undefined;
-          const r = await opts.ask.run(q, topK, conversationId);
+          const shown = Array.isArray(b.shown)
+            ? (b.shown as unknown[]).flatMap((x) => {
+                const o = x as { n?: unknown; path?: unknown };
+                return typeof o?.n === "number" && typeof o.path === "string" ? [{ n: o.n, path: o.path }] : [];
+              }).slice(0, 20)
+            : undefined;
+          const r = await opts.ask.run(q, topK, conversationId, { shown, force: b.force === "answer" ? "answer" : undefined });
           if (!r.ok) return send(res, r.status, { error: r.error, message: r.message, ...(r.rail ? { rail: r.rail } : {}) });
           return send(res, 200, r.result);
         }
@@ -336,21 +345,6 @@ export function createApp(opts: AppOptions): Server {
           const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
           const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
           return f ? send(res, 200, f) : notFound(res);
-        }
-
-        case "GET /files": {
-          // GET /api/files?q=<sentence> → { files[{ path, name, bytes, date, kind }], by: "name"|"search"|"none" }
-          // The worklog files a request names ("11월 2일 전사본"); when none fit, the files behind the top search hits.
-          const q = (url.searchParams.get("q") ?? "").trim();
-          if (!q) return send(res, 400, { error: "missing_query" });
-          const catalog = await listWorklogFiles(worklog.root);
-          const named = findFiles(catalog, q);
-          if (named.length) return send(res, 200, { files: named, by: "name" });
-          const known = new Map(catalog.map((f) => [f.path, f]));
-          const r = await search.search(q, 10).catch(() => null);
-          const paths = [...new Set((r?.ok ? r.hits : []).filter((h) => !h.weak).map((h) => h.path))].filter((p) => known.has(p)).slice(0, 5);
-          const files = paths.map((p) => findFiles([known.get(p)!], p)[0]).filter(Boolean);
-          return send(res, 200, { files, by: files.length ? "search" : "none" });
         }
 
         case "POST /transcripts": {

@@ -140,8 +140,16 @@ class WorklogApi {
   /// Searches, then has the chosen agent answer from the passages. Takes tens of seconds; the server
   /// answers 409 (no agent / busy), 404 (no hits) or 502 (agent failed) as an [ApiException].
   /// Asks; with [conversationId] the question continues that conversation (the server keeps the turns).
-  Future<AskResult> ask(String question, {int topK = 10, String? conversationId}) async =>
-      AskResult.fromJson(await _send('POST', '/ask', {'q': question, 'topK': topK, if (conversationId != null) 'conversationId': conversationId}));
+  /// One chat line. [shown] is what the chat showed last with its numbers ("[2] 받을래"); [force] skips the router
+  /// (the reply to a question back, "답 받기", a retry).
+  Future<AskResult> ask(String question, {int topK = 10, String? conversationId, List<({int n, String path})> shown = const [], bool force = false}) async =>
+      AskResult.fromJson(await _send('POST', '/ask', {
+        'q': question,
+        'topK': topK,
+        if (conversationId != null) 'conversationId': conversationId,
+        if (shown.isNotEmpty) 'shown': [for (final s in shown) {'n': s.n, 'path': s.path}],
+        if (force) 'force': 'answer',
+      }));
 
   /// Stops the question in flight; its POST /ask then fails with code `cancelled`. False when none was running.
   Future<bool> cancelAsk() async => (await _send('POST', '/ask/cancel'))['cancelled'] == true;
@@ -176,9 +184,6 @@ class WorklogApi {
   /// Queues a speaker pass for a transcript saved without speakers (the kept recording is recognized again).
   /// Progress is the `kind: speakers` job in [inbox] whose file is the transcript's name.
   Future<void> relabelSpeakers(String path) => _send('POST', '/transcripts/relabel', {'path': path});
-
-  /// The worklog files a sentence names ("11월 2일 전사본"), or the files behind its top search hits.
-  Future<FileMatches> findFiles(String request) async => FileMatches.fromJson(await _get('/files', {'q': request}));
 
   /// Where the file itself is served as an attachment (the web build links to it).
   Uri downloadUri(String path) => _uri('/download', {'path': path});

@@ -160,7 +160,7 @@ class Clarify {
 }
 
 class AskResult {
-  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0, this.rail = const [], this.clarify});
+  const AskResult({required this.question, required this.answer, required this.sources, required this.agent, required this.ms, this.conversationId = '', this.turn = 0, this.rail = const [], this.clarify, this.files = const [], this.route, this.routedBy});
   factory AskResult.fromJson(Json j) => AskResult(
         question: _str(j['q']),
         answer: _str(j['answer']),
@@ -171,14 +171,24 @@ class AskResult {
         turn: (j['turn'] as num?)?.toInt() ?? 0,
         rail: RailStop.list(j['rail']),
         clarify: Clarify.fromJson(j['clarify']),
+        files: (j['files'] is List ? j['files'] as List : const <Object?>[]).whereType<Json>().map(FoundFile.fromJson).toList(),
+        route: j['route'] is Map ? _strOrNull((j['route'] as Map)['intent']) : null,
+        routedBy: j['route'] is Map ? _strOrNull((j['route'] as Map)['by']) : null,
       );
   final String question;
   final String answer;
 
+  /// Files handed over to save (the line asked for the files themselves).
+  final List<FoundFile> files;
+
+  /// What the line wanted: "search" (a lookup, no answer), "answer" or "files" — decided by [routedBy], "jev" or "agent".
+  final String? route;
+  final String? routedBy;
+
   /// Set when the agent asked back instead of answering.
   final Clarify? clarify;
   final List<AskSource> sources;
-  final String agent; // claude | codex | gemini | openrouter
+  final String agent; // claude | codex | gemini | openrouter | jev (routed, no agent called)
   final int ms;
 
   /// The conversation this turn belongs to and its index in it.
@@ -286,7 +296,7 @@ class WorklogFile {
   final String markdown;
 }
 
-/// A worklog file the chat found for a download request (GET /api/files).
+/// A worklog file handed over in the chat for saving (`files` of POST /api/ask).
 class FoundFile {
   const FoundFile({required this.path, required this.name, required this.bytes, this.date, this.kind = ''});
   factory FoundFile.fromJson(Json j) => FoundFile(
@@ -308,15 +318,6 @@ class FoundFile {
 
 /// The answer to "which files does this sentence mean": `name` when the request named them (date, kind, file name),
 /// `search` when they are the files behind the top search hits, `none` when nothing fit.
-class FileMatches {
-  const FileMatches({required this.files, required this.by});
-  factory FileMatches.fromJson(Json j) => FileMatches(
-        files: (j['files'] is List ? j['files'] as List : const <Object?>[]).whereType<Json>().map(FoundFile.fromJson).toList(),
-        by: _str(j['by']),
-      );
-  final List<FoundFile> files;
-  final String by;
-}
 
 class SearchResult {
   const SearchResult({

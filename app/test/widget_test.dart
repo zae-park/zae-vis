@@ -167,8 +167,25 @@ WorklogApi _fakeApi() => WorklogApi(
                 ],
               });
             }
-            if (mockAskAgent == null) return _json({'error': 'no_agent', 'message': '답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하세요.'}, 409);
             final askBody = jsonDecode(req.body) as Map<String, dynamic>;
+            final askQ = askBody['q'] as String;
+            // the router's stand-in: a request for a file gets it back, a single word is a lookup (no agent either way)
+            if (askBody['force'] != 'answer' && RegExp('받|다운').hasMatch(askQ)) {
+              final shownList = (askBody['shown'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+              final cited = RegExp(r'\[(\d+)\]').firstMatch(askQ)?.group(1);
+              final path = cited == null ? 'inbox/transcripts/2026-11-02_1703_녹음.txt' : shownList.firstWhere((s) => '${s['n']}' == cited)['path'] as String;
+              return _json({
+                'q': askQ, 'agent': 'jev', 'ms': 300, 'conversationId': askBody['conversationId'] ?? '20261027-120000', 'turn': 0,
+                'answer': '파일:\n- $path', 'sources': <Object>[], 'route': {'by': 'jev', 'intent': 'files'},
+                'files': [
+                  {'path': path, 'name': path.split('/').last, 'bytes': 2048, 'date': '2026-11-02', 'kind': path.contains('transcripts') ? '전사본' : '한 줄 기록'},
+                ],
+              });
+            }
+            if (askBody['force'] != 'answer' && !askQ.trim().contains(' ')) {
+              return _json({'q': askQ, 'agent': 'jev', 'ms': 280, 'answer': '', 'sources': <Object>[], 'route': {'by': 'jev', 'intent': 'search'}});
+            }
+            if (mockAskAgent == null) return _json({'error': 'no_agent', 'message': '답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하세요.'}, 409);
             return _json({
               'q': askBody['q'], 'agent': 'claude', 'ms': 12345,
               'conversationId': askBody['conversationId'] ?? '20261027-120000', 'turn': askBody['conversationId'] == null ? 0 : 1,
@@ -177,14 +194,6 @@ WorklogApi _fakeApi() => WorklogApi(
               'sources': [
                 {'n': 1, 'path': 'sources/git/2026-10-09.md', 'label': '2026-10-09 · git 커밋 · notes · 박재', 'passage': '색인할 파일이 빠져서'},
                 {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '색인을 처음부터 다시 만들기로'},
-              ],
-            });
-          case '/api/files':
-            posted.add(req);
-            return _json({
-              'by': 'name',
-              'files': [
-                {'path': 'inbox/transcripts/2026-11-02_1703_녹음.txt', 'name': '2026-11-02_1703_녹음.txt', 'bytes': 2048, 'date': '2026-11-02', 'kind': '전사본'},
               ],
             });
           case '/api/transcripts/relabel' when req.method == 'POST':
@@ -443,7 +452,7 @@ void main() {
     expect(find.textContaining('색인할 파일이 빠져서 — 박재'), findsWidgets);
   });
 
-  testWidgets('a file request gets download buttons without an agent; "[2] 내려받기" takes the answer\'s source', (tester) async {
+  testWidgets('a file request comes back as download buttons; "[2] 내려받기" sends what the chat showed', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -462,9 +471,8 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
 
-    expect(posted.where((r) => r.url.path == '/api/files').single.url.queryParameters['q'], '11월 2일 전사본 txt로 다운받아줘');
-    expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty, reason: 'a file request does not wake an agent');
-    expect(find.text('이 파일을 찾았습니다.'), findsOneWidget);
+    expect(jsonDecode(posted.where((r) => r.url.path == '/api/ask').single.body)['q'], '11월 2일 전사본 txt로 다운받아줘');
+    expect(find.text('이 파일입니다.'), findsOneWidget);
     expect(find.text('2026-11-02_1703_녹음.txt'), findsOneWidget);
     expect(find.textContaining('전사본 · 2.0 KB'), findsOneWidget);
     await tester.tap(find.text('내려받기'));
@@ -478,15 +486,18 @@ void main() {
     await tester.enterText(find.byType(TextField), '[2] 내려받기');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    expect(posted.where((r) => r.url.path == '/api/files').length, 1, reason: '[2] is the answer\'s second source, found in the chat');
-    expect(find.text('위에 나온 파일입니다.'), findsOneWidget);
+    final last = jsonDecode(posted.where((r) => r.url.path == '/api/ask').last.body) as Map;
+    expect(last['shown'], [
+      {'n': 1, 'path': 'sources/git/2026-10-09.md'},
+      {'n': 2, 'path': 'log/2026-10.md'},
+    ], reason: 'the answer\'s sources go along, so the server can resolve [2]');
     expect(find.text('2026-10.md'), findsOneWidget);
     await tester.tap(find.text('내려받기').first); // the thread is reversed: the newest turn comes first
     await tester.pumpAndSettle();
     expect(saved.last, 'log/2026-10.md');
   });
 
-  testWidgets('a keyword line shows hits; 답 받기 asks the same words; the file screen saves the original', (tester) async {
+  testWidgets('a lookup shows hits; 답 받기 asks the same words past the router; the file screen saves the original', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -505,13 +516,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     expect(find.text('찾은 기록 2건'), findsOneWidget);
-    expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty, reason: 'keywords only search');
-
-    await tester.tap(find.text('답 받기'));
-    await tester.pumpAndSettle();
-    expect(jsonDecode(posted.where((r) => r.url.path == '/api/ask').single.body), {'q': '색인', 'topK': 10});
-    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
-    expect(find.text('답 받기'), findsNothing);
+    expect(jsonDecode(posted.where((r) => r.url.path == '/api/ask').single.body), {'q': '색인', 'topK': 10}, reason: 'the router took it for a lookup');
 
     await tester.tap(find.byTooltip('파일 내려받기').first);
     await tester.pumpAndSettle();
@@ -523,6 +528,15 @@ void main() {
     await tester.tap(find.text('내려받기'));
     await tester.pumpAndSettle();
     expect(saved.last, 'sources/git/2026-10-09.md');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('답 받기'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.where((r) => r.url.path == '/api/ask').last.body), {'q': '색인', 'topK': 10, 'force': 'answer'});
+    expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
+    expect(find.text('답 받기'), findsNothing);
+    expect(find.text('찾은 기록 2건 모두 보기'), findsOneWidget, reason: 'the hits shrink to one line under an answer');
   });
 
   testWidgets('멈추기 stops the answer on the server; 다시 묻기 asks again', (tester) async {
@@ -574,8 +588,9 @@ void main() {
     await tester.tap(find.widgetWithText(ActionChip, 'rosetta 문서 색인'));
     await tester.pumpAndSettle();
     final asks = posted.where((r) => r.url.path == '/api/ask').toList();
-    expect(jsonDecode(asks.last.body), {'q': 'rosetta 문서 색인', 'topK': 10, 'conversationId': '20261027-120000'},
-        reason: 'a choice is a keyword line, but after a question back it is the reply');
+    final reply = jsonDecode(asks.last.body) as Map;
+    expect([reply['q'], reply['conversationId'], reply['force']], ['rosetta 문서 색인', '20261027-120000', 'answer'],
+        reason: 'after a question back the line is the reply: straight to the agent, past the router');
     expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsOneWidget);
     expect(tester.widget<ActionChip>(find.widgetWithText(ActionChip, 'zaevis 검색 색인')).onPressed, isNull, reason: 'an answered question back is closed');
   });
@@ -633,7 +648,9 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     asks = posted.where((r) => r.url.path == '/api/ask').toList();
-    expect(jsonDecode(asks.last.body), {'q': '그건 왜?', 'topK': 10, 'conversationId': '20261027-120000'});
+    final followUp = jsonDecode(asks.last.body) as Map;
+    expect([followUp['q'], followUp['conversationId'], followUp['force']], ['그건 왜?', '20261027-120000', null]);
+    expect((followUp['shown'] as List).length, 2, reason: 'the previous answer\'s sources go along');
     expect(find.text('그건 왜?'), findsOneWidget);
     expect(find.textContaining('빠뜨린 파일 때문에 막혔다'), findsNWidgets(2));
 
@@ -660,7 +677,7 @@ void main() {
 
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '색인?');
+    await tester.enterText(find.byType(TextField), '색인 왜 미뤘어?');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(InkWell, '1').first);

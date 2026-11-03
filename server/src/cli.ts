@@ -297,7 +297,8 @@ export async function run(api: Api, cmd: string, args: string[]): Promise<string
       if (!st.chosen) throw new CliError("답을 쓸 에이전트가 없습니다. Claude Code·Codex·Gemini CLI 중 하나를 설치하거나 설정에서 OpenRouter 키를 저장하세요.");
       const title = ((st.agents as J[]) ?? []).find((a) => a.id === st.chosen)?.title ?? st.chosen;
       console.log(c.dim(`${title}가 기록을 읽고 답을 쓰는 중… (수십 초)`));
-      const r = await api.post("/ask", { q });
+      // `ask` asked for an answer: no router (a "파일:" reply still prints its paths)
+      const r = await api.post("/ask", { q, force: "answer" });
       if (r.error) throw new CliError(String(r.message ?? r.error));
       return formatAnswer(r);
     }

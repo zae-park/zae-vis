@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ask-state-"));
-const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, execCli, mergeSources, namedSources, parseClarify, pickSources, searchQueryFor } = await import("../src/ask.ts");
+const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, execCli, parseClarify, pickSources, searchQueryFor } = await import("../src/ask.ts");
 const { quotaReason } = await import("../src/rail.ts");
 const { createApp } = await import("../src/app.ts");
 const { normalizeSearch } = await import("../src/autorag.ts");
@@ -393,26 +393,122 @@ test("ask: the prompt allows one question back; the reply is parsed into a quest
 });
 
 
-test("ask: a question that names a file by kind and date reads that file whole, before the search sources", async () => {
-  const w = await mkdtemp(join(tmpdir(), "zv-ask-named-"));
+async function routeFixture() {
+  const w = await mkdtemp(join(tmpdir(), "zv-ask-route-"));
   await mkdir(join(w, "inbox", "transcripts"), { recursive: true });
+  await mkdir(join(w, "sources", "git"), { recursive: true });
   await writeFile(join(w, "inbox", "transcripts", "2026-10-30_1424_녹음.txt"), "# 10-30\n\n예전 회의");
   await writeFile(join(w, "inbox", "transcripts", "2026-11-02_1703_녹음.txt"), "# 11-02\n\n[A] 레비뉴는 주말에 오른다.\n\n[B] 주중엔 떨어진다.");
-  const now = new Date(2026, 10, 3);
-  const named = await namedSources(w, "가장 최근 회의 내용 요약해줘", now);
-  assert.equal(named.length, 1);
-  assert.equal(named[0].path, "inbox/transcripts/2026-11-02_1703_녹음.txt");
-  assert.match(named[0].label, /2026-11-02 · 전사본 · 파일 전체/);
-  assert.match(named[0].passage, /\[B\] 주중엔 떨어진다/);
-  await writeFile(join(w, "inbox", "transcripts", "2026-11-03_0900_녹음.txt"), "가".repeat(2000));
-  const clipped = (await namedSources(w, "가장 최근 회의록", now, 600))[0];
-  assert.equal(clipped.path, "inbox/transcripts/2026-11-03_0900_녹음.txt");
-  assert.match(clipped.passage, /^가{600}\n…\(이하 생략, 전체 2000자\)$/);
-  assert.deepEqual(await namedSources(w, "레비뉴 패턴은 왜 그래?", now), [], "a content question names no file");
+  await writeFile(join(w, "sources", "git", "2026-11-02.md"), "# git\n\n- 커밋");
+  const search: SearchBackend = {
+    ...fakeSearch,
+    async search(query, topK, passageChars) {
+      return normalizeSearch(query, { results: [{ path: join(w, "sources", "git", "2026-11-02.md"), score: 1, content: "# git\n\n- 커밋" }] }, [w], passageChars);
+    },
+  };
+  const store = new ConversationStore(await mkdtemp(join(tmpdir(), "zv-ask-route-store-")));
+  return { w, search, store };
+}
 
-  const merged = mergeSources(named, [
-    { n: 1, path: "inbox/transcripts/2026-11-02_1703_녹음.txt", label: "x", passage: "조각" },
-    { n: 2, path: "sources/git/2026-11-02.md", label: "git", passage: "커밋" },
-  ], 10);
-  assert.deepEqual(merged.map((s) => [s.n, s.path]), [[1, "inbox/transcripts/2026-11-02_1703_녹음.txt"], [2, "sources/git/2026-11-02.md"]]);
+const verdict = (answer: string, confidence = 0.9) => ({ id: "x", type: "choice" as const, answer, confidence, escalate: false });
+/** A Jev stand-in: picks [intent], and the listed file whose path is [path] (or none). */
+const fakeJudge = (intent: string, path?: string) => {
+  const states: Array<Record<string, unknown>> = [];
+  const judge = async (state: unknown) => {
+    states.push(state as Record<string, unknown>);
+    const files = (state as { files: Array<{ id: string; path: string }> }).files;
+    const id = files.find((f) => f.path === path)?.id ?? "none";
+    return { answers: { intent: verdict(intent), file: verdict(id) } };
+  };
+  return { judge, states };
+};
+
+test("ask without Jev: the agent hands files over with 파일: lines, only paths from the list", async () => {
+  const { w, search, store } = await routeFixture();
+  const prompts: string[] = [];
+  const exec: Exec = async (_b, args) => {
+    prompts.push(args[1]);
+    return { ok: true, stdout: "파일:\n- inbox/transcripts/2026-11-02_1703_녹음.txt\n- ../../etc/passwd", stderr: "" };
+  };
+  const r = await new AskRunner({ exec, store }).ask("가장 최근에 진행한 회의의 회의록을 받고싶어", { search, agent: claude, setting: { model: "" }, worklogDir: w });
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.match(prompts[0], /파일 목록 \(경로/);
+  assert.match(prompts[0], /- inbox\/transcripts\/2026-11-02_1703_녹음\.txt · 2026-11-02 · 전사본/);
+  assert.deepEqual(r.result.files?.map((f) => f.path), ["inbox/transcripts/2026-11-02_1703_녹음.txt"], "a path outside the list is dropped");
+  assert.deepEqual(r.result.route, { by: "agent", intent: "files" });
+  assert.equal(store.list().length, 1);
+});
+
+test("ask without Jev: 읽기: reads the named file whole and asks once more with it as [1]", async () => {
+  const { w, search, store } = await routeFixture();
+  const prompts: string[] = [];
+  const exec: Exec = async (_b, args) => {
+    prompts.push(args[1]);
+    return prompts.length === 1
+      ? { ok: true, stdout: "읽기:\n- inbox/transcripts/2026-11-02_1703_녹음.txt", stderr: "" }
+      : { ok: true, stdout: "주말에 레비뉴가 오르고 주중엔 떨어진다는 얘기였습니다 [1].", stderr: "" };
+  };
+  const r = await new AskRunner({ exec, store }).ask("가장 최근 회의 내용 요약해줘", { search, agent: claude, setting: { model: "" }, worklogDir: w });
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /읽기:/);
+  assert.doesNotMatch(prompts[1], /"읽기:"만 쓰고/, "only one round of reading");
+  assert.match(prompts[1], /\[1\] \(2026-11-02 · 전사본 · 파일 전체\) inbox\/transcripts\/2026-11-02_1703_녹음\.txt\n# 11-02\n\n\[A\] 레비뉴/);
+  assert.equal(r.result.sources[0].path, "inbox/transcripts/2026-11-02_1703_녹음.txt");
+  assert.equal(r.result.files, undefined);
+  assert.deepEqual(r.result.route, { by: "agent", intent: "answer" });
+});
+
+test("ask with Jev: a lookup calls no agent and is not saved; files come straight back; a file question reads it", async () => {
+  const { w, search, store } = await routeFixture();
+  let calls = 0;
+  const prompts: string[] = [];
+  const exec: Exec = async (_b, args) => {
+    calls++;
+    prompts.push(args[1]);
+    return { ok: true, stdout: "레비뉴 얘기였습니다 [1].", stderr: "" };
+  };
+  const runner = new AskRunner({ exec, store });
+  const common = { search, agent: claude, setting: { model: "" }, worklogDir: w };
+
+  const lookup = fakeJudge("search");
+  const s1 = await runner.ask("레비뉴", { ...common, judge: lookup.judge });
+  assert.equal(s1.ok && s1.result.route?.intent, "search");
+  assert.equal(s1.ok && s1.result.answer, "");
+  assert.equal(calls, 0);
+  assert.deepEqual(store.list(), [], "a lookup leaves no conversation");
+
+  const give = fakeJudge("files", "inbox/transcripts/2026-11-02_1703_녹음.txt");
+  const s2 = await runner.ask("회의록 받을래", { ...common, judge: give.judge, shown: [{ n: 2, path: "inbox/transcripts/2026-10-30_1424_녹음.txt" }] });
+  assert.ok(s2.ok);
+  if (!s2.ok) return;
+  assert.deepEqual(s2.result.files?.map((f) => f.path), ["inbox/transcripts/2026-11-02_1703_녹음.txt"]);
+  assert.equal(s2.result.agent, "jev");
+  assert.equal(calls, 0);
+  const files = give.states[0].files as Array<{ path: string; shown?: string }>;
+  assert.deepEqual(files[0], { id: "f1", path: "inbox/transcripts/2026-10-30_1424_녹음.txt", date: "2026-10-30", kind: "전사본", shown: "앞 화면 [2]" });
+  assert.equal(give.states[0].line, "회의록 받을래");
+
+  const about = fakeJudge("answer", "inbox/transcripts/2026-11-02_1703_녹음.txt");
+  const s3 = await runner.ask("가장 최근 회의 요약해줘", { ...common, judge: about.judge });
+  assert.ok(s3.ok);
+  assert.equal(calls, 1);
+  assert.match(prompts[0], /\[1\] \(2026-11-02 · 전사본 · 파일 전체\)/);
+  assert.doesNotMatch(prompts[0], /"읽기:"만 쓰고/, "the file is already read");
+  assert.deepEqual(s3.ok && s3.result.route, { by: "jev", intent: "answer" });
+
+  const forced = await runner.ask("레비뉴", { ...common, judge: lookup.judge, force: "answer" });
+  assert.equal(forced.ok && forced.result.route?.intent, "answer", "답 받기 skips the router");
+  assert.equal(lookup.states.length, 1);
+
+  const broken = await runner.ask("레비뉴", { ...common, judge: async () => { throw new Error("401"); } });
+  assert.equal(broken.ok && broken.result.route?.by, "agent");
+  assert.equal(broken.ok && broken.result.answer, "레비뉴 얘기였습니다 [1].", "a failing router leaves it to the agent");
+
+  const noAgent = await runner.ask("회의록 받을래", { ...common, agent: null, judge: give.judge });
+  assert.equal(noAgent.ok, true, "files need no agent");
+  const noAgentAnswer = await runner.ask("요약", { ...common, agent: null, judge: about.judge });
+  assert.equal(!noAgentAnswer.ok && noAgentAnswer.error, "no_agent");
 });
