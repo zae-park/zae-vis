@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -15,6 +15,7 @@ let root: string;
 const calls: string[] = [];
 let added: Array<Record<string, unknown>> = [];
 const queued: string[] = [];
+const relabeled: string[] = [];
 let indexOnInject = false;
 let embeddingOn = false;
 let rerankOn = false;
@@ -60,7 +61,7 @@ before(async () => {
       },
       indexOnInject: () => indexOnInject,
     },
-    audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), jobs: () => [] },
+    audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), relabel: (p) => relabeled.push(p), jobs: () => [] },
     digest: {
       status: async () => ({ running: false, last: null, nextWeekly: null, setting: { agent: digestAgent, model: "", weekly: true }, agents: [{ id: "claude", title: "Claude Code", available: true, detail: "1.0" }], chosen: "claude" }),
       update: async (p) => {
@@ -243,4 +244,24 @@ test("digest endpoints: status, update, run (202 / 409)", async () => {
   assert.equal(r.status, 409);
   assert.equal(r.body.reason, "없음");
   assert.equal((await call("POST", "/api/digest", {})).status, 404);
+});
+
+test("POST /transcripts/relabel queues a speaker pass only when the recording was kept", async () => {
+  await mkdir(join(root, "inbox", "transcripts"), { recursive: true });
+  await mkdir(join(root, "processed", "audio"), { recursive: true });
+  await writeFile(join(root, "inbox", "transcripts", "2026-10-30_1424_녹음.txt"), "# 2026-10-30_1424_녹음\n\n(whisperX large-v3-turbo 자동 전사)\n\n안녕하세요.\n");
+  await writeFile(join(root, "inbox", "transcripts", "2026-10-21_회의.txt"), "# 2026-10-21_회의\n\n텍스트\n");
+  await writeFile(join(root, "inbox", "transcripts", "붙여넣기.txt"), "텍스트\n");
+  await writeFile(join(root, "processed", "audio", "2026-10-30_1424_녹음.wav"), "RIFF");
+  await writeFile(join(root, "processed", "audio", "회의.m4a"), "m4a");
+  const ok = await call("POST", "/api/transcripts/relabel", { path: "inbox/transcripts/2026-10-30_1424_녹음.txt" });
+  assert.equal(ok.status, 202);
+  assert.equal(ok.body.file, "2026-10-30_1424_녹음.txt");
+  assert.equal((await call("POST", "/api/transcripts/relabel", { path: "inbox/transcripts/2026-10-21_회의.txt" })).status, 202, "the name before the date was added");
+  const none = await call("POST", "/api/transcripts/relabel", { path: "inbox/transcripts/붙여넣기.txt" });
+  assert.equal(none.status, 404);
+  assert.equal(none.body.error, "no_audio");
+  assert.equal((await call("POST", "/api/transcripts/relabel", { path: "log/2026-10.md" })).status, 400);
+  assert.equal((await call("POST", "/api/transcripts/relabel", { path: "inbox/transcripts/없음.txt" })).status, 404);
+  assert.deepEqual(relabeled, ["inbox/transcripts/2026-10-30_1424_녹음.txt", "inbox/transcripts/2026-10-21_회의.txt"]);
 });

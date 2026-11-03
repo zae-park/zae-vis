@@ -660,9 +660,10 @@ class InboxFile {
 }
 
 class TranscribeJob {
-  const TranscribeJob({required this.file, required this.state, this.result, this.error, this.line, this.fraction});
+  const TranscribeJob({required this.file, required this.state, this.kind = 'transcribe', this.result, this.error, this.line, this.fraction});
   factory TranscribeJob.fromJson(Json j) => TranscribeJob(
         file: _str(j['file']),
+        kind: _strOrNull(j['kind']) ?? 'transcribe',
         state: _str(j['state']),
         result: _strOrNull(j['result']),
         error: _strOrNull(j['error']),
@@ -671,6 +672,9 @@ class TranscribeJob {
       );
   final String file;
   final String state; // queued | running | done | failed | cancelled
+  /// "transcribe" (an audio file) or "speakers" (a speaker pass for an existing transcript; [file] is its name).
+  final String kind;
+  bool get active => state == 'queued' || state == 'running';
   final String? result;
   final String? error;
   /// "음성 인식 45%" while this file is being transcribed.

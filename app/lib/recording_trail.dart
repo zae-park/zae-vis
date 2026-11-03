@@ -41,6 +41,18 @@ List<RecordingTrail> recordingTrails({
 
   for (final job in inbox.jobs) {
     if (covered.contains(job.file)) continue;
+    if (job.kind == 'speakers') {
+      // a speaker pass for a transcript already saved: its line, opening the transcript
+      if (!job.active) continue;
+      covered.add(job.file);
+      items.add(RecordingTrail(
+        file: job.file,
+        sentence: job.state == 'queued' ? '대기 · 곧 화자를 붙입니다' : '화자 붙이는 중 · ${job.line ?? ''}',
+        stage: job.state == 'queued' ? RecordingStage.queued : RecordingStage.running,
+        openPath: 'inbox/transcripts/${job.file}',
+      ));
+      continue;
+    }
     if (job.state == 'queued' || job.state == 'running') {
       covered.add(job.file);
       items.add(RecordingTrail(
@@ -66,6 +78,7 @@ List<RecordingTrail> recordingTrails({
   }
 
   for (final transcript in inbox.transcripts) {
+    if (covered.contains(transcript.name)) continue;
     final path = 'inbox/transcripts/${transcript.name}';
     items.add(RecordingTrail(
       file: transcript.name,

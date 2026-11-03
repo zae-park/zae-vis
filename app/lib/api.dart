@@ -173,6 +173,10 @@ class WorklogApi {
     return (j['speakers'] is List ? j['speakers'] as List : const <Object?>[]).whereType<String>().toList();
   }
 
+  /// Queues a speaker pass for a transcript saved without speakers (the kept recording is recognized again).
+  /// Progress is the `kind: speakers` job in [inbox] whose file is the transcript's name.
+  Future<void> relabelSpeakers(String path) => _send('POST', '/transcripts/relabel', {'path': path});
+
   /// The worklog files a sentence names ("11월 2일 전사본"), or the files behind its top search hits.
   Future<FileMatches> findFiles(String request) async => FileMatches.fromJson(await _get('/files', {'q': request}));
 

@@ -187,6 +187,13 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'path': 'inbox/transcripts/2026-11-02_1703_녹음.txt', 'name': '2026-11-02_1703_녹음.txt', 'bytes': 2048, 'date': '2026-11-02', 'kind': '전사본'},
               ],
             });
+          case '/api/transcripts/relabel' when req.method == 'POST':
+            posted.add(req);
+            final name = ((jsonDecode(req.body) as Map)['path'] as String).split('/').last;
+            mockInboxJobs = [
+              {'file': name, 'kind': 'speakers', 'state': 'running', 'line': '다시 인식 · 음성 인식 30%', 'fraction': 0.18},
+            ];
+            return _json({'file': name}, 202);
           case '/api/transcripts/speakers' when req.method == 'PUT':
             posted.add(req);
             final names = ((jsonDecode(req.body) as Map)['names'] as Map).cast<String, String>();
@@ -1057,6 +1064,43 @@ void main() {
     expect(jsonDecode(posted.last.body), {'path': path, 'names': {'A': '재박'}});
     expect(find.widgetWithText(ActionChip, '재박'), findsOneWidget, reason: 'the view reloads with the new name');
     expect(tester.widget<SelectableText>(find.byType(SelectableText)).textSpan!.toPlainText(), contains('[재박] 안녕하세요.'));
+  });
+
+  testWidgets('a transcript without speakers offers 화자 붙이기: confirm, progress, then the labeled text', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final original = mockTranscript;
+    mockTranscript = '# 녹음\n\n(whisperX 자동 전사)\n\n안녕하세요. 네, 좋아요.\n';
+    addTearDown(() {
+      mockTranscript = original;
+      mockInboxJobs = const [];
+    });
+    const path = 'inbox/transcripts/2026-10-30_1424_녹음.txt';
+
+    await tester.pumpWidget(MaterialApp(home: FileScreen(api: _fakeApi(), path: path)));
+    await tester.pumpAndSettle();
+    expect(find.text('말한 사람이 표시되지 않은 전사본입니다.'), findsOneWidget);
+    await tester.tap(find.text('화자 붙이기'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('남겨 둔 원본 녹음을 다시 인식해'), findsOneWidget);
+    await tester.tap(find.text('붙이기'));
+    await tester.pump();
+    await tester.pump();
+    expect(jsonDecode(posted.last.body), {'path': path});
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('화자 붙이는 중 · 다시 인식 · 음성 인식 30%'), findsOneWidget);
+
+    mockTranscript = '# 녹음\n\n(whisperX 자동 전사)\n\n[A] 안녕하세요.\n\n[B] 네, 좋아요.\n';
+    mockInboxJobs = [
+      {'file': '2026-10-30_1424_녹음.txt', 'kind': 'speakers', 'state': 'done', 'fraction': 1},
+    ];
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ActionChip, 'A'), findsOneWidget, reason: 'the file reloads with speakers');
+    expect(find.text('화자 다시 붙이기'), findsOneWidget);
   });
 
   testWidgets('settings: speakers work without an account; the quiet/fast switch saves', (tester) async {

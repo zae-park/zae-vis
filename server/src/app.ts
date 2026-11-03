@@ -1,14 +1,14 @@
 // HTTP API for the Flutter front-end. Binds to loopback only; see main.ts.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, normalize, sep } from "node:path";
 import type { AskOutcome } from "./ask.ts";
 import type { RefreshPhase, SearchBackend } from "./autorag.ts";
 import type { HfStatus } from "./hf.ts";
 import type { CollectProgress } from "./sources/index.ts";
-import { AUDIO_EXT } from "./transcribe.ts";
+import { AUDIO_EXT, audioForTranscript } from "./transcribe.ts";
 import { contentDisposition, findFiles, listWorklogFiles } from "./files.ts";
 import { cleanSpeakerName, renameSpeakers, transcriptSpeakers } from "./diarize.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
@@ -87,6 +87,8 @@ export type AppOptions = {
   audio?: {
     dir(): string;
     enqueue(file: string): void;
+    /** Queues a speaker pass for a worklog-relative transcript path. Absent in tests that only upload. */
+    relabel?(path: string): void;
     jobs(): unknown[];
     /** Stops a queued or running transcription. Absent in tests that only upload. */
     cancel?(file: string): boolean;
@@ -349,6 +351,23 @@ export function createApp(opts: AppOptions): Server {
           const paths = [...new Set((r?.ok ? r.hits : []).filter((h) => !h.weak).map((h) => h.path))].filter((p) => known.has(p)).slice(0, 5);
           const files = paths.map((p) => findFiles([known.get(p)!], p)[0]).filter(Boolean);
           return send(res, 200, { files, by: files.length ? "search" : "none" });
+        }
+
+        case "POST /transcripts": {
+          // POST /api/transcripts/relabel { path } → 202 { file } — speaker labels for a transcript saved without them.
+          // Recognizes the kept recording (processed/audio/) again, then rewrites the text as "[A] …" turns. Progress is a
+          // job in GET /api/inbox (kind "speakers", file = the transcript's name).
+          if (arg !== "relabel") return notFound(res);
+          const b = await readJson(req);
+          const rel = typeof b.path === "string" ? b.path.trim() : "";
+          if (!/^(inbox|processed)\/transcripts\/[^/\\]+\.txt$/.test(rel) || rel.includes("..")) return send(res, 400, { error: "bad_path", message: "전사본(.txt)만 화자를 붙일 수 있습니다." });
+          if (!opts.audio?.relabel) return send(res, 501, { error: "unsupported", message: "이 서버는 전사를 하지 않습니다." });
+          if (!existsSync(join(worklog.root, rel))) return notFound(res);
+          if (!(await audioForTranscript(worklog.root, rel))) return send(res, 404, { error: "no_audio", message: "원본 녹음이 processed/audio에 없어 화자를 붙일 수 없습니다." });
+          const name = rel.split("/").pop()!;
+          const busy = (opts.audio.jobs() as Array<{ file?: string; state?: string }>).some((j) => j.file === name && (j.state === "queued" || j.state === "running"));
+          if (!busy) opts.audio.relabel(rel);
+          return send(res, 202, { file: name });
         }
 
         case "PUT /transcripts": {

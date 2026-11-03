@@ -22,6 +22,7 @@ import { delimiter } from "node:path";
 import type { SearchBackend, SearchHit } from "./autorag.ts";
 import { DEFAULT_OPENROUTER_MODEL, noAgentReason, searchDirs, type AgentId, type AgentInfo, type DigestSetting } from "./digest.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
+import { filesNamedIn, listWorklogFiles } from "./files.ts";
 import { fallbackCandidates, plannedRail, quotaReason, replyQuota, withStop, type RailStop } from "./rail.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
@@ -61,6 +62,33 @@ export function pickSources(hits: SearchHit[], max = DEFAULT_TOP_K): AskSource[]
     label: [h.context?.date, h.context?.sourceLabel, clipLabel(h.context?.section), h.context?.author].filter(Boolean).join(" · ") || h.title,
     passage: h.snippet,
   }));
+}
+
+/** How much of the files a question names goes into the prompt. The prompt is a CLI argument, and Windows caps a
+ * command line at 32K characters. */
+export const NAMED_CHARS = process.platform === "win32" ? 12_000 : 40_000;
+
+/** Sources for the files [question] names ("가장 최근 회의록"), read whole up to [budget] characters in all. */
+export async function namedSources(worklogDir: string, question: string, now = new Date(), budget = NAMED_CHARS): Promise<AskSource[]> {
+  const files = filesNamedIn(await listWorklogFiles(worklogDir), question, now);
+  const out: AskSource[] = [];
+  let left = budget;
+  for (const f of files) {
+    if (left < 500) break;
+    const text = (await readFile(join(worklogDir, f.path), "utf8").catch(() => "")).trim();
+    if (!text) continue;
+    const passage = text.length <= left ? text : `${text.slice(0, left)}\n…(이하 생략, 전체 ${text.length}자)`;
+    left -= Math.min(text.length, left);
+    out.push({ n: out.length + 1, path: f.path, label: [f.date, f.kind, "파일 전체"].filter(Boolean).join(" · "), passage });
+  }
+  return out;
+}
+
+/** Named files first, then search sources that are not one of them, numbered again from 1. */
+export function mergeSources(named: AskSource[], searched: AskSource[], max = DEFAULT_TOP_K): AskSource[] {
+  const seen = new Set(named.map((s) => s.path));
+  const rest = searched.filter((s) => !seen.has(s.path)).slice(0, Math.max(max - named.length, 0));
+  return [...named, ...rest].map((s, i) => ({ ...s, n: i + 1 }));
 }
 
 const clipLabel = (s: string | null | undefined): string | null => (!s ? null : s.length > 60 ? s.slice(0, 60).trimEnd() + "…" : s);
@@ -320,10 +348,13 @@ export class AskRunner {
     try {
       const previous = existing?.turns.at(-1);
       // fetch a few more than needed so weak hits can be dropped
-      const r = await opts.search.search(searchQueryFor(question, previous?.q), Math.min(topK + 5, 50), PASSAGE_CHARS);
+      const [r, named] = await Promise.all([
+        opts.search.search(searchQueryFor(question, previous?.q), Math.min(topK + 5, 50), PASSAGE_CHARS),
+        namedSources(opts.worklogDir, question).catch(() => [] as AskSource[]),
+      ]);
       if (abort.signal.aborted) return cancelled();
-      if (!r.ok) return { ok: false, status: 502, error: "search_failed", message: r.error?.message ?? "검색에 실패했습니다." };
-      const sources = pickSources(r.hits, topK);
+      if (!r.ok && !named.length) return { ok: false, status: 502, error: "search_failed", message: r.error?.message ?? "검색에 실패했습니다." };
+      const sources = mergeSources(named, r.ok ? pickSources(r.hits, topK) : [], topK);
       if (!sources.length) return { ok: false, status: 404, error: "no_hits", message: `"${question}"과 관련된 기록을 찾지 못했습니다.` };
       const prompt = buildAskPrompt(question, sources, existing?.turns ?? []);
       this.opts.log?.(`질문 (${chain.map((a) => a.title).join(" → ")}, 발췌 ${sources.length}개): ${question}`);

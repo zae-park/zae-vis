@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -41,7 +43,10 @@ class FileScreen extends StatelessWidget {
               return Readable(
                 maxWidth: 1100,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  if (speakers.isNotEmpty) _SpeakerBar(api: api, path: path, speakers: speakers, onRenamed: reload),
+                  if (speakers.isNotEmpty)
+                    _SpeakerBar(api: api, path: path, speakers: speakers, onRenamed: reload, pass: SpeakerPass(api: api, path: path, labeled: true, onDone: reload))
+                  else if (isTranscriptPath(path))
+                    Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: SpeakerPass(api: api, path: path, labeled: false, onDone: reload)),
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(20),
@@ -141,11 +146,12 @@ class PlainTextView extends StatelessWidget {
 
 /// "화자 [A] [B]": tap one to give it a name; the file changes on the server and the view reloads.
 class _SpeakerBar extends StatelessWidget {
-  const _SpeakerBar({required this.api, required this.path, required this.speakers, required this.onRenamed});
+  const _SpeakerBar({required this.api, required this.path, required this.speakers, required this.onRenamed, required this.pass});
   final WorklogApi api;
   final String path;
   final List<String> speakers;
   final VoidCallback onRenamed;
+  final Widget pass;
 
   Future<void> _rename(BuildContext context, String label) async {
     final controller = TextEditingController(text: label);
@@ -193,7 +199,119 @@ class _SpeakerBar extends StatelessWidget {
             onPressed: () => _rename(context, s),
           ),
         Text('누르면 이름을 붙입니다. 이 파일에 바로 반영됩니다.', style: t.bodySmall?.copyWith(color: scheme.outline)),
+        pass,
       ]),
     );
+  }
+}
+
+/// "화자 붙이기": recognizes the kept recording again and rewrites the transcript as "[A] …" turns (server
+/// `POST /api/transcripts/relabel`). Shows the job's progress while it runs, then [onDone] reloads the file.
+class SpeakerPass extends StatefulWidget {
+  const SpeakerPass({super.key, required this.api, required this.path, required this.labeled, required this.onDone, this.poll = const Duration(seconds: 2)});
+  final WorklogApi api;
+  final String path;
+
+  /// The transcript already has speakers: the button reads "다시 붙이기" and warns that names go back to letters.
+  final bool labeled;
+  final VoidCallback onDone;
+  final Duration poll;
+
+  @override
+  State<SpeakerPass> createState() => _SpeakerPassState();
+}
+
+class _SpeakerPassState extends State<SpeakerPass> {
+  TranscribeJob? _job;
+  bool _starting = false;
+  Timer? _timer;
+
+  String get _name => widget.path.split('/').last;
+
+  @override
+  void initState() {
+    super.initState();
+    _check(); // a pass started earlier may still be running
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _check() async {
+    TranscribeJob? job;
+    try {
+      job = (await widget.api.inbox()).jobs.where((j) => j.kind == 'speakers' && j.file == _name).firstOrNull;
+    } catch (_) {
+      job = _job;
+    }
+    if (!mounted) return;
+    final was = _job;
+    setState(() => _job = job);
+    _timer?.cancel();
+    if (job != null && job.active) {
+      _timer = Timer(widget.poll, _check);
+    } else if (was != null && was.active && job?.state == 'done') {
+      toast(context, '화자를 붙였습니다');
+      widget.onDone();
+    }
+  }
+
+  Future<void> _start() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(widget.labeled ? '화자를 다시 붙일까요?' : '화자를 붙일까요?'),
+        content: Text([
+          '남겨 둔 원본 녹음을 다시 인식해 말한 사람마다 [A], [B]로 나눕니다. 녹음 길이만큼 걸리고 그동안 CPU를 씁니다.',
+          if (widget.labeled) '붙여 둔 이름은 A, B로 돌아갑니다.',
+          '이 파일의 본문이 새 글로 바뀝니다.',
+        ].join('\n\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('붙이기')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _starting = true);
+    try {
+      await widget.api.relabelSpeakers(widget.path);
+      if (!mounted) return;
+      setState(() => _job = TranscribeJob(file: _name, state: 'queued', kind: 'speakers'));
+      _timer?.cancel();
+      _timer = Timer(widget.poll, _check);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final job = _job;
+    if (job != null && job.active) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, value: job.fraction)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(job.state == 'queued' ? '화자 붙이기 대기 중' : '화자 붙이는 중 · ${job.line ?? ''}', style: t.bodySmall?.copyWith(color: scheme.outline))),
+      ]);
+    }
+    final button = TextButton.icon(
+      onPressed: _starting ? null : _start,
+      icon: const Icon(Icons.record_voice_over_outlined, size: 18),
+      label: Text(widget.labeled ? '화자 다시 붙이기' : '화자 붙이기'),
+    );
+    final failed = job?.state == 'failed' ? job!.error : null;
+    return Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      if (!widget.labeled) Text('말한 사람이 표시되지 않은 전사본입니다.', style: t.bodySmall?.copyWith(color: scheme.outline)),
+      button,
+      if (failed != null) Text('지난번 실패: $failed', style: t.bodySmall?.copyWith(color: scheme.error)),
+    ]);
   }
 }

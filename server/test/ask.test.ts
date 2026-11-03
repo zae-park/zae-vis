@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-ask-state-"));
-const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, execCli, parseClarify, pickSources, searchQueryFor } = await import("../src/ask.ts");
+const { AskRunner, ConversationStore, askCliArgs, buildAskPrompt, cleanAnswer, execCli, mergeSources, namedSources, parseClarify, pickSources, searchQueryFor } = await import("../src/ask.ts");
 const { quotaReason } = await import("../src/rail.ts");
 const { createApp } = await import("../src/app.ts");
 const { normalizeSearch } = await import("../src/autorag.ts");
@@ -79,7 +79,7 @@ test("ask: a CLI agent answers from the prompt in the worklog folder; one questi
   const runner = new AskRunner({ exec });
   const common = { search: fakeSearch, setting: { model: "" }, worklogDir: "/w" };
   const first = runner.ask("검색 맥락은 언제 했지?", { ...common, agent: claude, topK: 8 });
-  await new Promise((r) => setTimeout(r, 10));
+  while (!execCalls.length) await new Promise((r) => setTimeout(r, 5));
   assert.equal(runner.status().running?.q, "검색 맥락은 언제 했지?");
   const busy = await runner.ask("다른 질문", { ...common, agent: claude });
   assert.equal(busy.ok, false);
@@ -344,7 +344,7 @@ test("ask: cancel kills the agent's process; the question answers cancelled and 
   const runner = new AskRunner({ exec, store });
   assert.equal(runner.cancel(), false, "nothing to cancel");
   const pending = runner.ask("오래 걸리는 질문", { search: fakeSearch, agent: claude, setting: { model: "" }, worklogDir: "/w" });
-  await new Promise((r) => setTimeout(r, 10));
+  while (!seen) await new Promise((r) => setTimeout(r, 5));
   assert.ok(seen && !seen.aborted);
   assert.equal(runner.cancel(), true);
   const r = await pending;
@@ -392,3 +392,27 @@ test("ask: the prompt allows one question back; the reply is parsed into a quest
   assert.deepEqual(store.get(r.result.conversationId)?.turns[0].clarify, r.result.clarify, "kept so the next turn knows it already asked");
 });
 
+
+test("ask: a question that names a file by kind and date reads that file whole, before the search sources", async () => {
+  const w = await mkdtemp(join(tmpdir(), "zv-ask-named-"));
+  await mkdir(join(w, "inbox", "transcripts"), { recursive: true });
+  await writeFile(join(w, "inbox", "transcripts", "2026-10-30_1424_녹음.txt"), "# 10-30\n\n예전 회의");
+  await writeFile(join(w, "inbox", "transcripts", "2026-11-02_1703_녹음.txt"), "# 11-02\n\n[A] 레비뉴는 주말에 오른다.\n\n[B] 주중엔 떨어진다.");
+  const now = new Date(2026, 10, 3);
+  const named = await namedSources(w, "가장 최근 회의 내용 요약해줘", now);
+  assert.equal(named.length, 1);
+  assert.equal(named[0].path, "inbox/transcripts/2026-11-02_1703_녹음.txt");
+  assert.match(named[0].label, /2026-11-02 · 전사본 · 파일 전체/);
+  assert.match(named[0].passage, /\[B\] 주중엔 떨어진다/);
+  await writeFile(join(w, "inbox", "transcripts", "2026-11-03_0900_녹음.txt"), "가".repeat(2000));
+  const clipped = (await namedSources(w, "가장 최근 회의록", now, 600))[0];
+  assert.equal(clipped.path, "inbox/transcripts/2026-11-03_0900_녹음.txt");
+  assert.match(clipped.passage, /^가{600}\n…\(이하 생략, 전체 2000자\)$/);
+  assert.deepEqual(await namedSources(w, "레비뉴 패턴은 왜 그래?", now), [], "a content question names no file");
+
+  const merged = mergeSources(named, [
+    { n: 1, path: "inbox/transcripts/2026-11-02_1703_녹음.txt", label: "x", passage: "조각" },
+    { n: 2, path: "sources/git/2026-11-02.md", label: "git", passage: "커밋" },
+  ], 10);
+  assert.deepEqual(merged.map((s) => [s.n, s.path]), [[1, "inbox/transcripts/2026-11-02_1703_녹음.txt"], [2, "sources/git/2026-11-02.md"]]);
+});

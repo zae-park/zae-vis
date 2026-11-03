@@ -16,6 +16,24 @@ Inbox _inbox({List<Object> jobs = const [], List<Object> transcripts = const [],
     });
 
 void main() {
+  test('a speaker pass shows once, on the transcript, and opens it rather than the record floater', () {
+    final trails = recordingTrails(
+      inbox: _inbox(
+        jobs: [
+          {'file': '2026-10-30_1424_녹음.txt', 'kind': 'speakers', 'state': 'running', 'line': '다시 인식 · 음성 인식 40%'},
+          {'file': 'old.txt', 'kind': 'speakers', 'state': 'done'},
+        ],
+        transcripts: [
+          {'name': '2026-10-30_1424_녹음.txt', 'size': 10, 'modified': '2026-10-30T01:00:00Z'},
+        ],
+      ),
+    );
+    expect(trails, hasLength(1));
+    expect(trails.single.sentence, '화자 붙이는 중 · 다시 인식 · 음성 인식 40%');
+    expect(trails.single.watch, isFalse);
+    expect(trails.single.openPath, 'inbox/transcripts/2026-10-30_1424_녹음.txt');
+  });
+
   test('a running queue job and a saved transcript get different sentences', () {
     final trails = recordingTrails(
       inbox: _inbox(

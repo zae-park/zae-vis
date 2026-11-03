@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { contentDisposition, findFiles, listWorklogFiles, parseRequest, type CatalogFile } from "../src/files.ts";
+import { contentDisposition, filesNamedIn, findFiles, listWorklogFiles, parseRequest, type CatalogFile } from "../src/files.ts";
 
 const now = new Date(2026, 10, 2, 18, 0); // 2026-11-02
 const f = (path: string, mtime = 0): CatalogFile => ({ path, name: path.split("/").pop()!, bytes: 10, mtime });
@@ -27,7 +27,7 @@ const catalog = [
 const paths = (q: string) => findFiles(catalog, q, now).map((x) => x.path);
 
 test("a date and a kind pick that day's transcripts", () => {
-  assert.deepEqual(paths("11월 2일 전사본 txt로 다운받아줘"), ["inbox/transcripts/2026-11-02_1703_녹음.txt", "sources/transcripts/2026-11-02.md"]);
+  assert.deepEqual(paths("11월 2일 전사본 txt로 다운받아줘"), ["inbox/transcripts/2026-11-02_1703_녹음.txt"], "not the collector's list of names");
   assert.deepEqual(paths("2026-10-30 녹음 내려받기"), ["inbox/transcripts/2026-10-30_1424_녹음.txt"]);
   assert.deepEqual(paths("10/26 회의록"), ["inbox/transcripts/2026-10-26_2115_녹음.txt"]);
 });
@@ -60,7 +60,7 @@ test("parseRequest: a month later than now is last year; filler words are not se
   const w = parseRequest("12월 3일 회의 전사본을 텍스트 파일로 내려받고 싶어", now);
   assert.deepEqual(w.days, ["2025-12-03"]);
   assert.deepEqual(w.kinds.map((k) => k.label), ["전사본"]);
-  assert.ok(w.tokens.includes("회의") && !w.tokens.some((x) => /텍스트|파일|내려받|싶/.test(x)), w.tokens.join(","));
+  assert.ok(!w.tokens.some((x) => /회의|텍스트|파일|내려받|싶/.test(x)), w.tokens.join(","));
 });
 
 test("listWorklogFiles walks .md/.txt and skips dot folders and audio", async () => {
@@ -77,4 +77,13 @@ test("listWorklogFiles walks .md/.txt and skips dot folders and audio", async ()
 
 test("contentDisposition keeps a Korean name for browsers and an ASCII fallback", () => {
   assert.equal(contentDisposition("2026-11-02_1703_녹음.txt"), `attachment; filename="2026-11-02_1703___.txt"; filename*=UTF-8''2026-11-02_1703_%EB%85%B9%EC%9D%8C.txt`);
+});
+
+test("a question names files by kind plus date or latest; content questions name none", () => {
+  const named = (q: string) => filesNamedIn(catalog, q, now).map((x) => x.path);
+  assert.deepEqual(named("가장 최근에 진행한 회의의 회의록을 받고싶어"), ["inbox/transcripts/2026-11-02_1703_녹음.txt"]);
+  assert.deepEqual(named("가장 최근 회의 내용 요약해줘"), ["inbox/transcripts/2026-11-02_1703_녹음.txt"]);
+  assert.deepEqual(named("10월 30일 회의에서 정한 것"), ["inbox/transcripts/2026-10-30_1424_녹음.txt"]);
+  assert.deepEqual(named("회의에서 정한 배포 일정"), [], "no date: search finds it by content");
+  assert.deepEqual(named("가장 최근에 한 일"), [], "no kind of record");
 });

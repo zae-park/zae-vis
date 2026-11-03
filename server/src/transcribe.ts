@@ -6,7 +6,7 @@
 import { spawnBin } from "./spawnbin.ts";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -197,21 +197,31 @@ type SpeakerJob = {
   token: string;
   threads: number;
   onSpeakers?: (file: string) => void;
+  /** Stopped by the user while the pass ran: leave the transcript as it was. */
+  cancelled?: () => boolean;
 };
 
 let speakerChain: Promise<void> = Promise.resolve();
 
 function scheduleSpeakers(job: SpeakerJob): void {
-  speakerChain = speakerChain.then(() => labelSpeakers(job)).catch(() => {});
+  speakerChain = speakerChain.then(() => labelSpeakers(job)).catch((err) => console.error(`화자 구분 실패: ${(err as Error).message || String(err)}`));
 }
 
+/** Runs one speaker pass after any already scheduled one, and rejects when it fails. */
+function speakersNow(job: SpeakerJob): Promise<void> {
+  const run = speakerChain.then(() => labelSpeakers(job));
+  speakerChain = run.catch(() => {});
+  return run;
+}
+
+/** Writes "[A] …" turns into the transcript. Throws (with any token masked) when the pass fails. */
 async function labelSpeakers(job: SpeakerJob): Promise<void> {
   const py = venvPython(job.bin);
   const onnx = job.engine === "onnx";
   const script = join(dirname(fileURLToPath(import.meta.url)), onnx ? "diarize_onnx.py" : "diarize_later.py");
-  const fail = (msg: string) => console.error(`화자 구분 실패: ${job.token ? msg.replaceAll(job.token, "…") : msg}`);
   try {
-    if (!py || !existsSync(script) || !existsSync(job.audio)) return;
+    if (!py || !existsSync(script)) throw new Error("whisperX 환경에서 화자 구분 스크립트를 찾지 못했습니다");
+    if (!existsSync(job.audio)) throw new Error("원본 녹음이 없습니다");
     // the first transcript that needs speakers brings sherpa-onnx and the models (about 33 MB)
     if (onnx && !(await ensureDiarizer(py, { log: (l) => console.log(`[speakers] ${l}`) }))) throw new Error("화자 구분 모델을 준비하지 못했습니다");
     const args = onnx ? [script, job.audio, job.jsonPath, diarizeDir()] : [script, job.audio, job.jsonPath];
@@ -232,19 +242,90 @@ async function labelSpeakers(job: SpeakerJob): Promise<void> {
         else reject(new Error(err.trim().split("\n").slice(-3).join(" ") || `종료 ${code}`));
       });
     });
+    if (job.cancelled?.()) return;
     const raw = await readFile(job.transcript, "utf8");
-    const marker = raw.indexOf("(whisperX ");
-    const splitAt = marker >= 0 ? raw.indexOf("\n\n", marker) : -1;
-    const header = splitAt >= 0 ? raw.slice(0, splitAt) : raw.trimEnd();
-    await writeFile(job.transcript, `${header}\n\n${redact(formatSpeakerTurns(text))}\n`);
+    const header = transcriptHeader(raw);
+    await writeFile(job.transcript, `${header ? `${header}\n\n` : ""}${redact(formatSpeakerTurns(text))}\n`);
     const name = basename(job.transcript);
     try { job.onSpeakers?.(name); } catch {}
     notify("화자 구분 완료", `${name}에 말한 사람을 붙였습니다.`);
   } catch (err) {
-    fail((err as Error).message || String(err));
+    const msg = (err as Error).message || String(err);
+    throw new Error(job.token ? msg.replaceAll(job.token, "…") : msg);
   } finally {
     await rm(job.jsonPath, { force: true }).catch(() => {});
   }
+}
+
+/** One whisperX pass: <audio stem>.txt and .json in [outDir]. Rejects with TranscribeCancelled when [slot] is stopped. */
+async function runWhisperx(bin: string, audio: string, outDir: string, threads: number, slot: ActiveRun, opts: TranscribeOptions): Promise<void> {
+  const args = transcribeLaunchArgs(audio, outDir, { model: opts.model, language: opts.language, threads });
+  let view: WhisperView = { label: "모델 불러오는 중", fraction: null };
+  const emit = () => opts.onProgress?.({ line: whisperStatusLine(view), fraction: view.fraction });
+  emit();
+  await new Promise<void>((resolve, reject) => {
+    // whisperX shells out to `ffmpeg`; the extension links one next to the whisperx binary.
+    // PYTHONUNBUFFERED so each "Progress: N%" line arrives before the buffer fills.
+    // detached puts ffmpeg in the same process group so cancel reaches it too.
+    const env = {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+      OMP_NUM_THREADS: String(threads),
+      MKL_NUM_THREADS: String(threads),
+      PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter),
+    };
+    if (slot.cancelled) {
+      reject(new TranscribeCancelled());
+      return;
+    }
+    const child = spawnBin(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    slot.child = child;
+    let errText = "";
+    const take = (buf: Buffer) => {
+      const chunk = buf.toString();
+      errText = (errText + chunk).slice(-4000);
+      for (const line of textLines(chunk)) {
+        opts.onBeat?.(line.slice(0, 160));
+        const next = foldWhisperLine(view, line);
+        if (next) {
+          view = next;
+          emit();
+        }
+      }
+    };
+    child.stdout?.on("data", take);
+    child.stderr?.on("data", take);
+    const timer = setInterval(() => opts.onTick?.(), 5000);
+    const killer = setTimeout(() => child.kill("SIGTERM"), 3 * 60 * 60_000);
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      clearTimeout(killer);
+      if (err) reject(err);
+      else resolve();
+    };
+    child.on("error", (e) => finish(slot.cancelled ? new TranscribeCancelled() : e));
+    child.on("close", (code) => {
+      if (slot.cancelled) finish(new TranscribeCancelled());
+      else if (code === 0) finish();
+      else {
+        const tail = errText.trim().split("\n").slice(-3).join(" ");
+        finish(new Error(`whisperX 실패: ${tail || `종료 ${code}`}`));
+      }
+    });
+  });
+}
+
+/** The title and "(whisperX …)" note of a transcript: everything a speaker pass keeps. */
+export function transcriptHeader(raw: string): string {
+  const marker = raw.indexOf("(whisperX ");
+  const splitAt = marker >= 0 ? raw.indexOf("\n\n", marker) : -1;
+  if (splitAt >= 0) return raw.slice(0, splitAt);
+  if (marker >= 0) return raw.trimEnd();
+  const title = raw.split("\n")[0] ?? "";
+  return title.startsWith("# ") ? title : "";
 }
 
 /**
@@ -263,63 +344,7 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
     out = dir;
     if (slot.cancelled) throw new TranscribeCancelled();
     const threads = transcribeThreads(opts.speed);
-    const args = transcribeLaunchArgs(audio, dir, { model: opts.model, language: opts.language, threads });
-    let view: WhisperView = { label: "모델 불러오는 중", fraction: null };
-    const emit = () => opts.onProgress?.({ line: whisperStatusLine(view), fraction: view.fraction });
-    emit();
-    await new Promise<void>((resolve, reject) => {
-      // whisperX shells out to `ffmpeg`; the extension links one next to the whisperx binary.
-      // PYTHONUNBUFFERED so each "Progress: N%" line arrives before the buffer fills.
-      // detached puts ffmpeg in the same process group so cancel reaches it too.
-      const env = {
-        ...process.env,
-        PYTHONUNBUFFERED: "1",
-        OMP_NUM_THREADS: String(threads),
-        MKL_NUM_THREADS: String(threads),
-        PATH: [dirname(bin), process.env.PATH ?? ""].filter(Boolean).join(delimiter),
-      };
-      if (slot.cancelled) {
-        reject(new TranscribeCancelled());
-        return;
-      }
-      const child = spawnBin(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-      slot.child = child;
-      let errText = "";
-      const take = (buf: Buffer) => {
-        const chunk = buf.toString();
-        errText = (errText + chunk).slice(-4000);
-        for (const line of textLines(chunk)) {
-          opts.onBeat?.(line.slice(0, 160));
-          const next = foldWhisperLine(view, line);
-          if (next) {
-            view = next;
-            emit();
-          }
-        }
-      };
-      child.stdout?.on("data", take);
-      child.stderr?.on("data", take);
-      const timer = setInterval(() => opts.onTick?.(), 5000);
-      const killer = setTimeout(() => child.kill("SIGTERM"), 3 * 60 * 60_000);
-      let settled = false;
-      const finish = (err?: Error) => {
-        if (settled) return;
-        settled = true;
-        clearInterval(timer);
-        clearTimeout(killer);
-        if (err) reject(err);
-        else resolve();
-      };
-      child.on("error", (e) => finish(slot.cancelled ? new TranscribeCancelled() : e));
-      child.on("close", (code) => {
-        if (slot.cancelled) finish(new TranscribeCancelled());
-        else if (code === 0) finish();
-        else {
-          const tail = errText.trim().split("\n").slice(-3).join(" ");
-          finish(new Error(`whisperX 실패: ${tail || `종료 ${code}`}`));
-        }
-      });
-    });
+    await runWhisperx(bin, audio, dir, threads, slot, opts);
     if (slot.cancelled) throw new TranscribeCancelled();
     const produced = join(dir, basename(audio, extname(audio)) + ".txt");
     const text = (await readFile(produced, "utf8")).trim();
@@ -343,10 +368,68 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
   }
 }
 
+/**
+ * The kept recording behind a transcript in processed/audio/: same name ("2026-11-02_1703_녹음"), or the name
+ * before the date was added ("2026-10-21_회의.txt" ← "회의.m4a"). Null when it was not kept.
+ */
+export async function audioForTranscript(worklogDir: string, transcript: string): Promise<string | null> {
+  const dir = join(worklogDir, "processed", "audio");
+  const stem = basename(transcript, extname(transcript));
+  const stems = [stem, stem.replace(/^\d{4}-\d{2}-\d{2}_/, "")];
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return null;
+  }
+  for (const want of stems) {
+    const hit = names.find((n) => AUDIO_EXT.has(extname(n).toLowerCase()) && basename(n, extname(n)) === want);
+    if (hit) return join(dir, hit);
+  }
+  return null;
+}
+
+/**
+ * Speaker labels for a transcript saved without them (before diarization existed, or with it off): recognizes the
+ * kept recording again for timings, then rewrites the text below the header as "[A] …" turns. The file changes
+ * only when the speaker pass succeeds; names given earlier are replaced by letters again.
+ */
+export async function relabelTranscript(transcript: string, worklogDir: string, opts: TranscribeOptions = {}): Promise<string> {
+  const bin = whisperxBin(opts.whisperxBin);
+  if (!bin) throw new Error("whisperX가 설치되지 않았습니다. 'zaevis ext install whisperx'를 실행하세요.");
+  const audio = await audioForTranscript(worklogDir, transcript);
+  if (!audio) throw new Error("원본 녹음이 processed/audio에 없어 화자를 붙일 수 없습니다");
+  const slot = trackRun(transcript);
+  let out: string | undefined;
+  try {
+    out = await mkdtemp(join(tmpdir(), "zaevis-wx-"));
+    const threads = transcribeThreads(opts.speed);
+    await runWhisperx(bin, audio, out, threads, slot, {
+      ...opts,
+      onProgress: (p) => opts.onProgress?.({ line: `다시 인식 · ${p.line}`, fraction: p.fraction == null ? null : p.fraction * 0.6 }),
+    });
+    if (slot.cancelled) throw new TranscribeCancelled();
+    const json = join(out, basename(audio, extname(audio)) + ".json");
+    if (!existsSync(json)) throw new Error("whisperX가 시간 정보(JSON)를 남기지 않았습니다");
+    const jsonCopy = join(tmpdir(), `zaevis-diarize-${process.pid}-${Date.now()}.json`);
+    await copyFile(json, jsonCopy);
+    opts.onProgress?.({ line: "화자 구분 중", fraction: 0.6 });
+    const hf = opts.hfToken ?? await tokenForDiarize().catch(() => null);
+    await speakersNow({ bin, audio, jsonPath: jsonCopy, transcript, engine: hf ? "pyannote" : "onnx", token: hf ?? "", threads, onSpeakers: opts.onSpeakers, cancelled: () => slot.cancelled });
+    if (slot.cancelled) throw new TranscribeCancelled();
+    return transcript;
+  } finally {
+    if (active.get(basename(transcript)) === slot) active.delete(basename(transcript));
+    if (out) await rm(out, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export type TranscribeJobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export type TranscribeJob = {
   file: string;
+  /** "speakers": a speaker pass for an existing transcript (file is the transcript's name). */
+  kind?: "transcribe" | "speakers";
   state: TranscribeJobState;
   result?: string;
   error?: string;
@@ -384,7 +467,16 @@ export class TranscribeQueue {
   }
 
   enqueue(audio: string, worklogDir: string, opts: TranscribeOptions): void {
-    const job: TranscribeJob = { file: basename(audio), state: "queued", at: new Date().toISOString() };
+    this.add(audio, "transcribe", opts, (o) => transcribeFile(audio, worklogDir, o));
+  }
+
+  /** Queues a speaker pass for a transcript that has none (see relabelTranscript). The job's file is the transcript's name. */
+  enqueueRelabel(transcript: string, worklogDir: string, opts: TranscribeOptions): void {
+    this.add(transcript, "speakers", opts, (o) => relabelTranscript(transcript, worklogDir, o));
+  }
+
+  private add(file: string, kind: TranscribeJob["kind"], opts: TranscribeOptions, run: (opts: TranscribeOptions) => Promise<string>): void {
+    const job: TranscribeJob = { file: basename(file), kind, state: "queued", at: new Date().toISOString() };
     this.jobs.unshift(job);
     this.jobs.splice(20);
     this.chain = this.chain.then(async () => {
@@ -396,7 +488,7 @@ export class TranscribeQueue {
       }
       job.state = "running";
       try {
-        job.result = basename(await transcribeFile(audio, worklogDir, {
+        job.result = basename(await run({
           ...opts,
           onProgress: (p) => {
             if (this.stopping.has(job)) return;

@@ -50,7 +50,14 @@ const queue = new TranscribeQueue();
 const digest = new DigestRunner({ notify });
 const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
-queue.onDone = (job) => notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
+queue.onDone = (job) => {
+  // a finished speaker pass already sent "화자 구분 완료"
+  if (job.kind === "speakers") {
+    if (job.state !== "done") notify("화자 구분 실패", `${job.file}: ${job.error ?? ""}`);
+    return;
+  }
+  notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
+};
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
 /** The whisperX venv's python, where sherpa-onnx goes; null without whisperX. */
 const speakerPython = (custom?: string): string | null => {
@@ -262,6 +269,10 @@ const server = createApp({
     enqueue: (file) => {
       const ts = transcriptSettings();
       queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), speakers: cfg.speakers, speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
+    },
+    relabel: (path) => {
+      const ts = transcriptSettings();
+      queue.enqueueRelabel(join(cfg.worklogDir, path), cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
     },
     jobs: () => queue.jobs,
     cancel: (file) => queue.cancel(file),

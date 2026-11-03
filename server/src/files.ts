@@ -43,7 +43,8 @@ type Kind = { label: string; dirs: string[]; words: string[] };
 
 /** Which folders a word in the request points at. Order matters: the first kind whose folder holds a file names it. */
 const KINDS: Kind[] = [
-  { label: "전사본", dirs: ["inbox/transcripts", "processed/transcripts", "sources/transcripts"], words: ["전사", "녹음", "회의록", "transcript"] },
+  // sources/transcripts/<date>.md only lists the day's transcript names: never what someone asking for one wants
+  { label: "전사본", dirs: ["inbox/transcripts", "processed/transcripts"], words: ["전사", "녹음", "회의", "미팅", "meeting", "transcript"] },
   { label: "git 커밋", dirs: ["sources/git"], words: ["git", "깃", "커밋", "commit"] },
   { label: "셸 이력", dirs: ["sources/shell-history"], words: ["셸", "쉘", "shell", "zsh", "터미널"] },
   { label: "에이전트 세션", dirs: ["sources/agent-sessions", "sources/claude-code", "inbox/claude-sessions", "processed/claude-sessions"], words: ["에이전트", "세션", "claude", "클로드", "codex", "gemini"] },
@@ -160,6 +161,16 @@ export function findFiles(catalog: CatalogFile[], q: string, now = new Date(), l
   if (scored.some((s) => s.score > 0)) scored.splice(0, scored.length, ...scored.filter((s) => s.score > 0));
   scored.sort((a, b) => b.score - a.score || (a.date === b.date ? b.f.mtime - a.f.mtime : a.date < b.date ? 1 : -1) || a.f.path.localeCompare(b.f.path));
   return scored.slice(0, w.latest ? 1 : limit).map((s) => found(s.f));
+}
+
+/**
+ * The files a question is about by name rather than by content: a kind of record plus a date, a time or "latest"
+ * ("가장 최근 회의록 요약해줘", "11월 2일 전사본에서 정한 것"). Search cannot see "latest", so the asker reads these whole.
+ */
+export function filesNamedIn(catalog: CatalogFile[], q: string, now = new Date(), limit = 3): FoundFile[] {
+  const w = parseRequest(q, now);
+  if (!w.kinds.length || !(w.latest || w.days.length || w.months.length || w.time)) return [];
+  return findFiles(catalog, q, now, limit);
 }
 
 /** What a download response says the file is called: an ASCII fallback plus the UTF-8 name (RFC 6266/5987). */

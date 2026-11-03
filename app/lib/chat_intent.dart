@@ -6,8 +6,12 @@ enum ChatIntent { search, ask, download }
 /// Words that always mean "give me the file".
 final _downloadStrong = RegExp(r'다운(?!타임|그레이드)|내려\s*받|내보내|export|download', caseSensitive: false);
 
-/// Words that mean it unless the line is a question ("txt로 저장하는 방법은?").
-final _downloadWeak = RegExp(r'(txt|md|텍스트|마크다운)\s*(파일)?\s*(로|으로)|파일\s*(로|을|를)?\s*(줘|주세요|줄래|받|보내)|저장\s*(해|하고|할래|해줘)', caseSensitive: false);
+/// Words that mean it unless the line is a question ("txt로 저장하는 방법은?"): a format, "save", or a kind of
+/// document handed over ("회의록을 받고 싶어", "리포트 보내 줘") — not "회의록 요약해 줘", which wants an answer.
+final _downloadWeak = RegExp(
+    r'(txt|md|텍스트|마크다운)\s*(파일)?\s*(로|으로)|저장\s*(해|하고|할래|해줘)'
+    r'|(파일|회의록|전사본|녹음본|리포트|보고서|원문)\s*(을|를|은|는|도|만|좀|하나)?\s*(줘|주세요|줄래|받|보내|가져)',
+    caseSensitive: false);
 
 final _questionWord = RegExp(r'왜|어떻게|무엇|뭐|뭘|언제|어디|누가|누구|어떤|얼마|몇\s|알려|설명|요약|정리해|비교|차이|이유|했지|였지|했나|됐지|인가|인지|할까|나요|까요|있어\?|없어\?');
 

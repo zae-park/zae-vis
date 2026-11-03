@@ -188,6 +188,10 @@ void main() {
     expect(chatIntent('이거 텍스트 파일로 줘'), ChatIntent.download);
     expect(chatIntent('어제 전사본 내려받을 수 있어?'), ChatIntent.download);
     expect(chatIntent('[2] export'), ChatIntent.download);
+    expect(chatIntent('가장 최근에 진행한 회의의 회의록을 받고싶어'), ChatIntent.download);
+    expect(chatIntent('주간 리포트 보내줘'), ChatIntent.download);
+    expect(chatIntent('가장 최근 회의록 요약해줘'), ChatIntent.ask, reason: 'a summary is an answer, not the file');
+    expect(chatIntent('회의록은 어디서 받아?'), ChatIntent.ask);
     expect(chatIntent('txt로 저장하는 방법은?'), ChatIntent.ask, reason: 'a question about saving is not a request for a file');
     expect(chatIntent('저장소 구조'), ChatIntent.search);
     expect(chatIntent('다운타임 원인'), ChatIntent.search);
