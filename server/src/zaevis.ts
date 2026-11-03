@@ -534,7 +534,7 @@ async function main(argv: string[]): Promise<void> {
       if (rest[0] === "app") return buildApp();
       die("사용법: zaevis build web|app");
       return;
-    case "search": case "s": case "ask": case "a": case "log": case "l": case "projects": case "p": case "project": case "summary": case "index": case "add": case "inbox": case "digest":
+    case "search": case "s": case "ask": case "a": case "log": case "l": case "projects": case "p": case "project": case "summary": case "index": case "add": case "inbox": case "digest": case "report":
       await serverStart();
       needNode();
       process.exitCode = await child("cli.ts", [cmd, ...rest]);

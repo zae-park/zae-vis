@@ -46,6 +46,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # pinned: a new stable once failed 11 tests that passed on the local SDK (ListTile asserts). Bump on purpose.
+          flutter-version: 3.47.9
           cache: true
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
@@ -80,6 +82,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.9
           cache: false  # SDK 캐시가 2GB라 복원이 새로 받는 것과 비슷하고 저장소 캐시 한도를 채운다
       - run: flutter pub get
       - name: runner folder
@@ -117,8 +120,9 @@ jobs:
           echo "will publish v$ver"
 
   # Full installers (Node runtime + MinSync + server + app).
+  # Waits for the tests: an installer is only built (and released) from a commit whose server and app tests pass.
   package:
-    needs: release-needed
+    needs: [release-needed, server, app]
     if: needs.release-needed.outputs.needed == 'true'
     env:
       ZAEVIS_BUILD: ${{ needs.release-needed.outputs.build }}
@@ -141,6 +145,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.9
           cache: false  # 위와 같은 이유. MinSync 캐시만 유지
       - uses: dtolnay/rust-toolchain@stable
       - name: build tools (protobuf, cmake)
