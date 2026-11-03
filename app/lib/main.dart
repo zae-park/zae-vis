@@ -253,7 +253,13 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _screen() => switch (_index) {
         0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api, backend: widget.backend), onOpenSettings: () => _openSettings(SettingsSection.digest), focusNode: _searchFocus, recorder: widget.recorder),
-        1 => MemoryScreen(api: api, onOpenProject: _openProject),
+        1 => MemoryScreen(
+            api: api,
+            onOpenProject: _openProject,
+            onOpenConnect: () => _selectTab(3),
+            onOpenReports: () => _selectTab(2),
+            onOpenSettings: () => _openSettings(SettingsSection.digest),
+          ),
         2 => ReportsScreen(api: api, onOpenProject: _openProject),
         _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
       };

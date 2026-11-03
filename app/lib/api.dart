@@ -379,6 +379,9 @@ class WorklogApi {
   // ── review of a digest run ───────────────────────────────────────────────
   /// Pending/applied/dismissed digest runs, newest first. An older server without the review flow
   /// answers 404, which reads as "none".
+  /// Where the material is on its way to knowledge (see KnowledgeStatus).
+  Future<KnowledgeStatus> knowledge() async => KnowledgeStatus.fromJson(await _get('/knowledge'));
+
   Future<List<ProposalSummary>> proposals() async {
     final Json j;
     try {

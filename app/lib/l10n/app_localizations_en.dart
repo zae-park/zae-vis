@@ -2773,4 +2773,182 @@ class AppLocalizationsEn extends AppLocalizations {
   String apiVoiceFailed(String url) {
     return 'Couldn\'t send the recording: $url';
   }
+
+  @override
+  String get knTitle => 'Knowledge status';
+
+  @override
+  String get knStepCollect => 'Collected';
+
+  @override
+  String get knStepWaiting => 'To digest';
+
+  @override
+  String get knStepReview => 'To review';
+
+  @override
+  String get knStepKnowledge => 'Knowledge';
+
+  @override
+  String get knStepReports => 'Reports';
+
+  @override
+  String get knNone => 'none';
+
+  @override
+  String knCollectValue(int count) {
+    return '$count day files';
+  }
+
+  @override
+  String knLatest(String day) {
+    return 'latest $day';
+  }
+
+  @override
+  String knWaitingValue(int days) {
+    return '$days days of sources';
+  }
+
+  @override
+  String knWaitingFiles(int files) {
+    return '$files transcripts/sessions';
+  }
+
+  @override
+  String knLastDigest(String day) {
+    return 'last digest $day';
+  }
+
+  @override
+  String get knNeverDigested => 'never digested';
+
+  @override
+  String knReviewValue(int lines, int projects) {
+    return '$lines lines · $projects projects';
+  }
+
+  @override
+  String get knReviewNone => 'nothing waiting';
+
+  @override
+  String knKnowledgeValue(int lines) {
+    return '$lines log lines';
+  }
+
+  @override
+  String knKnowledgeSub(int projects, int summaries) {
+    return '$projects projects · $summaries monthly';
+  }
+
+  @override
+  String knReportsValue(int m, int w, int d) {
+    return 'monthly $m · weekly $w · daily $d';
+  }
+
+  @override
+  String knReportsOn(String kinds) {
+    return 'automatic: $kinds';
+  }
+
+  @override
+  String get knReportsOff => 'automatic reports off';
+
+  @override
+  String get knKindDaily => 'daily';
+
+  @override
+  String get knKindWeekly => 'weekly';
+
+  @override
+  String get knKindMonthly => 'monthly';
+
+  @override
+  String get knNextRunning =>
+      'Digesting now. A proposal to review will follow.';
+
+  @override
+  String knNextReview(int days, int lines, int projects) {
+    return 'A digest proposal has waited $days days for review — $lines log lines, $projects projects. Search, questions and reports use it once applied.';
+  }
+
+  @override
+  String knNextReviewToday(int lines, int projects) {
+    return 'A digest proposal is waiting for review — $lines log lines, $projects projects. Search, questions and reports use it once applied.';
+  }
+
+  @override
+  String get knNextCollectFailed =>
+      'The last daily collection failed. See which source failed in the Connect tab.';
+
+  @override
+  String get knNextNothing =>
+      'Nothing collected yet. Turn sources on in the Connect tab and collect now.';
+
+  @override
+  String get knNextNoAgent =>
+      'Sources are waiting, but no agent can digest them. Sign in to a CLI such as Claude Code or save an OpenRouter key.';
+
+  @override
+  String knNextDigest(int days, int files) {
+    return '$days days of sources and $files transcripts/sessions arrived since the last digest. A digest turns them into log lines and project status.';
+  }
+
+  @override
+  String get knNextReports =>
+      'Turn reports on and a weekly summary of what was done, decided and next is written from these records.';
+
+  @override
+  String get knNextAllSet => 'Everything is digested.';
+
+  @override
+  String knNextAllSetWhen(String day) {
+    return 'Everything is digested. Next automatic digest $day.';
+  }
+
+  @override
+  String get knActionReview => 'Review';
+
+  @override
+  String get knActionConnect => 'Open Connect';
+
+  @override
+  String get knActionSettings => 'Open settings';
+
+  @override
+  String get knActionDigest => 'Digest now';
+
+  @override
+  String get knActionReports => 'Report settings';
+
+  @override
+  String get knDigestStarted => 'Digest started. It takes a few minutes.';
+
+  @override
+  String get knShowSteps => 'Show steps';
+
+  @override
+  String get knHideSteps => 'Hide steps';
+
+  @override
+  String reviewGroupsTitle(int projects, int lines) {
+    return '$projects projects · $lines log lines';
+  }
+
+  @override
+  String get reviewGroupsHint =>
+      'Grouped by project. Checking a project takes its log lines and its project page together; expand it to pick single lines.';
+
+  @override
+  String get reviewNoProject => 'No project';
+
+  @override
+  String reviewGroupLines(int chosen, int lines) {
+    return '$chosen/$lines log lines';
+  }
+
+  @override
+  String reviewGroupPage(String badge) {
+    return 'page $badge';
+  }
 }

@@ -1499,3 +1499,107 @@ class ReportRunning {
   final String? agent;
   final List<RailStop> rail;
 }
+
+/// "지식화 현황" (GET /api/knowledge): collected → waiting for a digest → waiting for review → knowledge → reports.
+class KnowledgeStatus {
+  const KnowledgeStatus({
+    required this.collectDays,
+    this.latestDay,
+    this.lastCollect,
+    this.collectOk,
+    required this.waitingTranscripts,
+    required this.waitingSessions,
+    required this.waitingSourceDays,
+    this.lastDigest,
+    this.review = const [],
+    required this.logLines,
+    this.latestLogDay,
+    required this.projects,
+    required this.summaries,
+    this.dailyReports = false,
+    this.weeklyReports = false,
+    this.monthlyReports = false,
+    this.dailyCount = 0,
+    this.weeklyCount = 0,
+    this.monthlyCount = 0,
+    this.digestRunning = false,
+    this.agent,
+    this.weekly = true,
+    this.nextWeekly,
+  });
+
+  factory KnowledgeStatus.fromJson(Json j) {
+    Json o(Object? v) => v is Json ? v : const <String, dynamic>{};
+    int n(Object? v) => (v as num?)?.toInt() ?? 0;
+    final c = o(j['collect']), w = o(j['waiting']), k = o(j['knowledge']), r = o(j['reports']), d = o(j['digest']);
+    return KnowledgeStatus(
+      collectDays: n(c['days']),
+      latestDay: _strOrNull(c['latestDay']),
+      lastCollect: DateTime.tryParse(_str(c['lastRun']))?.toLocal(),
+      collectOk: c['ok'] is bool ? c['ok'] as bool : null,
+      waitingTranscripts: n(w['transcripts']),
+      waitingSessions: n(w['sessions']),
+      waitingSourceDays: n(w['sourceDays']),
+      lastDigest: _strOrNull(w['lastDigest']),
+      review: (j['review'] is List ? j['review'] as List : const <Object?>[]).whereType<Json>().map(ProposalSummary.fromJson).toList(),
+      logLines: n(k['logLines']),
+      latestLogDay: _strOrNull(k['latestLogDay']),
+      projects: n(k['projects']),
+      summaries: n(k['summaries']),
+      dailyReports: o(r['daily'])['enabled'] == true,
+      weeklyReports: o(r['weekly'])['enabled'] == true,
+      monthlyReports: o(r['monthly'])['enabled'] == true,
+      dailyCount: n(o(r['daily'])['count']),
+      weeklyCount: n(o(r['weekly'])['count']),
+      monthlyCount: n(o(r['monthly'])['count']),
+      digestRunning: d['running'] == true,
+      agent: _strOrNull(d['agent']),
+      weekly: d['weekly'] != false,
+      nextWeekly: _strOrNull(d['nextWeekly']),
+    );
+  }
+
+  final int collectDays;
+  final String? latestDay;
+  final DateTime? lastCollect;
+  final bool? collectOk;
+  final int waitingTranscripts;
+  final int waitingSessions;
+  final int waitingSourceDays;
+  final String? lastDigest;
+  final List<ProposalSummary> review;
+  final int logLines;
+  final String? latestLogDay;
+  final int projects;
+  final int summaries;
+  final bool dailyReports;
+  final bool weeklyReports;
+  final bool monthlyReports;
+  final int dailyCount;
+  final int weeklyCount;
+  final int monthlyCount;
+  final bool digestRunning;
+  final String? agent;
+  final bool weekly;
+  final String? nextWeekly;
+
+  int get waitingFiles => waitingTranscripts + waitingSessions;
+  int get reviewLines => review.fold(0, (n, p) => n + p.lines);
+  int get reviewProjects => review.fold(0, (n, p) => n + p.projects);
+}
+
+/// The one thing to do next, most blocking first.
+enum KnowledgeNext { digestRunning, review, collectFailed, nothingCollected, noAgent, digest, reports, allSet }
+
+/// Which step the user is stuck at. A pending review comes first: the work is done and only waits for a click.
+KnowledgeNext knowledgeNext(KnowledgeStatus s) {
+  if (s.digestRunning) return KnowledgeNext.digestRunning;
+  if (s.review.isNotEmpty) return KnowledgeNext.review;
+  if (s.collectOk == false) return KnowledgeNext.collectFailed;
+  if (s.collectDays == 0 && s.waitingFiles == 0) return KnowledgeNext.nothingCollected;
+  final waiting = s.waitingSourceDays >= 3 || s.waitingFiles > 0;
+  if (waiting && s.agent == null) return KnowledgeNext.noAgent;
+  if (waiting) return KnowledgeNext.digest;
+  if (s.logLines > 0 && !s.dailyReports && !s.weeklyReports) return KnowledgeNext.reports;
+  return KnowledgeNext.allSet;
+}

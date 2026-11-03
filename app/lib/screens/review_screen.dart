@@ -39,6 +39,21 @@ class _ReviewScreenState extends State<ReviewScreen> {
     _projects.addAll(p.projects.map((e) => e.slug));
   }
 
+  /// The proposal's lines and pages by project, the biggest first; lines without a project last.
+  List<_Group> _groups(Proposal p) {
+    final byName = <String, _Group>{};
+    for (var i = 0; i < p.logLines.length; i++) {
+      final name = p.logLines[i].entry.projects.firstOrNull ?? '';
+      byName.putIfAbsent(name, () => _Group(name)).lines.add(i);
+    }
+    for (final pr in p.projects) {
+      byName.putIfAbsent(pr.slug, () => _Group(pr.slug)).page = pr;
+    }
+    final groups = byName.values.toList()
+      ..sort((a, b) => a.name.isEmpty != b.name.isEmpty ? (a.name.isEmpty ? 1 : -1) : b.lines.length.compareTo(a.lines.length));
+    return groups;
+  }
+
   int _chosen(Proposal p) => _lines.length + _projects.length + (_summaries ? p.summaries.length : 0) + (_processed ? p.processed.length : 0);
 
   Future<void> _apply(Proposal p) async {
@@ -124,33 +139,39 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     ),
                   ],
                   const SizedBox(height: 16),
-                  // ── log lines ───────────────────────────────────────────
+                  // ── log lines and project pages, one group per project ──
                   SectionHeader(
-                    context.l10n.reviewLogLines(_lines.length, p.logLines.length),
-                    subtitle: p.logLines.isEmpty ? context.l10n.reviewNoNewLines : null,
-                    trailing: p.logLines.isEmpty
+                    context.l10n.reviewGroupsTitle(_groups(p).length, p.logLines.length),
+                    subtitle: p.logLines.isEmpty && p.projects.isEmpty ? context.l10n.reviewNoNewLines : context.l10n.reviewGroupsHint,
+                    trailing: p.logLines.isEmpty && p.projects.isEmpty
                         ? null
                         : TextButton(
-                            onPressed: () => setState(() => _lines.length == p.logLines.length ? _lines.clear() : _lines.addAll(List.generate(p.logLines.length, (i) => i))),
-                            child: Text(_lines.length == p.logLines.length ? context.l10n.reviewDeselectAll : context.l10n.reviewSelectAll),
+                            onPressed: () => setState(() {
+                              final all = _lines.length == p.logLines.length && _projects.length == p.projects.length;
+                              _lines.clear();
+                              _projects.clear();
+                              if (!all) {
+                                _lines.addAll(List.generate(p.logLines.length, (i) => i));
+                                _projects.addAll(p.projects.map((e) => e.slug));
+                              }
+                            }),
+                            child: Text(_lines.length == p.logLines.length && _projects.length == p.projects.length ? context.l10n.reviewDeselectAll : context.l10n.reviewSelectAll),
                           ),
                   ),
-                  for (final month in p.logLines.map((l) => l.month).toSet()) ...[
-                    Padding(padding: const EdgeInsets.only(top: 8, bottom: 2), child: Text(month, style: t.labelLarge?.copyWith(color: scheme.outline))),
-                    for (var i = 0; i < p.logLines.length; i++)
-                      if (p.logLines[i].month == month) _LineTile(line: p.logLines[i], checked: _lines.contains(i), onChanged: (v) => setState(() => v ? _lines.add(i) : _lines.remove(i))),
-                  ],
-                  const SizedBox(height: 16),
-                  // ── projects ────────────────────────────────────────────
-                  SectionHeader(context.l10n.reviewProjects(_projects.length, p.projects.length), subtitle: p.projects.isEmpty ? context.l10n.reviewNoProjects : null),
-                  for (final pr in p.projects)
-                    _FileTile(
-                      title: pr.slug,
-                      badge: pr.isNew ? context.l10n.reviewNewFile : context.l10n.reviewChanged,
-                      before: pr.before,
-                      after: pr.after,
-                      checked: _projects.contains(pr.slug),
-                      onChanged: (v) => setState(() => v ? _projects.add(pr.slug) : _projects.remove(pr.slug)),
+                  for (final g in _groups(p))
+                    _ProjectGroup(
+                      group: g,
+                      chosenLines: _lines,
+                      pageChosen: g.page != null && _projects.contains(g.page!.slug),
+                      onGroup: (on) => setState(() {
+                        for (final i in g.lines) {
+                          on ? _lines.add(i) : _lines.remove(i);
+                        }
+                        if (g.page != null) on ? _projects.add(g.page!.slug) : _projects.remove(g.page!.slug);
+                      }),
+                      onLine: (i, on) => setState(() => on ? _lines.add(i) : _lines.remove(i)),
+                      onPage: (on) => setState(() => on ? _projects.add(g.page!.slug) : _projects.remove(g.page!.slug)),
+                      proposal: p,
                     ),
                   const SizedBox(height: 16),
                   // ── summaries ───────────────────────────────────────────
@@ -228,6 +249,52 @@ class _ReviewScreenState extends State<ReviewScreen> {
         'dismissed' => l.reviewStatusDismissed,
         _ => s,
       };
+}
+
+class _Group {
+  _Group(this.name);
+  final String name; // '' = lines without a project
+  final List<int> lines = [];
+  ProposedProject? page;
+}
+
+/// One project's share of the proposal, folded: a checkbox for all of it, and its lines and page inside.
+class _ProjectGroup extends StatelessWidget {
+  const _ProjectGroup({required this.group, required this.chosenLines, required this.pageChosen, required this.onGroup, required this.onLine, required this.onPage, required this.proposal});
+  final _Group group;
+  final Set<int> chosenLines;
+  final bool pageChosen;
+  final ValueChanged<bool> onGroup;
+  final void Function(int index, bool on) onLine;
+  final ValueChanged<bool> onPage;
+  final Proposal proposal;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final t = Theme.of(context).textTheme;
+    final g = group;
+    final chosen = g.lines.where(chosenLines.contains).length;
+    final parts = g.lines.length + (g.page == null ? 0 : 1);
+    final on = chosen + (pageChosen ? 1 : 0);
+    final value = on == 0 ? false : (on == parts ? true : null);
+    final badge = g.page == null ? null : (g.page!.isNew ? l.reviewNewFile : l.reviewChanged);
+    return Card.outlined(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: Checkbox(value: value, tristate: true, onChanged: (_) => onGroup(value != true)),
+        title: Text(g.name.isEmpty ? l.reviewNoProject : g.name, style: t.titleSmall),
+        subtitle: Text([if (g.lines.isNotEmpty) l.reviewGroupLines(chosen, g.lines.length), if (badge != null) l.reviewGroupPage(badge)].join(' · '), style: t.bodySmall),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final i in g.lines) _LineTile(line: proposal.logLines[i], checked: chosenLines.contains(i), onChanged: (v) => onLine(i, v)),
+          if (g.page != null)
+            _FileTile(title: g.page!.slug, badge: badge!, before: g.page!.before, after: g.page!.after, checked: pageChosen, onChanged: onPage),
+        ],
+      ),
+    );
+  }
 }
 
 class _LineTile extends StatelessWidget {

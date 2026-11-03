@@ -11,9 +11,14 @@ import { kiwiEnv } from "./kiwi.ts";
 import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
+import { waitingDays } from "./knowledge.ts";
+import { listProposals } from "./review.ts";
 import { KIND_LABEL, ReportRunner, dueReports } from "./reports.ts";
 import { isStale } from "./schedule.ts";
 import { collect } from "./sources/index.ts";
+
+/** A pending review older than this gets a daily reminder. */
+const REVIEW_REMIND_DAYS = 3;
 
 async function refreshIndex(cfg: { autoragConfig: string; worklogDir: string; memoryPaths: string[]; localEmbedding: boolean }): Promise<string> {
   if (!existsSync(cfg.autoragConfig)) return "건너뜀 (AutoRAG 미설정)";
@@ -79,6 +84,15 @@ async function main(): Promise<void> {
     const state = loadState();
     state.daily = { lastRun: new Date().toISOString(), ok: report.every((r) => r.ok), index };
     saveState(state);
+  }
+
+  // A digest left in review for 3+ days is knowledge nobody sees: say so once a day until it is handled.
+  if (!only.length) {
+    const stale = (await listProposals()).filter((p) => p.status === "pending" && waitingDays(p.createdAt) >= REVIEW_REMIND_DAYS);
+    if (stale.length) {
+      const lines = stale.reduce((n, p) => n + p.lines, 0);
+      notify("정리 제안이 검토를 기다립니다", `${waitingDays(stale[0].createdAt)}일째 · 로그 ${lines}줄. 메모리 탭에서 검토하면 검색·질문·리포트의 근거가 됩니다.`);
+    }
   }
 
   // Mondays: the weekly digest, with whatever agent the user has (see digest.ts).

@@ -1912,5 +1912,200 @@
         "type": "String"
       }
     }
+  },
+  "knTitle": "지식화 현황",
+  "knStepCollect": "수집",
+  "knStepWaiting": "정리 대기",
+  "knStepReview": "검토",
+  "knStepKnowledge": "지식",
+  "knStepReports": "리포트",
+  "knNone": "없음",
+  "knCollectValue": "날짜 파일 {count}개",
+  "@knCollectValue": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "knLatest": "최근 {day}",
+  "@knLatest": {
+    "placeholders": {
+      "day": {
+        "type": "String"
+      }
+    }
+  },
+  "knWaitingValue": "원본 {days}일 치",
+  "@knWaitingValue": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "knWaitingFiles": "전사본·세션 {files}개",
+  "@knWaitingFiles": {
+    "placeholders": {
+      "files": {
+        "type": "int"
+      }
+    }
+  },
+  "knLastDigest": "마지막 정리 {day}",
+  "@knLastDigest": {
+    "placeholders": {
+      "day": {
+        "type": "String"
+      }
+    }
+  },
+  "knNeverDigested": "아직 정리 안 함",
+  "knReviewValue": "로그 {lines}줄 · 프로젝트 {projects}개",
+  "@knReviewValue": {
+    "placeholders": {
+      "lines": {
+        "type": "int"
+      },
+      "projects": {
+        "type": "int"
+      }
+    }
+  },
+  "knReviewNone": "기다리는 제안 없음",
+  "knKnowledgeValue": "로그 {lines}줄",
+  "@knKnowledgeValue": {
+    "placeholders": {
+      "lines": {
+        "type": "int"
+      }
+    }
+  },
+  "knKnowledgeSub": "프로젝트 {projects} · 월간 정리 {summaries}",
+  "@knKnowledgeSub": {
+    "placeholders": {
+      "projects": {
+        "type": "int"
+      },
+      "summaries": {
+        "type": "int"
+      }
+    }
+  },
+  "knReportsValue": "월간 {m} · 주간 {w} · 일간 {d}",
+  "@knReportsValue": {
+    "placeholders": {
+      "m": {
+        "type": "int"
+      },
+      "w": {
+        "type": "int"
+      },
+      "d": {
+        "type": "int"
+      }
+    }
+  },
+  "knReportsOn": "자동: {kinds}",
+  "@knReportsOn": {
+    "placeholders": {
+      "kinds": {
+        "type": "String"
+      }
+    }
+  },
+  "knReportsOff": "자동 리포트 꺼짐",
+  "knKindDaily": "일간",
+  "knKindWeekly": "주간",
+  "knKindMonthly": "월간",
+  "knNextRunning": "정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.",
+  "knNextReview": "정리 제안이 {days}일째 검토를 기다립니다 — 로그 {lines}줄, 프로젝트 {projects}개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.",
+  "@knNextReview": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "lines": {
+        "type": "int"
+      },
+      "projects": {
+        "type": "int"
+      }
+    }
+  },
+  "knNextReviewToday": "정리 제안이 검토를 기다립니다 — 로그 {lines}줄, 프로젝트 {projects}개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.",
+  "@knNextReviewToday": {
+    "placeholders": {
+      "lines": {
+        "type": "int"
+      },
+      "projects": {
+        "type": "int"
+      }
+    }
+  },
+  "knNextCollectFailed": "마지막 매일 수집이 실패했습니다. 연결 탭에서 어떤 소스가 실패했는지 보세요.",
+  "knNextNothing": "아직 모은 기록이 없습니다. 연결 탭에서 소스를 켜고 지금 수집해 보세요.",
+  "knNextNoAgent": "정리할 원본이 쌓였지만 정리할 에이전트가 없습니다. Claude Code 같은 CLI에 로그인하거나 OpenRouter 키를 저장하세요.",
+  "knNextDigest": "마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.",
+  "@knNextDigest": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "files": {
+        "type": "int"
+      }
+    }
+  },
+  "knNextReports": "리포트를 켜 두면 매주 이 기록으로 한 일·결정·다음 할 일을 정리해 둡니다.",
+  "knNextAllSet": "모두 정리돼 있습니다.",
+  "knNextAllSetWhen": "모두 정리돼 있습니다. 다음 자동 정리 {day}.",
+  "@knNextAllSetWhen": {
+    "placeholders": {
+      "day": {
+        "type": "String"
+      }
+    }
+  },
+  "knActionReview": "검토하기",
+  "knActionConnect": "연결 탭 열기",
+  "knActionSettings": "설정 열기",
+  "knActionDigest": "지금 정리하기",
+  "knActionReports": "리포트 설정",
+  "knDigestStarted": "정리를 시작했습니다. 몇 분 걸립니다.",
+  "knShowSteps": "단계 보기",
+  "knHideSteps": "단계 숨기기",
+  "reviewGroupsTitle": "프로젝트 {projects}개 · 로그 {lines}줄",
+  "@reviewGroupsTitle": {
+    "placeholders": {
+      "projects": {
+        "type": "int"
+      },
+      "lines": {
+        "type": "int"
+      }
+    }
+  },
+  "reviewGroupsHint": "프로젝트마다 묶었습니다. 프로젝트를 체크하면 그 로그 줄과 프로젝트 페이지가 함께 들어갑니다. 펼쳐서 줄마다 고를 수도 있습니다.",
+  "reviewNoProject": "프로젝트 없음",
+  "reviewGroupLines": "로그 {chosen}/{lines}줄",
+  "@reviewGroupLines": {
+    "placeholders": {
+      "chosen": {
+        "type": "int"
+      },
+      "lines": {
+        "type": "int"
+      }
+    }
+  },
+  "reviewGroupPage": "페이지 {badge}",
+  "@reviewGroupPage": {
+    "placeholders": {
+      "badge": {
+        "type": "String"
+      }
+    }
   }
 }

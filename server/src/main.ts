@@ -14,7 +14,8 @@ import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
 import * as datasources from "./datasources.ts";
-import { DigestRunner, detectAgents, noAgentReason, pickAgent } from "./digest.ts";
+import { DigestRunner, detectAgents, lastWeeklyDate, noAgentReason, pickAgent } from "./digest.ts";
+import { knowledgeStatus } from "./knowledge.ts";
 import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
 import { agentsInOrder, normalizeAgentOrder, normalizeAgentSkip, plannedRail, DEFAULT_AGENT_ORDER } from "./rail.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
@@ -142,6 +143,18 @@ const server = createApp({
       return this.get();
     },
     indexOnInject: () => cfg.indexOnInject,
+  },
+  async knowledge() {
+    const st = digest.status(cfg.digest, cfg.worklogDir);
+    const chosen = pickAgent(cfg.digest, agentsInOrder(cfg.digest, await detectAgents()));
+    const daily = loadState().daily;
+    return knowledgeStatus(cfg.worklogDir, {
+      lastDigest: lastWeeklyDate(cfg.worklogDir),
+      proposals: await review.listProposals(),
+      collect: daily ? { lastRun: daily.lastRun, ok: daily.ok } : null,
+      reports: { daily: cfg.reports.daily.enabled, weekly: cfg.reports.weekly.enabled, monthly: cfg.reports.monthly.enabled },
+      digest: { running: st.running, agent: chosen?.id ?? null, weekly: cfg.digest.weekly, nextWeekly: st.nextWeekly, review: cfg.digest.review },
+    });
   },
   digest: {
     async status() {

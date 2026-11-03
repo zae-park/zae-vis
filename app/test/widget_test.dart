@@ -50,6 +50,19 @@ bool mockAskClarify = false;
 /// whisperX installed, and the speakers block GET /settings reports (null = not reported).
 bool mockWhisperx = false;
 
+/// GET /knowledge: by default the pending review the proposal routes below describe.
+Map<String, Object?> mockKnowledge = _knowledgeWithReview;
+const Map<String, Object?> _knowledgeWithReview = {
+  'collect': {'lastRun': '2026-10-27T09:30:00Z', 'ok': true, 'days': 12, 'latestDay': '2026-10-27'},
+  'waiting': {'transcripts': 1, 'sessions': 0, 'sourceDays': 5, 'lastDigest': '2026-10-20'},
+  'review': [
+    {'id': '20261027-100000', 'createdAt': '2026-10-27T01:00:00Z', 'agent': 'claude', 'status': 'pending', 'lines': 2, 'projects': 1, 'summaries': 0, 'processed': 1},
+  ],
+  'knowledge': {'logLines': 3, 'latestLogDay': '2026-10-09', 'projects': 1, 'summaries': 1},
+  'reports': {'daily': {'enabled': false, 'count': 0}, 'weekly': {'enabled': false, 'count': 0}, 'monthly': {'enabled': true, 'count': 1}},
+  'digest': {'running': false, 'agent': 'claude', 'weekly': true, 'nextWeekly': '2026-11-09', 'review': true},
+};
+
 /// What POST /voice hears (the chat's microphone).
 String mockVoiceText = '가장 최근 회의 내용 요약해줘';
 
@@ -316,6 +329,8 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/logs' when req.method == 'POST':
             posted.add(req);
             return _json({'month': '2026-10', 'line': '- 10-23 #done x'}, 201);
+          case '/api/knowledge':
+            return _json(mockKnowledge);
           case '/api/digest/proposals':
             return _json({
               'proposals': [
@@ -1461,6 +1476,30 @@ void main() {
     expect(posted.single.headers['x-zaevis'], '1');
   });
 
+  testWidgets('knowledge panel: with sources waiting it offers 지금 정리하기, and the chat says the same', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(() => mockKnowledge = _knowledgeWithReview);
+    mockKnowledge = {..._knowledgeWithReview, 'review': <Object>[]};
+    posted.clear();
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('마지막 정리 뒤 원본 5일 치와 전사본·세션 1개가 쌓였습니다'), findsOneWidget, reason: 'the empty chat shows the next step too');
+
+    await tester.tap(find.text('메모리').first);
+    await tester.pumpAndSettle();
+    expect(find.text('지식화 현황'), findsOneWidget);
+    expect(find.text('원본 5일 치 · 전사본·세션 1개'), findsOneWidget);
+    expect(find.text('마지막 정리 10-20'), findsOneWidget);
+    expect(find.text('기다리는 제안 없음'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '지금 정리하기'));
+    await tester.pumpAndSettle();
+    expect(posted.where((r) => r.url.path == '/api/digest/run'), hasLength(1));
+    expect(find.text('정리를 시작했습니다. 몇 분 걸립니다.'), findsOneWidget);
+  });
+
   testWidgets('log tab shows the pending proposal; the review screen applies only the chosen lines', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1;
@@ -1470,20 +1509,23 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.text('메모리').first);
     await tester.pumpAndSettle();
-    expect(find.textContaining('정리 제안 1건이 검토를 기다립니다'), findsOneWidget);
+    expect(find.textContaining('검토를 기다립니다 — 로그 2줄, 프로젝트 1개'), findsOneWidget, reason: 'the knowledge panel names the stuck step');
+    expect(find.text('로그 2줄 · 프로젝트 1개'), findsOneWidget, reason: 'step 3 of the strip');
 
-    await tester.tap(find.text('검토하기'));
+    await tester.tap(find.widgetWithText(FilledButton, '검토하기'));
     await tester.pumpAndSettle();
     expect(find.text('정리 결과 검토'), findsOneWidget);
-    expect(find.text('정리 분리'), findsOneWidget);
-    expect(find.text('토큰 상한'), findsOneWidget);
-    expect(find.text('로그 줄 (2/2)'), findsOneWidget);
-    expect(find.text('새 상태'), findsNothing); // project diff is collapsed until expanded
+    expect(find.text('프로젝트 2개 · 로그 2줄'), findsOneWidget);
+    expect(find.text('notes'), findsOneWidget, reason: 'one folded group per project');
+    expect(find.text('프로젝트 없음'), findsOneWidget);
+    expect(find.text('정리 분리'), findsNothing, reason: 'lines stay folded until a group is opened');
 
-    // drop the second line, keep the project and the inbox move
+    // drop the line without a project; keep the notes group (its line and page) and the inbox move
+    await tester.tap(find.text('프로젝트 없음'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('토큰 상한'));
     await tester.pump();
-    expect(find.text('로그 줄 (1/2)'), findsOneWidget);
+    expect(find.text('로그 0/1줄'), findsOneWidget);
     expect(find.text('선택 3개'), findsOneWidget);
 
     await tester.tap(find.text('선택한 것 적용'));
@@ -1843,7 +1885,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('프로젝트 상태'), findsOneWidget); // side panel on a wide window
     expect(find.text('노트'), findsOneWidget);
-    expect(find.textContaining('정리 에이전트는 고치지 못하고'), findsOneWidget); // flow strip
+    expect(find.textContaining('정리 에이전트는 고치지 못하고'), findsNothing, reason: 'the flow strip is one tap away now');
+    await tester.tap(find.byIcon(Icons.info_outline));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('정리 에이전트는 고치지 못하고'), findsOneWidget);
 
     // 출처 on the digest's line → its transcript
     await tester.tap(find.textContaining('출처 2026-10-09_회의'));
@@ -1852,6 +1897,10 @@ void main() {
     await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
+    // fold the flow strip and the panel's steps so the day cards fit an 800px window
+    await tester.tap(find.byIcon(Icons.info));
+    await tester.tap(find.text('단계 숨기기'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('하루'));
     await tester.pumpAndSettle();
     expect(find.text('2026-10-06'), findsOneWidget);

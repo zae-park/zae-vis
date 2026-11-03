@@ -11,10 +11,12 @@ import '../theme.dart';
 import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import '../widgets/hit_card.dart';
+import '../widgets/knowledge_panel.dart';
 import '../widgets/input_dialogs.dart' show toast;
 import '../widgets/save_file.dart';
 import '../recording_trail.dart';
 import 'file_screen.dart';
+import 'review_screen.dart';
 import 'search_screen.dart';
 
 const agentTitles = {'claude': 'Claude Code', 'codex': 'Codex CLI', 'gemini': 'Gemini CLI', 'openrouter': 'OpenRouter'};
@@ -426,7 +428,7 @@ class _AskViewState extends State<AskView> {
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= AskView.panelBreakpoint;
     final thread = Column(children: [
-      Expanded(child: c.turns.isEmpty ? _Intro(status: c.status, onOpenSettings: widget.onOpenSettings) : _thread(context)),
+      Expanded(child: c.turns.isEmpty ? _Intro(status: c.status, api: c.api, onOpenSettings: widget.onOpenSettings) : _thread(context)),
       _composerBar(context),
     ]);
     if (!wide || c.selectedSource == null) return thread;
@@ -588,8 +590,9 @@ class AskHeader extends StatelessWidget {
 
 /// Before the first question: what will answer, or how to get an agent.
 class _Intro extends StatelessWidget {
-  const _Intro({required this.status, this.onOpenSettings});
+  const _Intro({required this.status, required this.api, this.onOpenSettings});
   final Future<AskStatus> status;
+  final WorklogApi api;
   final VoidCallback? onOpenSettings;
 
   @override
@@ -612,6 +615,8 @@ class _Intro extends StatelessWidget {
             Text(context.l10n.askNoAgent, style: t.bodySmall?.copyWith(color: scheme.error), textAlign: TextAlign.center),
             if (onOpenSettings != null) Padding(padding: const EdgeInsets.only(top: 10), child: FilledButton.tonalIcon(onPressed: onOpenSettings, icon: const Icon(Icons.settings_outlined), label: Text(context.l10n.askOpenSettings))),
           ],
+          // where the records stand, so an empty chat also says what to do next (a review, a digest)
+          KnowledgePanel(api: api, compact: true, onReview: (id) => ReviewScreen.open(context, api, id), onOpenSettings: onOpenSettings),
           const SizedBox(height: 24),
         ]);
       },

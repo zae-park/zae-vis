@@ -4514,6 +4514,282 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'음성을 보내지 못했습니다: {url}'**
   String apiVoiceFailed(String url);
+
+  /// No description provided for @knTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'지식화 현황'**
+  String get knTitle;
+
+  /// No description provided for @knStepCollect.
+  ///
+  /// In ko, this message translates to:
+  /// **'수집'**
+  String get knStepCollect;
+
+  /// No description provided for @knStepWaiting.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리 대기'**
+  String get knStepWaiting;
+
+  /// No description provided for @knStepReview.
+  ///
+  /// In ko, this message translates to:
+  /// **'검토'**
+  String get knStepReview;
+
+  /// No description provided for @knStepKnowledge.
+  ///
+  /// In ko, this message translates to:
+  /// **'지식'**
+  String get knStepKnowledge;
+
+  /// No description provided for @knStepReports.
+  ///
+  /// In ko, this message translates to:
+  /// **'리포트'**
+  String get knStepReports;
+
+  /// No description provided for @knNone.
+  ///
+  /// In ko, this message translates to:
+  /// **'없음'**
+  String get knNone;
+
+  /// No description provided for @knCollectValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'날짜 파일 {count}개'**
+  String knCollectValue(int count);
+
+  /// No description provided for @knLatest.
+  ///
+  /// In ko, this message translates to:
+  /// **'최근 {day}'**
+  String knLatest(String day);
+
+  /// No description provided for @knWaitingValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'원본 {days}일 치'**
+  String knWaitingValue(int days);
+
+  /// No description provided for @knWaitingFiles.
+  ///
+  /// In ko, this message translates to:
+  /// **'전사본·세션 {files}개'**
+  String knWaitingFiles(int files);
+
+  /// No description provided for @knLastDigest.
+  ///
+  /// In ko, this message translates to:
+  /// **'마지막 정리 {day}'**
+  String knLastDigest(String day);
+
+  /// No description provided for @knNeverDigested.
+  ///
+  /// In ko, this message translates to:
+  /// **'아직 정리 안 함'**
+  String get knNeverDigested;
+
+  /// No description provided for @knReviewValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그 {lines}줄 · 프로젝트 {projects}개'**
+  String knReviewValue(int lines, int projects);
+
+  /// No description provided for @knReviewNone.
+  ///
+  /// In ko, this message translates to:
+  /// **'기다리는 제안 없음'**
+  String get knReviewNone;
+
+  /// No description provided for @knKnowledgeValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그 {lines}줄'**
+  String knKnowledgeValue(int lines);
+
+  /// No description provided for @knKnowledgeSub.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로젝트 {projects} · 월간 정리 {summaries}'**
+  String knKnowledgeSub(int projects, int summaries);
+
+  /// No description provided for @knReportsValue.
+  ///
+  /// In ko, this message translates to:
+  /// **'월간 {m} · 주간 {w} · 일간 {d}'**
+  String knReportsValue(int m, int w, int d);
+
+  /// No description provided for @knReportsOn.
+  ///
+  /// In ko, this message translates to:
+  /// **'자동: {kinds}'**
+  String knReportsOn(String kinds);
+
+  /// No description provided for @knReportsOff.
+  ///
+  /// In ko, this message translates to:
+  /// **'자동 리포트 꺼짐'**
+  String get knReportsOff;
+
+  /// No description provided for @knKindDaily.
+  ///
+  /// In ko, this message translates to:
+  /// **'일간'**
+  String get knKindDaily;
+
+  /// No description provided for @knKindWeekly.
+  ///
+  /// In ko, this message translates to:
+  /// **'주간'**
+  String get knKindWeekly;
+
+  /// No description provided for @knKindMonthly.
+  ///
+  /// In ko, this message translates to:
+  /// **'월간'**
+  String get knKindMonthly;
+
+  /// No description provided for @knNextRunning.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.'**
+  String get knNextRunning;
+
+  /// No description provided for @knNextReview.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리 제안이 {days}일째 검토를 기다립니다 — 로그 {lines}줄, 프로젝트 {projects}개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.'**
+  String knNextReview(int days, int lines, int projects);
+
+  /// No description provided for @knNextReviewToday.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리 제안이 검토를 기다립니다 — 로그 {lines}줄, 프로젝트 {projects}개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.'**
+  String knNextReviewToday(int lines, int projects);
+
+  /// No description provided for @knNextCollectFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'마지막 매일 수집이 실패했습니다. 연결 탭에서 어떤 소스가 실패했는지 보세요.'**
+  String get knNextCollectFailed;
+
+  /// No description provided for @knNextNothing.
+  ///
+  /// In ko, this message translates to:
+  /// **'아직 모은 기록이 없습니다. 연결 탭에서 소스를 켜고 지금 수집해 보세요.'**
+  String get knNextNothing;
+
+  /// No description provided for @knNextNoAgent.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리할 원본이 쌓였지만 정리할 에이전트가 없습니다. Claude Code 같은 CLI에 로그인하거나 OpenRouter 키를 저장하세요.'**
+  String get knNextNoAgent;
+
+  /// No description provided for @knNextDigest.
+  ///
+  /// In ko, this message translates to:
+  /// **'마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.'**
+  String knNextDigest(int days, int files);
+
+  /// No description provided for @knNextReports.
+  ///
+  /// In ko, this message translates to:
+  /// **'리포트를 켜 두면 매주 이 기록으로 한 일·결정·다음 할 일을 정리해 둡니다.'**
+  String get knNextReports;
+
+  /// No description provided for @knNextAllSet.
+  ///
+  /// In ko, this message translates to:
+  /// **'모두 정리돼 있습니다.'**
+  String get knNextAllSet;
+
+  /// No description provided for @knNextAllSetWhen.
+  ///
+  /// In ko, this message translates to:
+  /// **'모두 정리돼 있습니다. 다음 자동 정리 {day}.'**
+  String knNextAllSetWhen(String day);
+
+  /// No description provided for @knActionReview.
+  ///
+  /// In ko, this message translates to:
+  /// **'검토하기'**
+  String get knActionReview;
+
+  /// No description provided for @knActionConnect.
+  ///
+  /// In ko, this message translates to:
+  /// **'연결 탭 열기'**
+  String get knActionConnect;
+
+  /// No description provided for @knActionSettings.
+  ///
+  /// In ko, this message translates to:
+  /// **'설정 열기'**
+  String get knActionSettings;
+
+  /// No description provided for @knActionDigest.
+  ///
+  /// In ko, this message translates to:
+  /// **'지금 정리하기'**
+  String get knActionDigest;
+
+  /// No description provided for @knActionReports.
+  ///
+  /// In ko, this message translates to:
+  /// **'리포트 설정'**
+  String get knActionReports;
+
+  /// No description provided for @knDigestStarted.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리를 시작했습니다. 몇 분 걸립니다.'**
+  String get knDigestStarted;
+
+  /// No description provided for @knShowSteps.
+  ///
+  /// In ko, this message translates to:
+  /// **'단계 보기'**
+  String get knShowSteps;
+
+  /// No description provided for @knHideSteps.
+  ///
+  /// In ko, this message translates to:
+  /// **'단계 숨기기'**
+  String get knHideSteps;
+
+  /// No description provided for @reviewGroupsTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로젝트 {projects}개 · 로그 {lines}줄'**
+  String reviewGroupsTitle(int projects, int lines);
+
+  /// No description provided for @reviewGroupsHint.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로젝트마다 묶었습니다. 프로젝트를 체크하면 그 로그 줄과 프로젝트 페이지가 함께 들어갑니다. 펼쳐서 줄마다 고를 수도 있습니다.'**
+  String get reviewGroupsHint;
+
+  /// No description provided for @reviewNoProject.
+  ///
+  /// In ko, this message translates to:
+  /// **'프로젝트 없음'**
+  String get reviewNoProject;
+
+  /// No description provided for @reviewGroupLines.
+  ///
+  /// In ko, this message translates to:
+  /// **'로그 {chosen}/{lines}줄'**
+  String reviewGroupLines(int chosen, int lines);
+
+  /// No description provided for @reviewGroupPage.
+  ///
+  /// In ko, this message translates to:
+  /// **'페이지 {badge}'**
+  String reviewGroupPage(String badge);
 }
 
 class _AppLocalizationsDelegate

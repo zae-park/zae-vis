@@ -10,14 +10,21 @@ import '../widgets/markdown_view.dart';
 import 'collect_screen.dart' show SourceIcon;
 import 'file_screen.dart';
 import 'log_screen.dart';
+import '../widgets/knowledge_panel.dart';
+import 'review_screen.dart';
 
 /// 메모리: everything the app knows, in three layers — 기록 (the log lines, mine and the digest's),
 /// 원본 (the collected day files and inbox material the lines came from) and 상태 (the project
 /// pages the digest keeps). Wide windows show 상태 as a panel on the right.
 class MemoryScreen extends StatefulWidget {
-  const MemoryScreen({super.key, required this.api, required this.onOpenProject});
+  const MemoryScreen({super.key, required this.api, required this.onOpenProject, this.onOpenConnect, this.onOpenReports, this.onOpenSettings});
   final WorklogApi api;
   final void Function(String slug) onOpenProject;
+
+  /// Where the knowledge panel's next step leads (the shell's tabs and settings).
+  final VoidCallback? onOpenConnect;
+  final VoidCallback? onOpenReports;
+  final VoidCallback? onOpenSettings;
 
   static const panelBreakpoint = 1040.0;
 
@@ -44,7 +51,9 @@ enum _Layer {
 
 class _MemoryScreenState extends State<MemoryScreen> {
   _Layer _layer = _Layer.log;
-  bool _showFlow = true;
+  // the knowledge panel says where things stand; the flow explanation is one tap away
+  bool _showFlow = false;
+  int _generation = 0; // bumped after a review is applied, so the layers read the worklog again
 
   @override
   Widget build(BuildContext context) {
@@ -70,8 +79,17 @@ class _MemoryScreenState extends State<MemoryScreen> {
           ),
         ]),
       ),
+      KnowledgePanel(
+        api: widget.api,
+        onReview: (id) => ReviewScreen.open(context, widget.api, id),
+        onOpenConnect: widget.onOpenConnect,
+        onOpenReports: widget.onOpenReports,
+        onOpenSettings: widget.onOpenSettings,
+        onChanged: () => setState(() => _generation++),
+      ),
       if (_showFlow) _FlowStrip(layer: _layer),
       Expanded(
+        key: ValueKey(_generation),
         child: switch (_layer) {
           _Layer.log => LogScreen(api: widget.api, onOpenProject: widget.onOpenProject),
           _Layer.day => _DayView(api: widget.api),

@@ -187,4 +187,28 @@ void main() {
     expect(r.routedBy, 'jev');
     expect(AskResult.fromJson({'q': 'x', 'answer': 'y'}).files, isEmpty);
   });
+
+  test('knowledgeNext: a waiting review first, then collection trouble, then the digest, then reports', () {
+    KnowledgeStatus k({List<Object> review = const [], bool? ok = true, int days = 10, int transcripts = 0, int sourceDays = 0, String? agent = 'claude', int logLines = 5, bool weekly = false, bool running = false}) =>
+        KnowledgeStatus.fromJson({
+          'collect': {'days': days, 'ok': ok},
+          'waiting': {'transcripts': transcripts, 'sessions': 0, 'sourceDays': sourceDays},
+          'review': review,
+          'knowledge': {'logLines': logLines, 'projects': 1, 'summaries': 0},
+          'reports': {'weekly': {'enabled': weekly}},
+          'digest': {'running': running, 'agent': agent},
+        });
+    final pending = [{'id': 'p', 'status': 'pending', 'lines': 126, 'projects': 9}];
+    expect(knowledgeNext(k(running: true, review: pending)), KnowledgeNext.digestRunning);
+    expect(knowledgeNext(k(review: pending, ok: false)), KnowledgeNext.review, reason: 'the work is done; it only waits for a click');
+    expect(knowledgeNext(k(review: pending)).name, 'review');
+    expect(k(review: pending).reviewLines, 126);
+    expect(knowledgeNext(k(ok: false)), KnowledgeNext.collectFailed);
+    expect(knowledgeNext(k(days: 0)), KnowledgeNext.nothingCollected);
+    expect(knowledgeNext(k(sourceDays: 14, agent: null)), KnowledgeNext.noAgent);
+    expect(knowledgeNext(k(sourceDays: 14)), KnowledgeNext.digest);
+    expect(knowledgeNext(k(transcripts: 1)), KnowledgeNext.digest, reason: 'a transcript waits even when sources are fresh');
+    expect(knowledgeNext(k(sourceDays: 2)), KnowledgeNext.reports, reason: 'two days of sources is not worth a digest yet');
+    expect(knowledgeNext(k(weekly: true)), KnowledgeNext.allSet);
+  });
 }

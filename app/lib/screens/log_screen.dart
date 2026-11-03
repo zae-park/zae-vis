@@ -7,7 +7,6 @@ import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
 import '../widgets/markdown_view.dart';
 import 'file_screen.dart';
-import 'review_screen.dart';
 
 const _tags = ['done', 'decision', 'blocked', 'learned'];
 
@@ -21,77 +20,14 @@ class LogScreen extends StatefulWidget {
 }
 
 class _LogScreenState extends State<LogScreen> {
-  int _generation = 0;
-
+  // a pending digest review is announced by the memory tab's knowledge panel (widgets/knowledge_panel.dart)
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      _ProposalBanner(key: ValueKey('banner$_generation'), api: widget.api, onChanged: () => setState(() => _generation++)),
-      Expanded(
-        child: AsyncView<List<String>>(
-          key: ValueKey('log$_generation'),
-          load: widget.api.logMonths,
-          builder: (context, months, _) => months.isEmpty
-              ? EmptyPane(context.l10n.logEmpty)
-              : _MonthLog(api: widget.api, months: months, onOpenProject: widget.onOpenProject),
-        ),
-      ),
-    ]);
-  }
-}
-
-/// "정리 제안 N건이 검토를 기다립니다" above the log when a reviewed digest run is pending.
-class _ProposalBanner extends StatefulWidget {
-  const _ProposalBanner({super.key, required this.api, required this.onChanged});
-  final WorklogApi api;
-  final VoidCallback onChanged;
-
-  @override
-  State<_ProposalBanner> createState() => _ProposalBannerState();
-}
-
-class _ProposalBannerState extends State<_ProposalBanner> {
-  // a failed fetch just hides the banner; the log itself reports server trouble
-  late final Future<List<ProposalSummary>> _future = widget.api.proposals().catchError((_) => <ProposalSummary>[]);
-
-  @override
-  Widget build(BuildContext context) {
-    final api = widget.api;
-    final onChanged = widget.onChanged;
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    return FutureBuilder<List<ProposalSummary>>(
-      future: _future,
-      builder: (context, snap) {
-        final pending = (snap.data ?? const <ProposalSummary>[]).where((p) => p.pending).toList();
-        if (pending.isEmpty) return const SizedBox.shrink();
-        final total = pending.fold(0, (n, p) => n + p.lines);
-        return Readable(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Material(
-              color: scheme.primaryContainer.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                child: Row(children: [
-                  Icon(Icons.rule, color: scheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(context.l10n.logProposalBanner(pending.length, total), style: t.bodyMedium),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: () async {
-                      if (await ReviewScreen.open(context, api, pending.first.id)) onChanged();
-                    },
-                    child: Text(context.l10n.logReview),
-                  ),
-                ]),
-              ),
-            ),
-          ),
-        );
-      },
+    return AsyncView<List<String>>(
+      load: widget.api.logMonths,
+      builder: (context, months, _) => months.isEmpty
+          ? EmptyPane(context.l10n.logEmpty)
+          : _MonthLog(api: widget.api, months: months, onOpenProject: widget.onOpenProject),
     );
   }
 }

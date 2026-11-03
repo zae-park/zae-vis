@@ -50,6 +50,8 @@ export type AppOptions = {
     /** `apply` with a selection, or `dismiss`. Null when the proposal does not exist or is not pending. */
     act(id: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   };
+  /** "지식화 현황": collected → waiting → review → knowledge → reports, in one answer (knowledge.ts). */
+  knowledge?: () => Promise<unknown>;
   /** "질문": an answer written from the top search passages by an agent the user has (see ask.ts). */
   ask?: {
     /** Agents, which one would answer, whether one is answering now, and the last answer. */
@@ -333,6 +335,11 @@ export function createApp(opts: AppOptions): Server {
           if (!r.ok) return send(res, r.status, { error: r.error, message: r.message, ...(r.rail ? { rail: r.rail } : {}) });
           return send(res, 200, r.result);
         }
+
+        case "GET /knowledge":
+          // GET /api/knowledge → { collect, waiting, review[], knowledge, reports, digest } — see knowledge.ts
+          if (!opts.knowledge || arg) return notFound(res);
+          return send(res, 200, await opts.knowledge());
 
         case "GET /origins":
           // GET /api/origins?limit= → { files[{ path, source, kind, date, name, bytes }] } newest first

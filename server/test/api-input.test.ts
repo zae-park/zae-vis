@@ -72,6 +72,7 @@ before(async () => {
         return "가장 최근 회의록 줘";
       },
     },
+    knowledge: async () => ({ review: [], knowledge: { logLines: 2 } }),
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), relabel: (p) => relabeled.push(p), jobs: () => [] },
     digest: {
       status: async () => ({ running: false, last: null, nextWeekly: null, setting: { agent: digestAgent, model: "", weekly: true }, agents: [{ id: "claude", title: "Claude Code", available: true, detail: "1.0" }], chosen: "claude" }),
@@ -315,4 +316,11 @@ test("POST /voice turns speech into text and keeps nothing", async () => {
   assert.equal(existsSync(voiceFiles.at(-1)!), false, "the temporary audio is deleted");
   assert.equal((await fetch(base + "/api/voice?name=a.wav", { method: "POST", headers: { "x-zaevis": "1" }, body: Buffer.alloc(10) })).status, 400, "no sound");
   assert.equal((await fetch(base + "/api/voice?name=a.exe", { method: "POST", headers: { "x-zaevis": "1" }, body: wav })).status, 400);
+});
+
+test("GET /knowledge passes the status through", async () => {
+  const r = await call("GET", "/api/knowledge");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.knowledge.logLines, 2);
+  assert.equal((await call("GET", "/api/knowledge/x")).status, 404);
 });

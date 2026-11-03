@@ -2587,4 +2587,179 @@ class AppLocalizationsKo extends AppLocalizations {
   String apiVoiceFailed(String url) {
     return '음성을 보내지 못했습니다: $url';
   }
+
+  @override
+  String get knTitle => '지식화 현황';
+
+  @override
+  String get knStepCollect => '수집';
+
+  @override
+  String get knStepWaiting => '정리 대기';
+
+  @override
+  String get knStepReview => '검토';
+
+  @override
+  String get knStepKnowledge => '지식';
+
+  @override
+  String get knStepReports => '리포트';
+
+  @override
+  String get knNone => '없음';
+
+  @override
+  String knCollectValue(int count) {
+    return '날짜 파일 $count개';
+  }
+
+  @override
+  String knLatest(String day) {
+    return '최근 $day';
+  }
+
+  @override
+  String knWaitingValue(int days) {
+    return '원본 $days일 치';
+  }
+
+  @override
+  String knWaitingFiles(int files) {
+    return '전사본·세션 $files개';
+  }
+
+  @override
+  String knLastDigest(String day) {
+    return '마지막 정리 $day';
+  }
+
+  @override
+  String get knNeverDigested => '아직 정리 안 함';
+
+  @override
+  String knReviewValue(int lines, int projects) {
+    return '로그 $lines줄 · 프로젝트 $projects개';
+  }
+
+  @override
+  String get knReviewNone => '기다리는 제안 없음';
+
+  @override
+  String knKnowledgeValue(int lines) {
+    return '로그 $lines줄';
+  }
+
+  @override
+  String knKnowledgeSub(int projects, int summaries) {
+    return '프로젝트 $projects · 월간 정리 $summaries';
+  }
+
+  @override
+  String knReportsValue(int m, int w, int d) {
+    return '월간 $m · 주간 $w · 일간 $d';
+  }
+
+  @override
+  String knReportsOn(String kinds) {
+    return '자동: $kinds';
+  }
+
+  @override
+  String get knReportsOff => '자동 리포트 꺼짐';
+
+  @override
+  String get knKindDaily => '일간';
+
+  @override
+  String get knKindWeekly => '주간';
+
+  @override
+  String get knKindMonthly => '월간';
+
+  @override
+  String get knNextRunning => '정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.';
+
+  @override
+  String knNextReview(int days, int lines, int projects) {
+    return '정리 제안이 $days일째 검토를 기다립니다 — 로그 $lines줄, 프로젝트 $projects개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.';
+  }
+
+  @override
+  String knNextReviewToday(int lines, int projects) {
+    return '정리 제안이 검토를 기다립니다 — 로그 $lines줄, 프로젝트 $projects개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.';
+  }
+
+  @override
+  String get knNextCollectFailed =>
+      '마지막 매일 수집이 실패했습니다. 연결 탭에서 어떤 소스가 실패했는지 보세요.';
+
+  @override
+  String get knNextNothing => '아직 모은 기록이 없습니다. 연결 탭에서 소스를 켜고 지금 수집해 보세요.';
+
+  @override
+  String get knNextNoAgent =>
+      '정리할 원본이 쌓였지만 정리할 에이전트가 없습니다. Claude Code 같은 CLI에 로그인하거나 OpenRouter 키를 저장하세요.';
+
+  @override
+  String knNextDigest(int days, int files) {
+    return '마지막 정리 뒤 원본 $days일 치와 전사본·세션 $files개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.';
+  }
+
+  @override
+  String get knNextReports => '리포트를 켜 두면 매주 이 기록으로 한 일·결정·다음 할 일을 정리해 둡니다.';
+
+  @override
+  String get knNextAllSet => '모두 정리돼 있습니다.';
+
+  @override
+  String knNextAllSetWhen(String day) {
+    return '모두 정리돼 있습니다. 다음 자동 정리 $day.';
+  }
+
+  @override
+  String get knActionReview => '검토하기';
+
+  @override
+  String get knActionConnect => '연결 탭 열기';
+
+  @override
+  String get knActionSettings => '설정 열기';
+
+  @override
+  String get knActionDigest => '지금 정리하기';
+
+  @override
+  String get knActionReports => '리포트 설정';
+
+  @override
+  String get knDigestStarted => '정리를 시작했습니다. 몇 분 걸립니다.';
+
+  @override
+  String get knShowSteps => '단계 보기';
+
+  @override
+  String get knHideSteps => '단계 숨기기';
+
+  @override
+  String reviewGroupsTitle(int projects, int lines) {
+    return '프로젝트 $projects개 · 로그 $lines줄';
+  }
+
+  @override
+  String get reviewGroupsHint =>
+      '프로젝트마다 묶었습니다. 프로젝트를 체크하면 그 로그 줄과 프로젝트 페이지가 함께 들어갑니다. 펼쳐서 줄마다 고를 수도 있습니다.';
+
+  @override
+  String get reviewNoProject => '프로젝트 없음';
+
+  @override
+  String reviewGroupLines(int chosen, int lines) {
+    return '로그 $chosen/$lines줄';
+  }
+
+  @override
+  String reviewGroupPage(String badge) {
+    return '페이지 $badge';
+  }
 }
