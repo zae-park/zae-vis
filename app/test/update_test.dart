@@ -73,7 +73,12 @@ void main() {
     expect(find.textContaining('0.1.0+2'), findsNothing, reason: 'versions only in the tooltip');
     expect(find.textContaining('xattr'), findsNothing, reason: 'no damaged-app guide');
     expect(find.byType(AlertDialog), findsNothing);
-    expect(tester.getSize(find.byType(UpdateNotice)).height, lessThan(60), reason: 'one line');
+    final card = find.descendant(of: find.byType(UpdateNotice), matching: find.byType(Material)).first;
+    expect(tester.getSize(card).height, lessThan(56), reason: 'one line');
+    expect(tester.getRect(card).right - tester.getRect(find.byType(FilledButton)).right, lessThanOrEqualTo(8), reason: 'no blank space after the button');
+    final close = tester.getRect(find.byTooltip('나중에'));
+    expect(close.center.dx, closeTo(tester.getRect(card).right, 2), reason: 'the close button sits on the corner');
+    expect(close.center.dy, closeTo(tester.getRect(card).top, 2));
 
     await tester.tap(find.text('업데이트'));
     await tester.pump();
@@ -91,7 +96,7 @@ void main() {
     ));
     expect(find.text('받는 중 40%'), findsOneWidget);
     expect(find.text('업데이트'), findsNothing);
-    expect(tester.widget<IconButton>(find.byType(IconButton)).onPressed, isNull);
+    expect(find.byTooltip('나중에'), findsNothing, reason: 'no closing while it downloads');
   });
 
   testWidgets('the folder notice offers one action for every privacy folder', (tester) async {

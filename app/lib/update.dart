@@ -132,7 +132,7 @@ class UpdateNotice extends StatelessWidget {
     final download = offer.downloadUrl != null;
     final busy = phase != UpdatePhase.idle;
     final known = progress != null && progress! >= 0;
-    return Material(
+    final card = Material(
       color: scheme.surfaceContainerLowest,
       elevation: 3,
       shadowColor: Colors.black26,
@@ -142,46 +142,69 @@ class UpdateNotice extends StatelessWidget {
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 300),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.system_update_alt, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
-              Flexible(child: Tooltip(message: '${offer.local.label} → ${offer.remote.label}', child: Text('새 버전이 있습니다', style: t.bodyMedium))),
-              const SizedBox(width: 8),
-              if (download && !busy)
-                FilledButton(
-                  onPressed: onUpdate,
-                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 12)),
-                  child: const Text('업데이트'),
+        // as wide as its line, not the 300 the progress and error lines may take
+        child: IntrinsicWidth(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.system_update_alt, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Flexible(child: Tooltip(message: '${offer.local.label} → ${offer.remote.label}', child: Text('새 버전이 있습니다', style: t.bodyMedium))),
+                if (download && !busy) ...[
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: onUpdate,
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 12)),
+                    child: const Text('업데이트'),
+                  ),
+                ] else
+                  const SizedBox(width: 6),
+              ]),
+              if (phase == UpdatePhase.downloading) ...[
+                const SizedBox(height: 4),
+                LinearProgressIndicator(value: known ? progress : null),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2, bottom: 2),
+                  child: Text(known ? '받는 중 ${(progress! * 100).round()}%' : '받는 중', style: t.bodySmall),
                 ),
-              IconButton(
-                tooltip: '나중에',
-                visualDensity: VisualDensity.compact,
-                onPressed: busy ? null : onLater,
-                icon: const Icon(Icons.close, size: 18),
-              ),
+              ] else if (phase == UpdatePhase.installing)
+                Text('설치하고 다시 여는 중…', style: t.bodySmall)
+              else if (!download)
+                Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 2),
+                  child: SelectableText(error!, style: t.bodySmall?.copyWith(color: scheme.error), minLines: 1),
+                ),
             ]),
-            if (phase == UpdatePhase.downloading) ...[
-              LinearProgressIndicator(value: known ? progress : null),
-              Padding(
-                padding: const EdgeInsets.only(top: 2, bottom: 2),
-                child: Text(known ? '받는 중 ${(progress! * 100).round()}%' : '받는 중', style: t.bodySmall),
-              ),
-            ] else if (phase == UpdatePhase.installing)
-              Text('설치하고 다시 여는 중…', style: t.bodySmall)
-            else if (!download)
-              Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall),
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 8, bottom: 2),
-                child: SelectableText(error!, style: t.bodySmall?.copyWith(color: scheme.error), minLines: 1),
-              ),
-          ]),
+          ),
         ),
       ),
     );
+    if (busy) return card;
+    // the close button sits on the card's corner, outside the content; the padding keeps it inside the hit area
+    return Stack(clipBehavior: Clip.none, children: [
+      Padding(padding: const EdgeInsets.only(top: 8, right: 8), child: card),
+      Positioned(
+        top: 0,
+        right: 0,
+        child: Tooltip(
+          message: '나중에',
+          child: Material(
+            color: scheme.surfaceContainerLowest,
+            shape: CircleBorder(side: BorderSide(color: scheme.outlineVariant)),
+            elevation: 2,
+            shadowColor: Colors.black26,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onLater,
+              child: SizedBox(width: 20, height: 20, child: Icon(Icons.close, size: 12, color: scheme.onSurfaceVariant)),
+            ),
+          ),
+        ),
+      ),
+    ]);
   }
 }
 
