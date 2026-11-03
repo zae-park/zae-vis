@@ -252,6 +252,17 @@ class WorklogApi {
     return (_decode(res)['file'] as String?) ?? name;
   }
 
+  /// Speech said into the chat → its text (POST /voice). The server reads it from a temporary file and keeps nothing.
+  Future<String> voiceToText(List<int> wav) async {
+    final http.Response res;
+    try {
+      res = await _client.post(_uri('/voice', {'name': 'voice.wav'}), headers: const {'x-zaevis': '1', 'content-type': 'audio/wav'}, body: wav);
+    } catch (_) {
+      throw ApiException(0, l10nNow.apiVoiceFailed(baseUrl));
+    }
+    return (_decode(res)['text'] as String?)?.trim() ?? '';
+  }
+
   /// Stops a queued or running transcription. The recording stays in the inbox.
   Future<void> cancelTranscription(String file) async {
     await _send('DELETE', '/inbox/audio', const {}, {'name': file});

@@ -1884,5 +1884,33 @@
   "inputPasteTranscript": "전사본 붙여넣기",
   "inputTitle": "제목",
   "inputTitleHint": "주간 정리 회의",
-  "inputPasteHint": "전사 서비스에서 복사한 내용을 붙여넣으세요"
+  "inputPasteHint": "전사 서비스에서 복사한 내용을 붙여넣으세요",
+  "voiceStart": "말로 하기",
+  "voiceStop": "말 끝내기",
+  "voiceListening": "듣는 중 {elapsed} · 다시 누르면 보냅니다",
+  "@voiceListening": {
+    "placeholders": {
+      "elapsed": {
+        "type": "String"
+      }
+    }
+  },
+  "voiceConverting": "말을 글자로 바꾸는 중…",
+  "voiceNothing": "알아들은 말이 없습니다. 다시 말해 주세요.",
+  "voiceFailed": "음성을 글자로 바꾸지 못했습니다: {error}",
+  "@voiceFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "apiVoiceFailed": "음성을 보내지 못했습니다: {url}",
+  "@apiVoiceFailed": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  }
 }

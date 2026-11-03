@@ -50,6 +50,9 @@ bool mockAskClarify = false;
 /// whisperX installed, and the speakers block GET /settings reports (null = not reported).
 bool mockWhisperx = false;
 
+/// What POST /voice hears (the chat's microphone).
+String mockVoiceText = '가장 최근 회의 내용 요약해줘';
+
 /// The transcript GET /file serves for inbox/transcripts paths; PUT /transcripts/speakers renames in it.
 String mockTranscript = '# 녹음\n\n(whisperX 자동 전사)\n\n[A] 안녕하세요.\n오늘은 색인 얘기입니다.\n\n[B] 네, 좋아요.\n';
 Map<String, Object?>? mockSpeakers;
@@ -212,6 +215,9 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'n': 2, 'path': 'log/2026-10.md', 'label': '2026-10 · 한 줄 기록', 'passage': '색인을 처음부터 다시 만들기로'},
               ],
             });
+          case '/api/voice' when req.method == 'POST':
+            posted.add(req);
+            return _json({'text': mockVoiceText, 'ms': 3100});
           case '/api/transcripts/relabel' when req.method == 'POST':
             posted.add(req);
             final name = ((jsonDecode(req.body) as Map)['path'] as String).split('/').last;
@@ -936,6 +942,57 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '실행'));
     await tester.pumpAndSettle();
     expect(posted.where((r) => r.url.path == '/api/digest/run').length, 1);
+  });
+
+  testWidgets('the chat microphone: speak, stop, and the words are sent as a line', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(() => mockVoiceText = '가장 최근 회의 내용 요약해줘');
+    posted.clear();
+    final rec = _FakeRecorder();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: rec));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('말로 하기'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('듣는 중 0:00'), findsOneWidget);
+    expect(find.byTooltip('말 끝내기'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('말 끝내기'));
+    await tester.pumpAndSettle();
+    expect(rec.stopped, isTrue);
+    final voice = posted.firstWhere((r) => r.url.path == '/api/voice');
+    expect(voice.headers['x-zaevis'], '1');
+    expect(String.fromCharCodes(voice.bodyBytes.take(4)), 'RIFF', reason: 'a WAV of what was said');
+    final ask = jsonDecode(posted.lastWhere((r) => r.url.path == '/api/ask').body) as Map;
+    expect(ask['q'], '가장 최근 회의 내용 요약해줘');
+    expect(find.text('가장 최근 회의 내용 요약해줘'), findsWidgets, reason: 'the spoken line shows as the question');
+  });
+
+  testWidgets('the chat microphone says so when it heard nothing, and asks for the mic when denied', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mockVoiceText = '';
+    addTearDown(() => mockVoiceText = '가장 최근 회의 내용 요약해줘');
+    posted.clear();
+    final rec = _FakeRecorder();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), recorder: rec));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('말로 하기'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byTooltip('말 끝내기'));
+    await tester.pumpAndSettle();
+    expect(find.text('알아들은 말이 없습니다. 다시 말해 주세요.'), findsOneWidget);
+    expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty);
+
+    final denied = _FakeRecorder()..permission = false;
+    await tester.pumpWidget(ZaevisApp(key: UniqueKey(), desktopIntegration: false, api: _fakeApi(), recorder: denied));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('말로 하기'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('마이크 접근이 허용되지 않았습니다'), findsOneWidget);
   });
 
   testWidgets('record button records, stops, and uploads a WAV to the inbox', (tester) async {

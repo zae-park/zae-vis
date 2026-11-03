@@ -2560,4 +2560,31 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get inputPasteHint => '전사 서비스에서 복사한 내용을 붙여넣으세요';
+
+  @override
+  String get voiceStart => '말로 하기';
+
+  @override
+  String get voiceStop => '말 끝내기';
+
+  @override
+  String voiceListening(String elapsed) {
+    return '듣는 중 $elapsed · 다시 누르면 보냅니다';
+  }
+
+  @override
+  String get voiceConverting => '말을 글자로 바꾸는 중…';
+
+  @override
+  String get voiceNothing => '알아들은 말이 없습니다. 다시 말해 주세요.';
+
+  @override
+  String voiceFailed(String error) {
+    return '음성을 글자로 바꾸지 못했습니다: $error';
+  }
+
+  @override
+  String apiVoiceFailed(String url) {
+    return '음성을 보내지 못했습니다: $url';
+  }
 }

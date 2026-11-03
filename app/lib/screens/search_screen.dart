@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../l10n/l10n.dart';
 import '../models.dart';
+import '../recording/recorder.dart';
 import '../recording_trail.dart';
 import '../widgets/common.dart';
 import '../widgets/hit_card.dart';
@@ -42,12 +43,15 @@ enum SearchPeriod {
 }
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, required this.api, required this.onOpenIndex, this.onOpenSettings, this.focusNode});
+  const SearchScreen({super.key, required this.api, required this.onOpenIndex, this.onOpenSettings, this.focusNode, this.recorder});
   final WorklogApi api;
   final VoidCallback onOpenIndex;
 
   /// Where to send the user when no agent can answer (null hides the button).
   final VoidCallback? onOpenSettings;
+
+  /// The chat's microphone (tests pass a fake).
+  final Recorder? recorder;
 
   /// Owned by the shell so ⌘K can focus the field from anywhere.
   final FocusNode? focusNode;
@@ -120,6 +124,7 @@ class _SearchScreenState extends State<SearchScreen> {
               index: _index,
               inbox: _inbox,
               onSent: _loadTrail,
+              recorder: widget.recorder,
             ),
           ),
         ],

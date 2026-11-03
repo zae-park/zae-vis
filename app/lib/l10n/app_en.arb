@@ -728,5 +728,12 @@
   "inputPasteTranscript": "Paste transcript",
   "inputTitle": "Title",
   "inputTitleHint": "Weekly review meeting",
-  "inputPasteHint": "Paste the text you copied from a transcription service"
+  "inputPasteHint": "Paste the text you copied from a transcription service",
+  "voiceStart": "Speak",
+  "voiceStop": "Done speaking",
+  "voiceListening": "Listening {elapsed} · press again to send",
+  "voiceConverting": "Turning speech into text…",
+  "voiceNothing": "Nothing was heard. Please try again.",
+  "voiceFailed": "Couldn't turn the speech into text: {error}",
+  "apiVoiceFailed": "Couldn't send the recording: {url}"
 }

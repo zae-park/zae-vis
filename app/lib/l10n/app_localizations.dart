@@ -4472,6 +4472,48 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'전사 서비스에서 복사한 내용을 붙여넣으세요'**
   String get inputPasteHint;
+
+  /// No description provided for @voiceStart.
+  ///
+  /// In ko, this message translates to:
+  /// **'말로 하기'**
+  String get voiceStart;
+
+  /// No description provided for @voiceStop.
+  ///
+  /// In ko, this message translates to:
+  /// **'말 끝내기'**
+  String get voiceStop;
+
+  /// No description provided for @voiceListening.
+  ///
+  /// In ko, this message translates to:
+  /// **'듣는 중 {elapsed} · 다시 누르면 보냅니다'**
+  String voiceListening(String elapsed);
+
+  /// No description provided for @voiceConverting.
+  ///
+  /// In ko, this message translates to:
+  /// **'말을 글자로 바꾸는 중…'**
+  String get voiceConverting;
+
+  /// No description provided for @voiceNothing.
+  ///
+  /// In ko, this message translates to:
+  /// **'알아들은 말이 없습니다. 다시 말해 주세요.'**
+  String get voiceNothing;
+
+  /// No description provided for @voiceFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'음성을 글자로 바꾸지 못했습니다: {error}'**
+  String voiceFailed(String error);
+
+  /// No description provided for @apiVoiceFailed.
+  ///
+  /// In ko, this message translates to:
+  /// **'음성을 보내지 못했습니다: {url}'**
+  String apiVoiceFailed(String url);
 }
 
 class _AppLocalizationsDelegate

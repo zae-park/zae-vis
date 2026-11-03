@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../l10n/l10n.dart';
 import '../models.dart';
+import '../recording/recorder.dart';
 import '../theme.dart';
 import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import '../widgets/hit_card.dart';
+import '../widgets/input_dialogs.dart' show toast;
 import '../widgets/save_file.dart';
 import '../recording_trail.dart';
 import 'file_screen.dart';
@@ -247,7 +250,7 @@ class AskController extends ChangeNotifier {
 /// The chat: the user's lines and what each got, a composer at the bottom, and the source a citation
 /// points at in a panel on the right (wide) or a sheet from the bottom (narrow).
 class AskView extends StatefulWidget {
-  const AskView({super.key, required this.controller, this.focusNode, this.onOpenSettings, this.onOpenIndex, this.index, this.inbox, this.onSent});
+  const AskView({super.key, required this.controller, this.focusNode, this.onOpenSettings, this.onOpenIndex, this.index, this.inbox, this.onSent, this.recorder});
   final AskController controller;
   final FocusNode? focusNode;
   final VoidCallback? onOpenSettings;
@@ -262,6 +265,12 @@ class AskView extends StatefulWidget {
   /// After each line is handled (the screen refreshes its recording trail).
   final VoidCallback? onSent;
 
+  /// The microphone for saying a line instead of typing it; tests pass a fake, the app uses the plugin.
+  final Recorder? recorder;
+
+  /// A spoken line longer than this is sent as it is.
+  static const voiceLimit = Duration(minutes: 2);
+
   /// Below this width the source opens as a bottom sheet instead of a side panel.
   static const panelBreakpoint = 980.0;
 
@@ -269,8 +278,21 @@ class AskView extends StatefulWidget {
   State<AskView> createState() => _AskViewState();
 }
 
+/// The composer's microphone: idle, listening, or waiting for the server's text.
+enum _Voice { idle, listening, converting }
+
 class _AskViewState extends State<AskView> {
   final _composer = TextEditingController();
+
+  _Voice _voice = _Voice.idle;
+  final List<Uint8List> _chunks = [];
+  StreamSubscription<Uint8List>? _sub;
+  Timer? _tick;
+  DateTime? _since;
+  Duration _elapsed = Duration.zero;
+  Recorder? _ownRecorder;
+
+  Recorder get _recorder => widget.recorder ?? (_ownRecorder ??= PluginRecorder());
 
   AskController get c => widget.controller;
 
@@ -293,6 +315,10 @@ class _AskViewState extends State<AskView> {
   void dispose() {
     c.removeListener(_changed);
     _composer.dispose();
+    _tick?.cancel();
+    unawaited(_sub?.cancel() ?? Future.value());
+    if (_voice == _Voice.listening) unawaited(_recorder.stop());
+    unawaited(_ownRecorder?.dispose() ?? Future.value());
     super.dispose();
   }
 
@@ -307,6 +333,71 @@ class _AskViewState extends State<AskView> {
     widget.focusNode?.requestFocus();
     await c.send(q);
     widget.onSent?.call();
+  }
+
+  /// The microphone button: start listening, or stop and send what was said.
+  Future<void> _toggleVoice() async {
+    switch (_voice) {
+      case _Voice.idle:
+        await _startVoice();
+      case _Voice.listening:
+        await _finishVoice();
+      case _Voice.converting:
+        return;
+    }
+  }
+
+  Future<void> _startVoice() async {
+    final l = context.l10n;
+    try {
+      if (!await _recorder.hasPermission()) {
+        if (mounted) toast(context, l.recordMicDenied, error: true);
+        return;
+      }
+      final stream = await _recorder.startStream();
+      _chunks.clear();
+      _since = DateTime.now();
+      _elapsed = Duration.zero;
+      _sub = stream.listen(_chunks.add);
+      _tick = Timer.periodic(const Duration(milliseconds: 200), (_) {
+        if (!mounted) return;
+        setState(() => _elapsed = DateTime.now().difference(_since!));
+        if (_elapsed >= AskView.voiceLimit) _finishVoice();
+      });
+      if (mounted) setState(() => _voice = _Voice.listening);
+    } catch (e) {
+      if (mounted) toast(context, l.recordStartFailed('$e'), error: true);
+    }
+  }
+
+  /// Stops listening, has the server turn the speech into text (whisper, nothing kept), and sends it as a typed line.
+  Future<void> _finishVoice() async {
+    if (_voice != _Voice.listening) return;
+    _tick?.cancel();
+    setState(() => _voice = _Voice.converting);
+    await _recorder.stop(); // the plugin ends the stream here
+    unawaited(_sub?.cancel() ?? Future.value());
+    _sub = null;
+    final wav = wavFromPcm16(_chunks);
+    _chunks.clear();
+    String text;
+    try {
+      text = await c.api.voiceToText(wav);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _voice = _Voice.idle);
+        toast(context, context.l10n.voiceFailed(e.message), error: true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _voice = _Voice.idle);
+    if (text.isEmpty) {
+      toast(context, context.l10n.voiceNothing);
+      return;
+    }
+    _composer.text = text;
+    await _send();
   }
 
   void _cite(int turn, int n) {
@@ -403,20 +494,37 @@ class _AskViewState extends State<AskView> {
             maxLines: 4,
             textInputAction: TextInputAction.send,
             onSubmitted: _send,
+            readOnly: _voice != _Voice.idle,
             decoration: InputDecoration(
-              hintText: c.openClarify != null
+              hintText: _voice == _Voice.listening
+                  ? context.l10n.voiceListening('${_elapsed.inMinutes}:${(_elapsed.inSeconds % 60).toString().padLeft(2, '0')}')
+                  : _voice == _Voice.converting
+                      ? context.l10n.voiceConverting
+                      : c.openClarify != null
                   ? context.l10n.askHintClarify
                   : continuing
                       ? context.l10n.askHintContinue
                       : context.l10n.askHintFirst,
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: Icon(_voice == _Voice.idle ? Icons.search : Icons.graphic_eq, color: _voice == _Voice.listening ? scheme.error : null),
               isDense: true,
             ),
           ),
         ),
         const SizedBox(width: 8),
+        if (_voice == _Voice.converting)
+          const SizedBox(width: 40, height: 40, child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2)))
+        else if (_voice == _Voice.listening)
+          IconButton.filled(
+            tooltip: context.l10n.voiceStop,
+            style: IconButton.styleFrom(backgroundColor: scheme.error, foregroundColor: scheme.onError),
+            onPressed: _toggleVoice,
+            icon: const Icon(Icons.stop),
+          )
+        else
+          IconButton.filledTonal(tooltip: context.l10n.voiceStart, onPressed: c.busy ? null : _toggleVoice, icon: const Icon(Icons.mic_none)),
+        const SizedBox(width: 8),
         FilledButton.icon(
-          onPressed: c.busy ? null : _send,
+          onPressed: c.busy || _voice != _Voice.idle ? null : _send,
           icon: c.busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send),
           label: Text(c.answering ? context.l10n.askAnswering : c.busy ? context.l10n.askSearching : context.l10n.askSend),
         ),

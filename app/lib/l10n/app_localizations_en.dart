@@ -2746,4 +2746,31 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get inputPasteHint =>
       'Paste the text you copied from a transcription service';
+
+  @override
+  String get voiceStart => 'Speak';
+
+  @override
+  String get voiceStop => 'Done speaking';
+
+  @override
+  String voiceListening(String elapsed) {
+    return 'Listening $elapsed · press again to send';
+  }
+
+  @override
+  String get voiceConverting => 'Turning speech into text…';
+
+  @override
+  String get voiceNothing => 'Nothing was heard. Please try again.';
+
+  @override
+  String voiceFailed(String error) {
+    return 'Couldn\'t turn the speech into text: $error';
+  }
+
+  @override
+  String apiVoiceFailed(String url) {
+    return 'Couldn\'t send the recording: $url';
+  }
 }
