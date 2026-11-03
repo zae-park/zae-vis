@@ -6,6 +6,8 @@ class _WebBackend implements Backend {
   @override
   String? get buildVersion => null;
   @override
+  DateTime? get installedAt => null;
+  @override
   String? get problem => null;
   @override
   String get home => '';

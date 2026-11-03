@@ -44,6 +44,29 @@ class IoBackend implements Backend {
     return text.isEmpty ? null : text;
   }
 
+  DateTime? _installedAt;
+  bool _installedRead = false;
+
+  /// `$ZAEVIS_HOME/app-installed.json` keeps `{version, at}` of the build first opened; a new VERSION starts a new date.
+  @override
+  DateTime? get installedAt {
+    if (_installedRead) return _installedAt;
+    _installedRead = true;
+    final version = buildVersion;
+    if (version == null) return null;
+    final f = File('$_stateDir${Platform.pathSeparator}app-installed.json');
+    try {
+      final j = jsonDecode(f.readAsStringSync());
+      if (j is Map && j['version'] == version && j['at'] is String) return _installedAt = DateTime.tryParse(j['at'] as String)?.toLocal();
+    } catch (_) {}
+    final now = DateTime.now();
+    try {
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode({'version': version, 'at': now.toUtc().toIso8601String()}));
+    } catch (_) {}
+    return _installedAt = now;
+  }
+
   @override
   String get home => Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '';
 

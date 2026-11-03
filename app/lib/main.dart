@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'app_prefs.dart';
 import 'backend/backend.dart';
 import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
@@ -23,8 +24,8 @@ Future<void> main() async {
   runApp(ZaevisApp(api: WorklogApi(), backend: createBackend()));
 }
 
-class ZaevisApp extends StatelessWidget {
-  const ZaevisApp({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true});
+class ZaevisApp extends StatefulWidget {
+  const ZaevisApp({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true, this.prefs});
   final WorklogApi api;
 
   /// null in tests / when the server is managed elsewhere.
@@ -36,25 +37,44 @@ class ZaevisApp extends StatelessWidget {
   /// Native menu bar and the system-wide hotkey (desktop builds only; tests turn it off).
   final bool desktopIntegration;
 
+  /// Theme and text size; the app makes its own, tests may pass one.
+  final AppPrefs? prefs;
+
+  @override
+  State<ZaevisApp> createState() => _ZaevisAppState();
+}
+
+class _ZaevisAppState extends State<ZaevisApp> {
+  late final AppPrefs _prefs = widget.prefs ?? AppPrefs();
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'zaevis',
-      debugShowCheckedModeBanner: false,
-      theme: ZaevisTheme.of(Brightness.light),
-      darkTheme: ZaevisTheme.of(Brightness.dark),
-      home: backend == null
-          ? HomeShell(api: api, recorder: recorder, desktopIntegration: desktopIntegration)
-          : _BootGate(api: api, backend: backend!, recorder: recorder, desktopIntegration: desktopIntegration),
+    return ListenableBuilder(
+      listenable: _prefs,
+      builder: (context, _) => MaterialApp(
+        title: 'zaevis',
+        debugShowCheckedModeBanner: false,
+        theme: ZaevisTheme.of(Brightness.light),
+        darkTheme: ZaevisTheme.of(Brightness.dark),
+        themeMode: _prefs.themeMode,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_prefs.textScale)),
+          child: child!,
+        ),
+        home: widget.backend == null
+            ? HomeShell(api: widget.api, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs)
+            : _BootGate(api: widget.api, backend: widget.backend!, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs),
+      ),
     );
   }
 }
 
 /// Packaged app: first-run wizard, then make sure the bundled server is up.
 class _BootGate extends StatefulWidget {
-  const _BootGate({required this.api, required this.backend, this.recorder, this.desktopIntegration = true});
+  const _BootGate({required this.api, required this.backend, required this.prefs, this.recorder, this.desktopIntegration = true});
   final WorklogApi api;
   final Backend backend;
+  final AppPrefs prefs;
   final Recorder? recorder;
   final bool desktopIntegration;
 
@@ -71,7 +91,7 @@ class _BootGateState extends State<_BootGate> {
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
-    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration);
+    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs);
     if (!_configured) {
       return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() => _configured = true));
     }
@@ -103,7 +123,7 @@ class _BootGateState extends State<_BootGate> {
             ),
           );
         }
-        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration);
+        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs);
       },
     );
   }
@@ -125,11 +145,14 @@ const _dests = [
 ];
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true});
+  const HomeShell({super.key, required this.api, this.backend, this.recorder, this.desktopIntegration = true, this.prefs});
   final WorklogApi api;
   final Backend? backend;
   final Recorder? recorder;
   final bool desktopIntegration;
+
+  /// Theme and text size from the app root; a shell built on its own (tests) makes one.
+  final AppPrefs? prefs;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -139,10 +162,8 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   int _generation = 0; // bumped when the server address changes, to reload every screen
   final _searchFocus = FocusNode();
-  UpdateOffer? _update;
-  UpdatePhase _updatePhase = UpdatePhase.idle;
-  double? _updateProgress;
-  String? _updateError;
+  late final UpdateController _updates = UpdateController(localVersion: widget.backend?.buildVersion, install: widget.backend?.installUpdate);
+  late final AppPrefs _prefs = widget.prefs ?? AppPrefs();
   bool _folderNotice = false;
 
   WorklogApi get api => widget.api;
@@ -155,8 +176,9 @@ class _HomeShellState extends State<HomeShell> {
     if (_native) _registerHotkey();
     final backend = widget.backend;
     final local = backend?.buildVersion;
+    _prefs.load(api);
     if (local != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate(local));
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updates.check());
       if (!folderSkipAcked(backend!.home)) _folderNotice = true;
     }
   }
@@ -165,43 +187,6 @@ class _HomeShellState extends State<HomeShell> {
     final home = widget.backend?.home;
     if (home != null) await ackFolderSkip(home);
     if (mounted) setState(() => _folderNotice = false);
-  }
-
-  Future<void> _checkUpdate(String local) async {
-    final offer = await lookForUpdate(local);
-    if (!mounted || offer == null) return;
-    setState(() => _update = offer);
-  }
-
-  Future<void> _applyUpdate() async {
-    final url = _update?.downloadUrl;
-    final backend = widget.backend;
-    if (url == null || backend == null || _updatePhase != UpdatePhase.idle) return;
-    setState(() {
-      _updatePhase = UpdatePhase.downloading;
-      _updateProgress = 0;
-      _updateError = null;
-    });
-    try {
-      await backend.installUpdate(url, (progress) {
-        if (!mounted) return;
-        setState(() {
-          if (progress == null) {
-            _updatePhase = UpdatePhase.installing;
-            _updateProgress = null;
-          } else {
-            _updateProgress = progress;
-          }
-        });
-      });
-    } catch (e) {
-      if (!mounted) return;
-      final text = e.toString().replaceFirst(RegExp(r'^(StateError|Exception): '), '');
-      setState(() {
-        _updatePhase = UpdatePhase.idle;
-        _updateError = text;
-      });
-    }
   }
 
   /// The stored spec when the server answers, the platform default otherwise.
@@ -216,6 +201,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     if (_native) GlobalHotkey.unregister();
+    _updates.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -238,9 +224,8 @@ class _HomeShellState extends State<HomeShell> {
 
   void _openProject(String slug) => openProject(context, api, slug);
 
-  void _openSettings() => Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => SettingsScreen(api: api, backend: widget.backend, onServerChanged: () => setState(() => _generation++)),
-      ));
+  void _openSettings([SettingsSection initial = SettingsSection.general]) => SettingsScreen.show(context,
+      api: api, backend: widget.backend, prefs: _prefs, updates: _updates, initial: initial, onServerChanged: () => setState(() => _generation++));
 
   Future<void> _addLog() async {
     List<String> projects = const [];
@@ -256,7 +241,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _screen() => switch (_index) {
-        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api, backend: widget.backend), onOpenSettings: _openSettings, focusNode: _searchFocus),
+        0 => SearchScreen(api: api, onOpenIndex: () => IndexSheet.show(context, api, backend: widget.backend), onOpenSettings: () => _openSettings(SettingsSection.digest), focusNode: _searchFocus),
         1 => MemoryScreen(api: api, onOpenProject: _openProject),
         2 => ReportsScreen(api: api, onOpenProject: _openProject),
         _ => CollectScreen(api: api, recorder: widget.recorder, backend: widget.backend),
@@ -309,27 +294,34 @@ class _HomeShellState extends State<HomeShell> {
         ? FloatingActionButton.extended(onPressed: _addLog, icon: const Icon(Icons.edit_note), label: const Text('한 줄 기록'))
         : null;
     final scaffold = wide ? _wideScaffold(context, body, fab) : _narrowScaffold(context, body, fab);
-    return Stack(children: [
-      Positioned.fill(child: scaffold),
-      if (_update != null || _folderNotice)
-        Positioned(
-          top: 12,
-          right: 16,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            if (_update != null)
-              UpdateNotice(
-                offer: _update!,
-                phase: _updatePhase,
-                progress: _updateProgress,
-                error: _updateError,
-                onLater: () => setState(() => _update = null),
-                onUpdate: _applyUpdate,
-              ),
-            if (_update != null && _folderNotice) const SizedBox(height: 8),
-            if (_folderNotice) AccessNotice(onApply: _skipGuardedFolders),
-          ]),
-        ),
-    ]);
+    return ListenableBuilder(
+      listenable: _updates,
+      builder: (context, _) {
+        final u = _updates;
+        final card = u.offer != null && !u.dismissed;
+        return Stack(children: [
+          Positioned.fill(child: scaffold),
+          if (card || _folderNotice)
+            Positioned(
+              top: 12,
+              right: 16,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                if (card)
+                  UpdateNotice(
+                    offer: u.offer!,
+                    phase: u.phase,
+                    progress: u.progress,
+                    error: u.error,
+                    onLater: u.dismiss,
+                    onUpdate: u.apply,
+                  ),
+                if (card && _folderNotice) const SizedBox(height: 8),
+                if (_folderNotice) AccessNotice(onApply: _skipGuardedFolders),
+              ]),
+            ),
+        ]);
+      },
+    );
   }
 
   Widget _wideScaffold(BuildContext context, Widget body, Widget? fab) {
@@ -406,10 +398,13 @@ class _Sidebar extends StatelessWidget {
               child: Text('z', style: TextStyle(color: scheme.onPrimary, fontWeight: FontWeight.w800, fontSize: 17, height: 1)),
             ),
             const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('zaevis', style: t.titleMedium?.copyWith(letterSpacing: -0.3, height: 1.1)),
-              Text('작업 기록 · 지식', style: t.labelSmall),
-            ]),
+            // a larger text size (설정 → 일반) must not push the wordmark past the sidebar
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('zaevis', style: t.titleMedium?.copyWith(letterSpacing: -0.3, height: 1.1), maxLines: 1, overflow: TextOverflow.fade, softWrap: false),
+                Text('작업 기록 · 지식', style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ]),
+            ),
           ]),
         ),
         for (var i = 0; i < _dests.length; i++) _NavItem(dest: _dests[i], selected: i == index, onTap: () => onSelect(i)),

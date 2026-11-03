@@ -14,8 +14,11 @@ import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
 import 'package:zaevis/screens/file_screen.dart';
+import 'package:zaevis/screens/settings_screen.dart';
 import 'package:zaevis/screens/search_screen.dart';
 import 'package:zaevis/shortcuts.dart';
+import 'package:zaevis/app_prefs.dart';
+import 'package:zaevis/update.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -60,16 +63,29 @@ Map<String, Object?> _tokenizer() => {
           : {'installed': false, 'library': null, 'model': null, 'source': null, 'version': null, 'asset': 'kiwi_mac_arm64_v0.24.1.tgz', 'downloadMb': 129},
     };
 
+/// Picks a section in the settings modal (the home sidebar behind it has its own "검색").
+Future<void> _settingsSection(WidgetTester tester, String label) async {
+  await tester.tap(find.descendant(of: find.byType(SettingsScreen), matching: find.text(label)).first);
+  await tester.pumpAndSettle();
+}
+
+/// The settings modal's scrolling content.
+Finder _settingsScroll() => find.descendant(of: find.byKey(const ValueKey('settings-content')), matching: find.byType(Scrollable)).first;
+
 /// Records every `zaevis …` the app asks the bundled backend to run.
 class _FakeBackend implements Backend {
-  _FakeBackend({this.configured = true});
+  _FakeBackend({this.configured = true, this.version, this.installed});
   final bool configured;
+  final String? version;
+  final DateTime? installed;
   final ran = <List<String>>[];
   List<List<String>> get runs => ran;
   @override
   bool get managed => true;
   @override
-  String? get buildVersion => null;
+  String? get buildVersion => version;
+  @override
+  DateTime? get installedAt => installed;
   @override
   String? get problem => null;
   @override
@@ -736,9 +752,8 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('정리'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
+    await _settingsSection(tester, '정리');
+    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: _settingsScroll());
     expect(find.text('서비스 순서'), findsOneWidget);
     expect(find.text('Claude Code · 할당량'), findsOneWidget);
     expect(find.text('Codex CLI · 작성'), findsOneWidget);
@@ -764,9 +779,74 @@ void main() {
     expect(find.textContaining('Claude Code·Codex·Gemini CLI 중 하나를 설치하세요'), findsOneWidget);
     await tester.tap(find.text('설정 열기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('정리'));
+    expect(find.byType(SettingsScreen), findsOneWidget);
+    expect(find.text('에이전트 순서'), findsOneWidget, reason: 'it opens on the section that picks the agent');
+  });
+
+  testWidgets('settings is a modal over the app; 일반 shows the version, install date and the update', (tester) async {
+    tester.view.physicalSize = const Size(1300, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final installs = <String>[];
+    final updates = UpdateController(
+      localVersion: '0.1.0+20261103061250',
+      install: (url, onProgress) async => installs.add(url),
+      fetch: (_) async => UpdateOffer(local: parseBuild('0.1.0+20261103061250')!, remote: parseBuild('0.1.1+20261110090000')!, downloadUrl: 'https://example/arm.dmg'),
+    );
+    addTearDown(updates.dispose);
+    final backend = _FakeBackend(version: '0.1.0+20261103061250', installed: DateTime(2026, 11, 3, 15, 20));
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) => Scaffold(body: Center(child: TextButton(
+        onPressed: () => SettingsScreen.show(context, api: _fakeApi(), backend: backend, updates: updates, onServerChanged: () {}),
+        child: const Text('열기'),
+      )))),
+    ));
+    await tester.tap(find.text('열기'));
     await tester.pumpAndSettle();
-    expect(find.text('정리 (지식화)'), findsOneWidget); // settings opened
+
+    expect(find.byType(Dialog), findsOneWidget, reason: 'a modal, with the app dimmed behind it');
+    expect(find.text('일반'), findsNWidgets(2), reason: 'the selected section in the list and as the title');
+    expect(find.textContaining('0.1.0 · 2026년 11월 3일 빌드'), findsOneWidget);
+    expect(find.text('2026년 11월 3일 15:20'), findsOneWidget);
+    expect(find.text('아직 확인하지 않았습니다'), findsOneWidget);
+
+    await tester.tap(find.text('업데이트 확인'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('새 버전이 있습니다: 0.1.1'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '업데이트'));
+    await tester.pumpAndSettle();
+    expect(installs, ['https://example/arm.dmg']);
+
+    await tester.tap(find.byTooltip('닫기'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsNothing);
+  });
+
+  testWidgets('theme and text size apply to the whole app and are saved on the server', (tester) async {
+    tester.view.physicalSize = const Size(1300, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final prefs = AppPrefs();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), prefs: prefs));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('시스템'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('어둡게').last);
+    await tester.pumpAndSettle();
+    expect(prefs.themeMode, ThemeMode.dark);
+    expect(Theme.of(tester.element(find.text('테마'))).brightness, Brightness.dark);
+    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.0}});
+
+    await tester.tap(find.text('기본'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('크게').last);
+    await tester.pumpAndSettle();
+    expect(MediaQuery.textScalerOf(tester.element(find.text('테마'))).scale(10), closeTo(12, 0.01));
+    expect(jsonDecode(posted.last.body), {'appearance': {'theme': 'dark', 'textScale': 1.2}});
   });
 
   testWidgets('settings shows the OpenRouter re-ranking section, off and local by default', (tester) async {
@@ -777,8 +857,7 @@ void main() {
     await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi()));
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('검색'));
-    await tester.pumpAndSettle();
+    await _settingsSection(tester, '검색');
 
     expect(find.text('의미 검색 (로컬 임베딩)'), findsOneWidget);
     expect(find.text('검색 결과 재정렬 (OpenRouter)'), findsOneWidget);
@@ -789,19 +868,18 @@ void main() {
     expect(save.onPressed, isNull);
 
     // the digest section lists detected agents, marks the one that will run, shows the last report
-    await tester.tap(find.text('정리'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: find.byType(Scrollable).first);
+    await _settingsSection(tester, '정리');
+    await tester.scrollUntilVisible(find.text('지금 정리하기'), 200, scrollable: _settingsScroll());
     expect(find.text('Claude Code'), findsOneWidget);
     expect(find.text('Codex CLI'), findsOneWidget);
     expect(find.text('사용'), findsOneWidget);
     // an installed but signed-out CLI says what to do
-    expect(find.textContaining('로그인 필요: 터미널에서 codex login'), findsOneWidget);
+    // (the chat behind the modal names it too, so look inside the settings only)
+    expect(find.descendant(of: find.byType(SettingsScreen), matching: find.textContaining('로그인 필요: 터미널에서 codex login')), findsOneWidget);
     expect(find.textContaining('로그 3줄 추가'), findsOneWidget);
     await tester.ensureVisible(find.text('지금 정리하기'));
     await tester.pumpAndSettle();
-    // FilledButton.icon builds a private subclass, so match by predicate rather than exact type
-    await tester.tap(find.ancestor(of: find.text('지금 정리하기'), matching: find.byWidgetPredicate((w) => w is FilledButton)));
+    await tester.tap(find.widgetWithText(FilledButton, '실행'));
     await tester.pumpAndSettle();
     expect(posted.where((r) => r.url.path == '/api/digest/run').length, 1);
   });
@@ -1136,6 +1214,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
+    await _settingsSection(tester, '녹음');
     await tester.ensureVisible(find.text('화자 구분'));
     await tester.pumpAndSettle();
     expect(find.textContaining('계정 없이 이 맥에서 구분합니다. 첫 녹음 때 화자 모델(약 33MB)'), findsOneWidget);
@@ -1160,6 +1239,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
+    await _settingsSection(tester, '녹음');
     final login = find.text('로그인');
     await tester.ensureVisible(login);
     await tester.pumpAndSettle();
@@ -1374,17 +1454,14 @@ void main() {
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
 
-    // the page's ListView, not the server-address TextField's own Scrollable
-    final scrollable = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
-    // a non-lazy ListView already holds every child, so scroll until the tile is actually hit-testable
-    await tester.dragUntilVisible(find.text('시스템 알림').hitTestable(), scrollable, const Offset(0, -250));
+    // 일반 opens first; a non-lazy ListView already holds every child, so scroll until the tile is actually hit-testable
+    await tester.dragUntilVisible(find.text('시스템 알림').hitTestable(), _settingsScroll(), const Offset(0, -250));
     await tester.tap(find.text('시스템 알림'));
     await tester.pumpAndSettle();
     expect(jsonDecode(posted.single.body), {'notifications': false});
 
-    await tester.tap(find.text('앱'));
-    await tester.pumpAndSettle();
-    await tester.dragUntilVisible(find.text('바꾸기').last.hitTestable(), scrollable, const Offset(0, -250));
+    await _settingsSection(tester, '단축키');
+    await tester.dragUntilVisible(find.text('바꾸기').last.hitTestable(), _settingsScroll(), const Offset(0, -250));
     await tester.tap(find.text('바꾸기').last);
     await tester.pumpAndSettle();
     expect(find.text('전역 단축키 바꾸기'), findsOneWidget);
@@ -1482,10 +1559,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('설정'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('검색'));
-    await tester.pumpAndSettle();
+    await _settingsSection(tester, '검색');
     final tile = find.widgetWithText(ListTile, '한국어 형태소 분석 (Kiwi)');
-    await tester.dragUntilVisible(tile, find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first, const Offset(0, -250));
+    await tester.dragUntilVisible(tile, _settingsScroll(), const Offset(0, -250));
     await tester.pumpAndSettle();
     expect(find.textContaining('129MB 다운로드'), findsOneWidget);
     await tester.tap(find.descendant(of: tile, matching: find.text('설치')));

@@ -725,6 +725,8 @@ class AppSettings {
     this.lastDaily,
     this.speakers,
     this.transcribeSpeed = 'quiet',
+    this.theme = 'system',
+    this.textScale = 1,
   });
 
   factory AppSettings.fromJson(Json j) {
@@ -748,6 +750,8 @@ class AppSettings {
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
       speakers: j['speakers'] is Json ? SpeakersStatus.fromJson(j['speakers'] as Json) : null,
       transcribeSpeed: _str(j['transcribeSpeed']) == 'fast' ? 'fast' : 'quiet',
+      theme: j['appearance'] is Json ? _str((j['appearance'] as Json)['theme']) : 'system',
+      textScale: j['appearance'] is Json && (j['appearance'] as Json)['textScale'] is num ? ((j['appearance'] as Json)['textScale'] as num).toDouble() : 1,
     );
   }
 
@@ -756,6 +760,10 @@ class AppSettings {
 
   /// whisperX CPU use: `quiet` (4 threads, default) or `fast` (every core).
   final String transcribeSpeed;
+
+  /// `appearance`: "system" | "light" | "dark", and the text size factor (see AppPrefs).
+  final String theme;
+  final double textScale;
 
   final String dailyAt;
   final bool indexOnInject;

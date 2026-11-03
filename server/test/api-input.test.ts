@@ -55,6 +55,7 @@ before(async () => {
     settings: {
       get: async () => ({ dailyAt: "18:30", indexOnInject }),
       update: async (p) => {
+        if (p.appearance) calls.push(`appearance:${JSON.stringify(p.appearance)}`);
         if (p.dailyAt && !/^\d{2}:\d{2}$/.test(p.dailyAt)) throw new Error("시각 형식");
         if (p.indexOnInject !== undefined) indexOnInject = p.indexOnInject;
         return { dailyAt: p.dailyAt ?? "18:30", indexOnInject };
@@ -264,4 +265,11 @@ test("POST /transcripts/relabel queues a speaker pass only when the recording wa
   assert.equal((await call("POST", "/api/transcripts/relabel", { path: "log/2026-10.md" })).status, 400);
   assert.equal((await call("POST", "/api/transcripts/relabel", { path: "inbox/transcripts/없음.txt" })).status, 404);
   assert.deepEqual(relabeled, ["inbox/transcripts/2026-10-30_1424_녹음.txt", "inbox/transcripts/2026-10-21_회의.txt"]);
+});
+
+test("PUT /settings appearance keeps only known themes and text sizes", async () => {
+  calls.length = 0;
+  await call("PUT", "/api/settings", { appearance: { theme: "dark", textScale: 1.2 } });
+  await call("PUT", "/api/settings", { appearance: { theme: "neon", textScale: 7 } });
+  assert.deepEqual(calls, ['appearance:{"theme":"dark","textScale":1.2}', 'appearance:{"theme":"system","textScale":1}']);
 });

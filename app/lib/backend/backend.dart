@@ -31,6 +31,9 @@ abstract class Backend {
   /// Bundled `VERSION` (`0.1.0+20261029120000`), or null when this is not an installed build.
   String? get buildVersion;
 
+  /// When this build was first opened on this machine (recorded on that launch), or null when it is not an installed build.
+  DateTime? get installedAt;
+
   /// Something that blocks running (e.g. app not moved to Applications), or null.
   String? get problem;
 

@@ -35,6 +35,7 @@ export type AppConfig = {
   speakers: boolean; // label who spoke in transcripts after the text is saved (default on, see diarize.ts)
   transcribeSpeed: "quiet" | "fast"; // whisperX CPU use: 4 threads (default) or every core (transcribe.ts)
   hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
+  appearance: Appearance; // the app's theme and text size, kept here so every window (macOS app, web) shares them
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
   digest: { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean; order: AgentId[]; skip: AgentId[] };
   reports: ReportsSetting; // daily / weekly / monthly reports written by the same agent (reports.ts)
@@ -88,6 +89,7 @@ export function loadConfig(): AppConfig {
     speakers: fc.speakers !== false,
     transcribeSpeed: fc.transcribeSpeed === "fast" ? "fast" : "quiet",
     hotkey: typeof fc.hotkey === "string" ? fc.hotkey : "",
+    appearance: normalizeAppearance(fc.appearance),
     rerank: { enabled: fc.rerank?.enabled === true, model: typeof fc.rerank?.model === "string" && fc.rerank.model ? fc.rerank.model : "voyageai/rerank-3-lite" },
     digest: normalizeDigest(fc.digest),
     reports: normalizeReportsSetting(fc.reports),
@@ -168,8 +170,19 @@ export function removeCustomSource(name: string): boolean {
   return true;
 }
 
+export type Appearance = { theme: "system" | "light" | "dark"; textScale: number };
+/** Text sizes the app offers, as a factor of the default. */
+export const TEXT_SCALES = [0.9, 1, 1.1, 1.2, 1.3];
+
+export function normalizeAppearance(raw: unknown): Appearance {
+  const a = (raw && typeof raw === "object" ? raw : {}) as { theme?: unknown; textScale?: unknown };
+  const theme = a.theme === "light" || a.theme === "dark" ? a.theme : "system";
+  const scale = typeof a.textScale === "number" && TEXT_SCALES.includes(a.textScale) ? a.textScale : 1;
+  return { theme, textScale: scale };
+}
+
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "speakers" | "transcribeSpeed" | "hotkey" | "rerank" | "digest" | "reports" | "memoryPaths">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "speakers" | "transcribeSpeed" | "hotkey" | "appearance" | "rerank" | "digest" | "reports" | "memoryPaths">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }

@@ -16,6 +16,17 @@ class AppBuild {
   final int build;
 
   String get label => '${semver.join('.')}${build > 0 ? '+$build' : ''}';
+
+  /// "0.1.0"
+  String get version => semver.join('.');
+
+  /// The build number is the CI build time, `yyyyMMddHHmmss` in UTC. Null for a plain version.
+  DateTime? get builtAt {
+    final b = build.toString();
+    if (b.length != 14) return null;
+    int at(int i, int n) => int.parse(b.substring(i, i + n));
+    return DateTime.utc(at(0, 4), at(4, 2), at(6, 2), at(8, 2), at(10, 2), at(12, 2)).toLocal();
+  }
 }
 
 class UpdateOffer {
@@ -83,6 +94,92 @@ String hostOs() {
     TargetPlatform.linux => 'linux',
     _ => 'other',
   };
+}
+
+/// Like [lookForUpdate] but throws when GitHub cannot be asked, so "up to date" and "could not check" differ.
+Future<UpdateOffer?> fetchUpdate(String localVersion, {http.Client? client}) async {
+  final own = client == null;
+  final http.Client c = client ?? http.Client();
+  try {
+    final res = await c.get(Uri.parse(releaseApi), headers: const {'user-agent': 'zaevis', 'accept': 'application/vnd.github+json'});
+    if (res.statusCode != 200) throw StateError('GitHub 응답 ${res.statusCode}');
+    final body = jsonDecode(res.body);
+    if (body is! Map<String, dynamic>) throw StateError('릴리스 정보를 읽지 못했습니다');
+    return offerFromRelease(localVersion, body, os: hostOs(), arch: hostArch());
+  } finally {
+    if (own) c.close();
+  }
+}
+
+/// Update state shared by the corner card and the settings page: one check, one download.
+class UpdateController extends ChangeNotifier {
+  UpdateController({this.localVersion, this.install, Future<UpdateOffer?> Function(String local)? fetch}) : _fetch = fetch ?? ((v) => fetchUpdate(v));
+
+  /// The bundled VERSION; null in development and on the web, where nothing is checked.
+  final String? localVersion;
+
+  /// Downloads and installs (Backend.installUpdate); null where the app cannot replace itself.
+  final Future<void> Function(String url, void Function(double? progress) onProgress)? install;
+  final Future<UpdateOffer?> Function(String local) _fetch;
+
+  AppBuild? get local => localVersion == null ? null : parseBuild(localVersion!);
+  UpdateOffer? offer;
+  UpdatePhase phase = UpdatePhase.idle;
+  double? progress;
+  String? error;
+  String? checkError;
+  bool checking = false;
+  DateTime? checkedAt;
+
+  /// The corner card was closed; the settings page still offers the update.
+  bool dismissed = false;
+
+  Future<void> check() async {
+    final v = localVersion;
+    if (v == null || checking) return;
+    checking = true;
+    checkError = null;
+    notifyListeners();
+    try {
+      offer = await _fetch(v);
+    } catch (e) {
+      checkError = e.toString().replaceFirst(RegExp(r'^(StateError|Exception|ClientException): ?'), '');
+    } finally {
+      checking = false;
+      checkedAt = DateTime.now();
+      notifyListeners();
+    }
+  }
+
+  void dismiss() {
+    dismissed = true;
+    notifyListeners();
+  }
+
+  Future<void> apply() async {
+    final url = offer?.downloadUrl;
+    final run = install;
+    if (url == null || run == null || phase != UpdatePhase.idle) return;
+    phase = UpdatePhase.downloading;
+    progress = 0;
+    error = null;
+    notifyListeners();
+    try {
+      await run(url, (p) {
+        if (p == null) {
+          phase = UpdatePhase.installing;
+          progress = null;
+        } else {
+          progress = p;
+        }
+        notifyListeners();
+      });
+    } catch (e) {
+      phase = UpdatePhase.idle;
+      error = e.toString().replaceFirst(RegExp(r'^(StateError|Exception): '), '');
+      notifyListeners();
+    }
+  }
 }
 
 Future<UpdateOffer?> lookForUpdate(String localVersion, {http.Client? client}) async {

@@ -102,6 +102,7 @@ const server = createApp({
         localEmbedding: cfg.localEmbedding,
         notifications: cfg.notifications,
         hotkey: cfg.hotkey,
+        appearance: cfg.appearance,
         rerank: rerank.status(cfg.rerank),
         tokenizer: tokenizer.status(),
       };

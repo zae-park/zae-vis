@@ -4,32 +4,65 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api.dart';
+import '../app_prefs.dart';
 import '../backend/backend.dart';
 import '../models.dart';
 import '../shortcuts.dart';
 import '../theme.dart';
+import '../update.dart';
 import '../widgets/agent_rail.dart';
 import '../widgets/common.dart';
 import '../widgets/input_dialogs.dart';
 import '../widgets/task_dialog.dart';
 import 'review_screen.dart';
 
+/// Settings as a modal over the dimmed app: sections on the left, grouped rows on the right. On a narrow window the
+/// modal fills the screen and the sections become a row of tabs.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.api, required this.onServerChanged, this.backend});
+  const SettingsScreen({super.key, required this.api, required this.onServerChanged, this.backend, this.prefs, this.updates, this.initial = SettingsSection.general});
   final WorklogApi api;
   final Backend? backend;
   final VoidCallback onServerChanged;
+
+  /// Theme and text size (the 일반 section); a screen built on its own gets a fresh one.
+  final AppPrefs? prefs;
+
+  /// The update check the corner card uses; null hides the update row's button.
+  final UpdateController? updates;
+  final SettingsSection initial;
+
+  static Future<void> show(BuildContext context,
+      {required WorklogApi api, required VoidCallback onServerChanged, Backend? backend, AppPrefs? prefs, UpdateController? updates, SettingsSection initial = SettingsSection.general}) {
+    return showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (_) => SettingsScreen(api: api, backend: backend, prefs: prefs, updates: updates, onServerChanged: onServerChanged, initial: initial),
+    );
+  }
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-enum _SettingsPane { mic, digest, search, app }
+enum SettingsSection {
+  general('일반', Icons.tune),
+  recording('녹음', Icons.mic_none),
+  digest('정리', Icons.auto_awesome_outlined),
+  search('검색', Icons.search),
+  collect('수집', Icons.schedule),
+  shortcuts('단축키', Icons.keyboard_outlined),
+  advanced('고급', Icons.build_outlined);
+
+  const SettingsSection(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final _server = TextEditingController(text: widget.api.baseUrl);
   late Future<AppSettings> _future = widget.api.settings();
-  _SettingsPane _pane = _SettingsPane.mic;
+  late SettingsSection _section = widget.initial;
+  late final AppPrefs _prefs = widget.prefs ?? AppPrefs();
 
   @override
   void dispose() {
@@ -88,6 +121,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
+  Future<void> _appearance({ThemeMode? mode, double? scale}) async {
+    try {
+      await _prefs.save(widget.api, mode: mode, scale: scale);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    }
+  }
+
   Future<void> _addMemory(AppSettings s) async {
     final path = await showDialog<String>(
       context: context,
@@ -114,19 +155,351 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final full = size.width < 700 || size.height < 520;
+    final scheme = Theme.of(context).colorScheme;
+    final body = ScaffoldMessenger(
+      child: Scaffold(
+        backgroundColor: scheme.surface,
+        body: full ? _narrow(context) : _wide(context),
+      ),
+    );
+    return Dialog(
+      insetPadding: full ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+      clipBehavior: Clip.antiAlias,
+      shape: full ? const RoundedRectangleBorder() : RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: full ? SizedBox(width: size.width, height: size.height, child: body) : ConstrainedBox(constraints: const BoxConstraints(maxWidth: 980, maxHeight: 720), child: SizedBox(width: 980, height: 720, child: body)),
+    );
+  }
+
+  Widget _wide(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('설정')),
-      body: Readable(
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 24, 32), children: [
-          Text('서버', style: t.titleMedium),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: Row(children: [
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Container(
+        width: 210,
+        color: scheme.surfaceContainerLow,
+        child: ListView(padding: const EdgeInsets.fromLTRB(10, 18, 10, 18), children: [
+          Padding(padding: const EdgeInsets.fromLTRB(10, 0, 10, 14), child: Text('설정', style: t.titleLarge)),
+          for (final sec in SettingsSection.values) _NavItem(section: sec, selected: sec == _section, onTap: () => setState(() => _section = sec)),
+        ]),
+      ),
+      VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 14, 12, 4),
+            child: Row(children: [
+              Expanded(child: Text(_section.label, style: t.headlineSmall)),
+              IconButton(tooltip: '닫기', onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
+            ]),
+          ),
+          Expanded(child: _content(context, const EdgeInsets.fromLTRB(28, 8, 28, 32))),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _narrow(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 4, 0),
+          child: Row(children: [
+            Expanded(child: Text('설정', style: t.titleLarge)),
+            IconButton(tooltip: '닫기', onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
+          ]),
+        ),
+        SizedBox(
+          height: 44,
+          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8), children: [
+            for (final sec in SettingsSection.values) _TabItem(section: sec, selected: sec == _section, onTap: () => setState(() => _section = sec)),
+          ]),
+        ),
+        Divider(height: 1, color: scheme.outlineVariant),
+        Expanded(child: _content(context, const EdgeInsets.fromLTRB(16, 16, 16, 32))),
+      ]),
+    );
+  }
+
+  Widget _content(BuildContext context, EdgeInsets padding) {
+    return FutureBuilder<AppSettings>(
+      future: _future,
+      builder: (context, snap) {
+        final List<Widget> children;
+        if (_section == SettingsSection.advanced) {
+          // the server address must stay reachable when the server is not
+          children = _advanced(context, snap.data);
+        } else if (snap.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snap.hasError) {
+          return ErrorPane(error: snap.error!, onRetry: _reload);
+        } else {
+          final s = snap.data!;
+          children = switch (_section) {
+            SettingsSection.general => _general(context, s),
+            SettingsSection.recording => _recording(context, s),
+            SettingsSection.digest => [_DigestSection(api: widget.api)],
+            SettingsSection.search => _search(context, s),
+            SettingsSection.collect => _collect(context, s),
+            SettingsSection.shortcuts => _shortcuts(context, s),
+            SettingsSection.advanced => const [],
+          };
+        }
+        return KeyedSubtree(
+          key: const ValueKey('settings-content'),
+          child: ListView(
+            key: PageStorageKey(_section),
+            padding: padding,
+            children: [for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(height: 22), children[i]]],
+          ),
+        );
+      },
+    );
+  }
+
+  List<Widget> _general(BuildContext context, AppSettings s) {
+    final t = Theme.of(context).textTheme;
+    return [
+      _Group(title: '앱 정보', children: [
+        ..._about(context),
+      ]),
+      ListenableBuilder(
+        listenable: _prefs,
+        builder: (context, _) => _Group(title: '화면', children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.contrast),
+            title: const Text('테마'),
+            subtitle: const Text('시스템을 고르면 macOS·Windows의 밝게/어둡게 설정을 따릅니다.'),
+            trailing: _Choice<ThemeMode>(
+              value: _prefs.themeMode,
+              items: const [(ThemeMode.system, '시스템'), (ThemeMode.light, '밝게'), (ThemeMode.dark, '어둡게')],
+              onChanged: (m) => _appearance(mode: m),
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.format_size),
+            title: const Text('글자 크기'),
+            subtitle: Text('앱 전체 글자를 ${(_prefs.textScale * 100).round()}%로 보여 줍니다.', style: t.bodySmall),
+            trailing: _Choice<double>(
+              value: _prefs.textScale,
+              items: AppPrefs.scales,
+              onChanged: (v) => _appearance(scale: v),
+            ),
+          ),
+        ]),
+      ),
+      _Group(title: '알림', children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          secondary: const Icon(Icons.notifications_outlined),
+          title: const Text('시스템 알림'),
+          subtitle: const Text('정리가 끝나 검토할 것이 생겼을 때, 수집이 실패했을 때, 녹음 전사가 끝났을 때 알립니다. '
+              '서버가 보내므로 앱 창이 닫혀 있어도 옵니다.'),
+          value: s.notifications,
+          onChanged: (v) => _update(notifications: v),
+        ),
+      ]),
+    ];
+  }
+
+  /// Version, install date and the update — always shown, whether or not an update is waiting.
+  List<Widget> _about(BuildContext context) {
+    final b = widget.backend;
+    final local = b?.buildVersion == null ? null : parseBuild(b!.buildVersion!);
+    final installed = b?.installedAt;
+    return [
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.info_outline),
+        title: const Text('버전'),
+        subtitle: Text(local == null
+            ? (b == null || !b.managed ? '설치본이 아닙니다 (개발 실행이나 웹)' : '버전 정보 없음')
+            : [local.version, if (local.builtAt != null) '${_day(local.builtAt!)} 빌드'].join(' · ')),
+        trailing: local == null ? null : SelectableText(local.label, style: ZaevisTheme.mono.copyWith(fontSize: 12)),
+      ),
+      if (installed != null)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.event_available_outlined),
+          title: const Text('설치한 날'),
+          subtitle: const Text('이 버전을 이 컴퓨터에서 처음 연 때'),
+          trailing: Text(_dayTime(installed)),
+        ),
+      if (widget.updates != null && local != null) _UpdateRow(updates: widget.updates!),
+    ];
+  }
+
+  List<Widget> _recording(BuildContext context, AppSettings s) {
+    return [
+      _Group(title: '전사', children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(s.whisperx ? Icons.check_circle_outline : Icons.extension_outlined),
+          title: const Text('whisperX (녹음 전사)'),
+          subtitle: Text(s.whisperx
+              ? '설치됨'
+              : (_managed ? '설치하면 녹음을 올릴 때 자동으로 전사합니다 (1~2GB 다운로드)' : "설치되지 않음 — 터미널에서 'zaevis ext install whisperx'")),
+          trailing: !s.whisperx && _managed
+              ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
+              : null,
+        ),
+        if (s.whisperx)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.speed),
+            title: const Text('빠르게 전사'),
+            subtitle: const Text('끄면 CPU 4코어만 써서 팬 소리가 작습니다. 켜면 모든 코어를 써서 약 1.4배 빠르지만 팬이 세게 돕니다.'),
+            value: s.transcribeSpeed == 'fast',
+            onChanged: (v) => _update(transcribeSpeed: v ? 'fast' : 'quiet'),
+          ),
+      ]),
+      _Group(title: '화자', children: [
+        if (s.speakers != null) _SpeakersTile(status: s.speakers!, whisperx: s.whisperx, onChanged: (v) => _update(speakers: v), onRefresh: _reload),
+        _HfLogin(api: widget.api, backend: widget.backend),
+      ]),
+    ];
+  }
+
+  List<Widget> _search(BuildContext context, AppSettings s) {
+    final t = Theme.of(context).textTheme;
+    return [
+      _Group(title: '색인', children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          secondary: const Icon(Icons.bolt),
+          title: const Text('넣자마자 색인'),
+          subtitle: const Text('한 줄 기록이나 전사본을 넣으면 바로 검색 색인을 갱신합니다. 끄면 예약·수동 색인 때만 반영됩니다.'),
+          value: s.indexOnInject,
+          onChanged: (v) => _update(indexOnInject: v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          secondary: const Icon(Icons.psychology_outlined),
+          title: const Text('의미 검색 (로컬 임베딩)'),
+          subtitle: const Text('이 맥에서 Qwen3-Embedding 모델을 돌려 뜻이 비슷한 기록도 찾습니다. 외부 서비스나 키는 쓰지 않습니다. '
+              '처음 켤 때 모델(1.1GB)을 내려받고 색인을 다시 만듭니다. 끄면 키워드 검색만 합니다.'),
+          value: s.localEmbedding,
+          onChanged: (v) => _update(localEmbedding: v),
+        ),
+        if (s.tokenizer != null) _KiwiTile(status: s.tokenizer!, managed: _managed, onInstall: _installKiwi),
+      ]),
+      _Group(
+        title: '색인 폴더',
+        description: '기록 폴더는 항상 색인됩니다. 노트가 다른 폴더에 있으면 추가하세요. 추가하거나 빼면 처음부터 다시 색인합니다.',
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.folder_special_outlined),
+            title: SelectableText(s.worklogDir, style: ZaevisTheme.mono, minLines: 1),
+            subtitle: Text('기록 폴더', style: t.bodySmall),
+          ),
+          for (final p in s.memoryPaths)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.folder_outlined),
+              title: Text(p, style: ZaevisTheme.mono, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: TextButton(onPressed: () => _update(memoryPaths: [for (final x in s.memoryPaths) if (x != p) x]), child: const Text('빼기')),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(onPressed: () => _addMemory(s), icon: const Icon(Icons.create_new_folder_outlined), label: const Text('폴더 추가')),
+            ),
+          ),
+        ],
+      ),
+      if (s.rerank != null)
+        _Group(title: '외부 서비스', children: [
+          _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
+        ]),
+    ];
+  }
+
+  List<Widget> _collect(BuildContext context, AppSettings s) {
+    final schedule = !s.scheduleSupported
+        ? (s.scheduleHint ?? '이 OS에서는 자동 예약을 지원하지 않습니다.')
+        : !s.scheduleInstalled
+            ? '예약 없음 — 시각을 저장하면 등록됩니다.'
+            : s.scheduleLoaded
+                ? '매일 ${s.dailyAt} 실행 중 (맥이 잠자기였으면 깨어날 때 실행)'
+                : '등록됐지만 아직 로드되지 않음';
+    return [
+      _Group(title: '매일 수집', children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.schedule),
+          title: Text('실행 시각 ${s.dailyAt}'),
+          subtitle: Text(schedule),
+          trailing: OutlinedButton(
+            onPressed: () async {
+              final parts = s.dailyAt.split(':');
+              final picked = await showTimePicker(
+                context: context,
+                initialTime: TimeOfDay(hour: int.tryParse(parts.first) ?? 18, minute: int.tryParse(parts.last) ?? 30),
+              );
+              if (picked == null) return;
+              String two(int n) => n.toString().padLeft(2, '0');
+              await _update(dailyAt: '${two(picked.hour)}:${two(picked.minute)}');
+            },
+            child: const Text('바꾸기'),
+          ),
+        ),
+        if (s.lastDaily != null)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history),
+            title: const Text('마지막 실행'),
+            trailing: Text(_dayTime(s.lastDaily!.toLocal())),
+          ),
+      ]),
+    ];
+  }
+
+  List<Widget> _shortcuts(BuildContext context, AppSettings s) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return [
+      _Group(children: [
+        for (final (keys, what) in AppShortcuts.describe(hotkey: s.hotkey))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(children: [
+              Container(
+                constraints: const BoxConstraints(minWidth: 110),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(6)),
+                child: Text(keys, style: ZaevisTheme.mono.copyWith(fontSize: 12, color: scheme.onSurface), textAlign: TextAlign.center),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(what, style: t.bodyMedium)),
+              if (what.contains('전역')) ...[
+                TextButton(
+                  onPressed: () async {
+                    final spec = await showHotkeyDialog(context, current: s.hotkey);
+                    if (spec != null) await _update(hotkey: spec);
+                  },
+                  child: const Text('바꾸기'),
+                ),
+                if (s.hotkey.isNotEmpty) TextButton(onPressed: () => _update(hotkey: ''), child: const Text('기본값')),
+              ],
+            ]),
+          ),
+      ]),
+    ];
+  }
+
+  List<Widget> _advanced(BuildContext context, AppSettings? s) {
+    return [
+      _Group(title: '서버', description: '앱이 이야기하는 zaevis 서버입니다. 보통은 바꿀 일이 없습니다.', children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(children: [
             Expanded(child: TextField(controller: _server, decoration: const InputDecoration(labelText: '서버 주소', hintText: defaultDesktopBase))),
             const SizedBox(width: 8),
             FilledButton.tonal(
@@ -138,218 +511,208 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('적용'),
             ),
           ]),
-            ),
+        ),
+      ]),
+      if (_managed)
+        _Group(title: '이 컴퓨터', children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.open_in_browser),
+            title: const Text('브라우저로 열기'),
+            subtitle: Text(widget.api.baseUrl),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => widget.backend!.open(widget.api.baseUrl),
           ),
-          const SizedBox(height: 24),
-          FutureBuilder<AppSettings>(
-            future: _future,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-              if (snap.hasError) return ErrorPane(error: snap.error!, onRetry: _reload);
-              final s = snap.data!;
-              final schedule = !s.scheduleSupported
-                  ? (s.scheduleHint ?? '이 OS에서는 자동 예약을 지원하지 않습니다.')
-                  : !s.scheduleInstalled
-                      ? '예약 없음 — 아래 시각을 저장하면 등록됩니다.'
-                      : s.scheduleLoaded
-                          ? '매일 ${s.dailyAt} 실행 중 (맥이 잠자기였으면 깨어날 때 실행)'
-                          : '등록됐지만 아직 로드되지 않음';
-              final scheduleTile = <Widget>[
-                Text('매일 수집', style: t.titleMedium),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.schedule),
-                  title: Text('실행 시각 ${s.dailyAt}'),
-                  subtitle: Text(schedule),
-                  trailing: OutlinedButton(
-                    onPressed: () async {
-                      final parts = s.dailyAt.split(':');
-                      final picked = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay(hour: int.tryParse(parts.first) ?? 18, minute: int.tryParse(parts.last) ?? 30),
-                      );
-                      if (picked == null) return;
-                      String two(int n) => n.toString().padLeft(2, '0');
-                      await _update(dailyAt: '${two(picked.hour)}:${two(picked.minute)}');
-                    },
-                    child: const Text('바꾸기'),
-                  ),
-                ),
-                if (s.lastDaily != null)
-                  Padding(padding: const EdgeInsets.only(left: 56), child: Text('마지막 실행: ${s.lastDaily!.toLocal()}'.split('.').first, style: t.bodySmall)),
-              ];
-              final search = <Widget>[
-                Text('검색', style: t.titleMedium),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Icons.bolt),
-                  title: const Text('넣자마자 색인'),
-                  subtitle: const Text('한 줄 기록이나 전사본을 넣으면 바로 검색 색인을 갱신합니다. 끄면 예약·수동 색인 때만 반영됩니다.'),
-                  value: s.indexOnInject,
-                  onChanged: (v) => _update(indexOnInject: v),
-                ),
-                const SizedBox(height: 16),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Icons.psychology_outlined),
-                  title: const Text('의미 검색 (로컬 임베딩)'),
-                  subtitle: const Text('이 맥에서 Qwen3-Embedding 모델을 돌려 뜻이 비슷한 기록도 찾습니다. 외부 서비스나 키는 쓰지 않습니다. '
-                      '처음 켤 때 모델(1.1GB)을 내려받고 색인을 다시 만듭니다. 끄면 키워드 검색만 합니다.'),
-                  value: s.localEmbedding,
-                  onChanged: (v) => _update(localEmbedding: v),
-                ),
-                if (s.tokenizer != null) _KiwiTile(status: s.tokenizer!, managed: _managed, onInstall: _installKiwi),
-                if (s.rerank != null) _RerankSection(api: widget.api, status: s.rerank!, onChanged: _reload),
-              ];
-              final mic = <Widget>[
-                Text('녹음', style: t.titleMedium),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(s.whisperx ? Icons.check_circle_outline : Icons.extension_outlined),
-                  title: const Text('whisperX (녹음 전사)'),
-                  subtitle: Text(s.whisperx
-                      ? '설치됨'
-                      : (_managed ? '설치하면 녹음을 올릴 때 자동으로 전사합니다 (1~2GB 다운로드)' : "설치되지 않음 — 터미널에서 'zaevis ext install whisperx'")),
-                  trailing: !s.whisperx && _managed
-                      ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
-                      : null,
-                ),
-                if (s.whisperx)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.speed),
-                    title: const Text('빠르게 전사'),
-                    subtitle: const Text('끄면 CPU 4코어만 써서 팬 소리가 작습니다. 켜면 모든 코어를 써서 약 1.4배 빠르지만 팬이 세게 돕니다.'),
-                    value: s.transcribeSpeed == 'fast',
-                    onChanged: (v) => _update(transcribeSpeed: v ? 'fast' : 'quiet'),
-                  ),
-                if (s.speakers != null) _SpeakersTile(status: s.speakers!, whisperx: s.whisperx, onChanged: (v) => _update(speakers: v), onRefresh: _reload),
-                _HfLogin(api: widget.api, backend: widget.backend),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  secondary: const Icon(Icons.notifications_outlined),
-                  title: const Text('시스템 알림'),
-                  subtitle: const Text('정리가 끝나 검토할 것이 생겼을 때, 수집이 실패했을 때, 녹음 전사가 끝났을 때 알립니다. '
-                      '서버가 보내므로 앱 창이 닫혀 있어도 옵니다.'),
-                  value: s.notifications,
-                  onChanged: (v) => _update(notifications: v),
-                ),
-              ];
-              final app = <Widget>[
-                ...scheduleTile,
-                if (_managed) ...[
-                  const SizedBox(height: 16),
-                  Text('이 맥', style: t.titleMedium),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.open_in_browser),
-                    title: const Text('브라우저로 열기'),
-                    subtitle: Text(widget.api.baseUrl),
-                    onTap: () => widget.backend!.open(widget.api.baseUrl),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.terminal),
-                    title: const Text('터미널에서 zaevis 명령 쓰기'),
-                    subtitle: const Text('~/.local/bin 에 zaevis 명령을 등록합니다'),
-                    onTap: () => _runTask('zaevis 명령 등록', const ['install']),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.restart_alt),
-                    title: const Text('서버 다시 시작'),
-                    onTap: () => _runTask('서버 다시 시작', const ['stop'], then: const ['start']),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.description_outlined),
-                    title: const Text('로그 폴더 열기'),
-                    subtitle: const Text('~/.zaevis'),
-                    onTap: () => widget.backend!.open('${widget.backend!.home}/.zaevis'),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Text('단축키', style: t.titleMedium),
-                const SizedBox(height: 6),
-                for (final (keys, what) in AppShortcuts.describe(hotkey: s.hotkey))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(children: [
-                      Container(
-                        constraints: const BoxConstraints(minWidth: 110),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(6)),
-                        child: Text(keys, style: ZaevisTheme.mono.copyWith(fontSize: 12, color: scheme.onSurface), textAlign: TextAlign.center),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(what, style: t.bodyMedium)),
-                      if (what.contains('전역')) ...[
-                        TextButton(
-                          onPressed: () async {
-                            final spec = await showHotkeyDialog(context, current: s.hotkey);
-                            if (spec != null) await _update(hotkey: spec);
-                          },
-                          child: const Text('바꾸기'),
-                        ),
-                        if (s.hotkey.isNotEmpty) TextButton(onPressed: () => _update(hotkey: ''), child: const Text('기본값')),
-                      ],
-                    ]),
-                  ),
-                const SizedBox(height: 16),
-                Text('색인 폴더', style: t.titleMedium),
-                const SizedBox(height: 4),
-                Text('기록 폴더는 항상 색인됩니다. 노트가 다른 폴더에 있으면 추가하세요. 추가하거나 빼면 처음부터 다시 색인합니다.', style: t.bodySmall),
-                const SizedBox(height: 6),
-                SelectableText(s.worklogDir, style: ZaevisTheme.mono),
-                for (final p in s.memoryPaths)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.folder_outlined),
-                    title: Text(p, style: ZaevisTheme.mono, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    trailing: IconButton(
-                      tooltip: '색인에서 빼기',
-                      icon: const Icon(Icons.close),
-                      onPressed: () => _update(memoryPaths: [for (final x in s.memoryPaths) if (x != p) x]),
-                    ),
-                  ),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(onPressed: () => _addMemory(s), icon: const Icon(Icons.create_new_folder_outlined), label: const Text('폴더 추가')),
-                ),
-              ];
-              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                SegmentedButton<_SettingsPane>(
-                  segments: const [
-                    ButtonSegment(value: _SettingsPane.mic, label: Text('녹음')),
-                    ButtonSegment(value: _SettingsPane.digest, label: Text('정리')),
-                    ButtonSegment(value: _SettingsPane.search, label: Text('검색')),
-                    ButtonSegment(value: _SettingsPane.app, label: Text('앱')),
-                  ],
-                  selected: {_pane},
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                  onSelectionChanged: (v) => setState(() => _pane = v.first),
-                ),
-                const SizedBox(height: 16),
-                ...switch (_pane) {
-                  _SettingsPane.mic => mic,
-                  _SettingsPane.digest => [
-                      Text('정리 (지식화)', style: t.titleMedium),
-                      _DigestSection(api: widget.api),
-                    ],
-                  _SettingsPane.search => search,
-                  _SettingsPane.app => app,
-                },
-              ]);
-            },
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.terminal),
+            title: const Text('터미널에서 zaevis 명령 쓰기'),
+            subtitle: const Text('~/.local/bin 에 zaevis 명령을 등록합니다'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _runTask('zaevis 명령 등록', const ['install']),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.restart_alt),
+            title: const Text('서버 다시 시작'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _runTask('서버 다시 시작', const ['stop'], then: const ['start']),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.description_outlined),
+            title: const Text('로그 폴더 열기'),
+            subtitle: const Text('~/.zaevis'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => widget.backend!.open('${widget.backend!.home}/.zaevis'),
           ),
         ]),
+    ];
+  }
+}
+
+String _two(int n) => n.toString().padLeft(2, '0');
+String _day(DateTime d) => '${d.year}년 ${d.month}월 ${d.day}일';
+String _dayTime(DateTime d) => '${_day(d)} ${_two(d.hour)}:${_two(d.minute)}';
+
+/// One left-hand section entry: a flat row, tinted when selected.
+class _NavItem extends StatelessWidget {
+  const _NavItem({required this.section, required this.selected, required this.onTap});
+  final SettingsSection section;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: selected ? scheme.primary.withValues(alpha: 0.10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Row(children: [
+              Icon(section.icon, size: 19, color: selected ? scheme.primary : scheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Text(section.label, style: t.bodyMedium?.copyWith(color: selected ? scheme.primary : scheme.onSurface, fontWeight: selected ? FontWeight.w600 : null)),
+            ]),
+          ),
+        ),
       ),
+    );
+  }
+}
+
+/// A section as a text tab with an underline (narrow windows).
+class _TabItem extends StatelessWidget {
+  const _TabItem({required this.section, required this.selected, required this.onTap});
+  final SettingsSection section;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: selected ? scheme.primary : Colors.transparent, width: 2))),
+        child: Text(section.label, style: TextStyle(color: selected ? scheme.primary : scheme.onSurfaceVariant, fontWeight: selected ? FontWeight.w600 : null)),
+      ),
+    );
+  }
+}
+
+/// A titled card of rows separated by hairlines, with an optional note under it.
+class _Group extends StatelessWidget {
+  const _Group({this.title, this.description, required this.children});
+  final String? title;
+  final String? description;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final rows = <Widget>[];
+    for (final c in children) {
+      if (rows.isNotEmpty) rows.add(Divider(height: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.6)));
+      rows.add(Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2), child: c));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (title != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text(title!, style: t.titleSmall?.copyWith(color: scheme.onSurfaceVariant))),
+      if (description != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 8), child: Text(description!, style: t.bodySmall?.copyWith(color: scheme.outline))),
+      Container(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      ),
+    ]);
+  }
+}
+
+/// A plain drop-down for a short list of options (theme, text size).
+class _Choice<T> extends StatelessWidget {
+  const _Choice({required this.value, required this.items, required this.onChanged});
+  final T value;
+  final List<(T, String)> items;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<T>(
+        value: items.any((i) => i.$1 == value) ? value : items.first.$1,
+        borderRadius: BorderRadius.circular(10),
+        items: [for (final (v, label) in items) DropdownMenuItem(value: v, child: Text(label))],
+        onChanged: (v) {
+          if (v != null) onChanged(v);
+        },
+      ),
+    );
+  }
+}
+
+/// "업데이트": up to date, checking, a newer build with its button, the download, or why the check failed.
+class _UpdateRow extends StatelessWidget {
+  const _UpdateRow({required this.updates});
+  final UpdateController updates;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return ListenableBuilder(
+      listenable: updates,
+      builder: (context, _) {
+        final u = updates;
+        final offer = u.offer;
+        final String status;
+        Widget? trailing;
+        if (u.phase == UpdatePhase.downloading) {
+          final p = u.progress;
+          status = p != null && p >= 0 ? '받는 중 ${(p * 100).round()}%' : '받는 중';
+        } else if (u.phase == UpdatePhase.installing) {
+          status = '설치하고 다시 여는 중…';
+        } else if (u.checking) {
+          status = '새 버전을 확인하는 중…';
+          trailing = const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2));
+        } else if (offer != null) {
+          final built = offer.remote.builtAt;
+          status = '새 버전이 있습니다: ${offer.remote.version}${built == null ? '' : ' (${_day(built)} 빌드)'}';
+          trailing = offer.downloadUrl != null && u.install != null
+              ? FilledButton(onPressed: u.apply, child: const Text('업데이트'))
+              : Text('이 기종용 설치 파일이 없습니다', style: t.bodySmall);
+        } else if (u.checkError != null) {
+          status = '확인하지 못했습니다: ${u.checkError}';
+          trailing = TextButton(onPressed: u.check, child: const Text('다시 확인'));
+        } else {
+          status = u.checkedAt == null ? '아직 확인하지 않았습니다' : '최신 버전입니다 · ${_two(u.checkedAt!.hour)}:${_two(u.checkedAt!.minute)} 확인';
+          trailing = TextButton(onPressed: u.check, child: const Text('업데이트 확인'));
+        }
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(offer != null ? Icons.system_update_alt : Icons.verified_outlined, color: offer != null ? scheme.primary : null),
+          title: const Text('업데이트'),
+          subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(status, style: u.checkError != null ? t.bodySmall?.copyWith(color: scheme.error) : null),
+            if (u.phase == UpdatePhase.downloading)
+              Padding(padding: const EdgeInsets.only(top: 6), child: LinearProgressIndicator(value: (u.progress ?? -1) >= 0 ? u.progress : null)),
+            if (u.error != null) Padding(padding: const EdgeInsets.only(top: 4), child: SelectableText(u.error!, style: t.bodySmall?.copyWith(color: scheme.error), minLines: 1)),
+          ]),
+          trailing: trailing,
+        );
+      },
     );
   }
 }
@@ -574,91 +937,110 @@ class _DigestSectionState extends State<_DigestSection> {
         _watch(s);
         if (_model.text.isEmpty && s.model.isNotEmpty) _model.text = s.model;
         final chosen = s.agents.where((a) => a.id == s.chosen).firstOrNull;
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. '
-              '블록을 왼쪽부터 시도하고, 할당량으로 막히면 다음 블록으로 넘깁니다. 끌어다 놓아 순서를 바꿉니다.', style: t.bodySmall),
-          const SizedBox(height: 8),
-          if (s.rail.isNotEmpty) AgentRail(stops: s.rail),
-          _AgentOrder(
-            agents: s.agents,
-            skip: s.skip,
-            chosen: s.chosen,
-            enabled: !s.running,
-            onReorder: (order) => _update(agent: 'auto', order: order, skip: s.skip),
-            onSkip: (skip) => _update(agent: 'auto', order: [for (final a in s.agents) a.id], skip: skip),
-          ),
-          if (!s.skip.contains('openrouter') && (s.chosen == 'openrouter' || s.agents.any((a) => a.id == 'openrouter' && a.available))) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 360),
-                child: TextField(
-                  controller: _model,
-                  decoration: const InputDecoration(labelText: 'OpenRouter 모델', hintText: 'anthropic/claude-sonnet-4.5'),
-                  onSubmitted: (v) => _update(model: v.trim()),
-                ),
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _Group(
+            title: '에이전트 순서',
+            description: 'inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. '
+                '블록을 왼쪽부터 시도하고, 할당량으로 막히면 다음 블록으로 넘깁니다. 끌어다 놓아 순서를 바꿉니다.',
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if (s.rail.isNotEmpty) AgentRail(stops: s.rail),
+                  _AgentOrder(
+                    agents: s.agents,
+                    skip: s.skip,
+                    chosen: s.chosen,
+                    enabled: !s.running,
+                    onReorder: (order) => _update(agent: 'auto', order: order, skip: s.skip),
+                    onSkip: (skip) => _update(agent: 'auto', order: [for (final a in s.agents) a.id], skip: skip),
+                  ),
+                  if (!s.skip.contains('openrouter') && (s.chosen == 'openrouter' || s.agents.any((a) => a.id == 'openrouter' && a.available))) ...[
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 360),
+                      child: TextField(
+                        controller: _model,
+                        decoration: const InputDecoration(labelText: 'OpenRouter 모델', hintText: 'anthropic/claude-sonnet-4.5'),
+                        onSubmitted: (v) => _update(model: v.trim()),
+                      ),
+                    ),
+                  ],
+                ]),
               ),
-            ),
-          ],
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            secondary: const Icon(Icons.rule),
-            title: const Text('적용 전에 검토'),
-            subtitle: Text(s.review
-                ? '정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.'
-                : '끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.'),
-            value: s.review,
-            onChanged: s.running ? null : (v) => _update(review: v),
+            ],
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            secondary: const Icon(Icons.event_repeat),
-            title: const Text('매주 월요일 자동 정리'),
-            subtitle: Text(s.weekly ? '다음 실행: ${s.nextWeekly ?? '다음 월요일'} (매일 수집 뒤에 이어서)' : '끄면 아래 버튼으로만 실행합니다'),
-            value: s.weekly,
-            onChanged: s.running ? null : (v) => _update(weekly: v),
-          ),
-          Row(children: [
-            FilledButton.icon(
-              onPressed: s.running || chosen == null ? null : _run,
-              icon: s.running ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.auto_awesome),
-              label: Text(s.running ? '정리 중… (${_labels[s.runningAgent] ?? s.runningAgent})' : '지금 정리하기'),
+          const SizedBox(height: 22),
+          _Group(title: '실행', children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.rule),
+              title: const Text('적용 전에 검토'),
+              subtitle: Text(s.review
+                  ? '정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.'
+                  : '끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.'),
+              value: s.review,
+              onChanged: s.running ? null : (v) => _update(review: v),
             ),
-            const SizedBox(width: 12),
-            if (chosen == null) Expanded(child: Text('쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI를 설치하거나 위에서 OpenRouter 키를 저장하세요.', style: t.bodySmall?.copyWith(color: scheme.error))),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.event_repeat),
+              title: const Text('매주 월요일 자동 정리'),
+              subtitle: Text(s.weekly ? '다음 실행: ${s.nextWeekly ?? '다음 월요일'} (매일 수집 뒤에 이어서)' : '끄면 아래 버튼으로만 실행합니다'),
+              value: s.weekly,
+              onChanged: s.running ? null : (v) => _update(weekly: v),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.auto_awesome),
+              title: Text(s.running ? '정리 중… (${_labels[s.runningAgent] ?? s.runningAgent})' : '지금 정리하기'),
+              subtitle: chosen == null
+                  ? Text('쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI를 설치하거나 검색 → 외부 서비스에서 OpenRouter 키를 저장하세요.',
+                      style: t.bodySmall?.copyWith(color: scheme.error))
+                  : Text('${chosen.title}가 정리합니다. 몇 분 걸립니다.'),
+              trailing: s.running
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : FilledButton(onPressed: chosen == null ? null : _run, child: const Text('실행')),
+            ),
           ]),
           FutureBuilder<List<ProposalSummary>>(
             future: _proposals,
             builder: (context, ps) {
               final pending = (ps.data ?? const <ProposalSummary>[]).where((p) => p.pending).toList();
               if (pending.isEmpty) return const SizedBox.shrink();
-              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const SizedBox(height: 8),
-                Text('검토 대기 ${pending.length}건', style: t.labelLarge?.copyWith(color: scheme.primary)),
-                for (final p in pending)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.rule),
-                    title: Text('${p.createdAt?.toLocal().toString().split('.').first ?? p.id} · ${_labels[p.agent] ?? p.agent}'),
-                    subtitle: Text('로그 ${p.lines}줄 · 프로젝트 ${p.projects}개 · 월간 정리 ${p.summaries}개 · inbox ${p.processed}개'),
-                    trailing: FilledButton.tonal(onPressed: () => _review(p.id), child: const Text('검토하기')),
-                  ),
-              ]);
+              return Padding(
+                padding: const EdgeInsets.only(top: 22),
+                child: _Group(title: '검토 대기 ${pending.length}건', children: [
+                  for (final p in pending)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.rule),
+                      title: Text('${p.createdAt?.toLocal().toString().split('.').first ?? p.id} · ${_labels[p.agent] ?? p.agent}'),
+                      subtitle: Text('로그 ${p.lines}줄 · 프로젝트 ${p.projects}개 · 월간 정리 ${p.summaries}개 · inbox ${p.processed}개'),
+                      trailing: FilledButton.tonal(onPressed: () => _review(p.id), child: const Text('검토하기')),
+                    ),
+                ]),
+              );
             },
           ),
           if (s.last != null) ...[
-            const SizedBox(height: 8),
-            Text('마지막 정리: ${s.last!.ok ? (s.last!.proposalId != null ? '검토 대기' : '완료') : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent}${_quotaNote(s.last!.rail)} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
-                style: t.bodySmall?.copyWith(color: s.last!.ok ? null : scheme.error)),
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
-              child: SelectableText(s.last!.report.length > 1200 ? '…${s.last!.report.substring(s.last!.report.length - 1200)}' : s.last!.report,
-                  style: ZaevisTheme.mono.copyWith(fontSize: 12), minLines: 1, maxLines: 14),
-            ),
+            const SizedBox(height: 22),
+            _Group(title: '마지막 정리', children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Text('${s.last!.ok ? (s.last!.proposalId != null ? '검토 대기' : '완료') : '실패'} · ${_labels[s.last!.agent] ?? s.last!.agent}${_quotaNote(s.last!.rail)} · ${s.last!.at?.toLocal().toString().split('.').first ?? ''}',
+                      style: t.bodySmall?.copyWith(color: s.last!.ok ? null : scheme.error)),
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
+                    child: SelectableText(s.last!.report.length > 1200 ? '…${s.last!.report.substring(s.last!.report.length - 1200)}' : s.last!.report,
+                        style: ZaevisTheme.mono.copyWith(fontSize: 12), minLines: 1, maxLines: 14),
+                  ),
+                ]),
+              ),
+            ]),
           ],
         ]);
       },
