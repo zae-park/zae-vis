@@ -19,7 +19,7 @@ test("whisperX progress lines become a phase and a fraction", () => {
   assert.equal(foldWhisperLine(start, "Progress: 140%")?.fraction, 1);
 });
 
-test("the fast pass uses every CPU core and leaves speakers and alignment out", () => {
+test("the fast pass passes the thread count and leaves speakers and alignment out", () => {
   const args = transcribeLaunchArgs("/tmp/a.wav", "/tmp/out", { threads: 14 });
   assert.equal(args.includes("--diarize"), false);
   assert.equal(args.includes("--hf_token"), false);
@@ -27,4 +27,11 @@ test("the fast pass uses every CPU core and leaves speakers and alignment out", 
   assert.deepEqual(args.slice(args.indexOf("--threads"), args.indexOf("--threads") + 2), ["--threads", "14"]);
   assert.deepEqual(args.slice(args.indexOf("--vad_method"), args.indexOf("--vad_method") + 2), ["--vad_method", "silero"]);
   assert.deepEqual(args.slice(args.indexOf("--device"), args.indexOf("--device") + 2), ["--device", "cpu"]);
+});
+
+test("quiet transcription keeps to 4 threads; fast takes every core", async () => {
+  const { transcribeThreads, QUIET_THREADS } = await import("../src/transcribe.ts");
+  const { availableParallelism } = await import("node:os");
+  assert.equal(transcribeThreads(), Math.min(QUIET_THREADS, availableParallelism()));
+  assert.equal(transcribeThreads("fast"), availableParallelism());
 });

@@ -77,9 +77,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey, List<String>? memoryPaths}) async {
+  Future<void> _update({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths}) async {
     try {
-      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, hotkey: hotkey, memoryPaths: memoryPaths);
+      await widget.api.updateSettings(dailyAt: dailyAt, indexOnInject: indexOnInject, localEmbedding: localEmbedding, notifications: notifications, speakers: speakers, transcribeSpeed: transcribeSpeed, hotkey: hotkey, memoryPaths: memoryPaths);
       if (hotkey != null) await GlobalHotkey.update(hotkey);
       if (mounted) toast(context, memoryPaths != null ? '폴더를 색인에 넣었습니다. 처음부터 다시 색인합니다.' : '저장했습니다');
     } on ApiException catch (e) {
@@ -217,6 +217,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? FilledButton.tonal(onPressed: () => _runTask('whisperX 설치', const ['ext', 'install', 'whisperx']), child: const Text('설치'))
                       : null,
                 ),
+                if (s.whisperx)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Icons.speed),
+                    title: const Text('빠르게 전사'),
+                    subtitle: const Text('끄면 CPU 4코어만 써서 팬 소리가 작습니다. 켜면 모든 코어를 써서 약 1.4배 빠르지만 팬이 세게 돕니다.'),
+                    value: s.transcribeSpeed == 'fast',
+                    onChanged: (v) => _update(transcribeSpeed: v ? 'fast' : 'quiet'),
+                  ),
+                if (s.speakers != null) _SpeakersTile(status: s.speakers!, whisperx: s.whisperx, onChanged: (v) => _update(speakers: v), onRefresh: _reload),
                 _HfLogin(api: widget.api, backend: widget.backend),
                 const SizedBox(height: 8),
                 SwitchListTile(
@@ -836,7 +846,87 @@ Future<String?> showHotkeyDialog(BuildContext context, {required String current}
   );
 }
 
-/// Hugging Face browser login for speaker diarization. The token stays on the server.
+/// Who spoke: on by default and without an account (sherpa-onnx on this Mac). While the models arrive,
+/// the tile re-reads the settings every 2 seconds.
+class _SpeakersTile extends StatefulWidget {
+  const _SpeakersTile({required this.status, required this.whisperx, required this.onChanged, required this.onRefresh});
+  final SpeakersStatus status;
+  final bool whisperx;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback onRefresh;
+
+  @override
+  State<_SpeakersTile> createState() => _SpeakersTileState();
+}
+
+class _SpeakersTileState extends State<_SpeakersTile> {
+  Timer? _poll;
+
+  @override
+  void didUpdateWidget(_SpeakersTile old) {
+    super.didUpdateWidget(old);
+    _schedule();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  void _schedule() {
+    _poll?.cancel();
+    if (widget.status.state == 'installing') _poll = Timer(const Duration(seconds: 2), widget.onRefresh);
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = widget.status;
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    const after = '글이 먼저 저장되고, 말한 사람은 그 뒤에 같은 파일에 [A], [B]처럼 붙습니다. 원문 화면에서 이름을 바꿀 수 있습니다.';
+    final String subtitle;
+    if (!widget.whisperx) {
+      subtitle = 'whisperX를 설치하면 쓸 수 있습니다. 계정은 필요 없습니다.';
+    } else if (!st.enabled) {
+      subtitle = '꺼져 있습니다. 녹음 글만 저장합니다.';
+    } else if (st.hfReady) {
+      subtitle = 'Hugging Face pyannote 모델로 구분합니다. $after';
+    } else {
+      subtitle = switch (st.state) {
+        'ready' => '계정 없이 이 맥에서 구분합니다. $after',
+        'installing' => '화자 모델을 준비하는 중… (약 ${st.downloadMb}MB)',
+        'failed' => '화자 모델을 준비하지 못했습니다: ${st.error ?? '알 수 없는 오류'}',
+        _ => '계정 없이 이 맥에서 구분합니다. 첫 녹음 때 화자 모델(약 ${st.downloadMb}MB)과 한국어 정렬 모델(약 1.2GB)을 한 번 받습니다.',
+      };
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        secondary: st.state == 'installing' && st.enabled
+            ? const SizedBox(width: 24, height: 24, child: Padding(padding: EdgeInsets.all(3), child: CircularProgressIndicator(strokeWidth: 2)))
+            : const Icon(Icons.record_voice_over_outlined),
+        title: const Text('화자 구분'),
+        subtitle: Text(subtitle, style: st.state == 'failed' && st.enabled ? t.bodySmall?.copyWith(color: scheme.error) : null),
+        value: st.enabled && widget.whisperx,
+        onChanged: widget.whisperx ? widget.onChanged : null,
+      ),
+      if (st.enabled && st.state == 'failed')
+        Padding(
+          padding: const EdgeInsets.only(left: 56),
+          child: TextButton(onPressed: () => widget.onChanged(true), child: const Text('다시 준비')),
+        ),
+    ]);
+  }
+}
+
+/// Optional: Hugging Face browser login so pyannote's own models label speakers. The token stays on the server.
 class _HfLogin extends StatefulWidget {
   const _HfLogin({required this.api, this.backend});
   final WorklogApi api;
@@ -930,12 +1020,12 @@ class _HfLoginState extends State<_HfLogin> {
     } else if (hf.loggedIn) {
       subtitle = '${hf.username ?? "계정"} 으로 연결됨. 녹음 글은 먼저 저장되고, 말한 사람은 그 뒤에 같은 파일에 붙습니다.';
     } else {
-      subtitle = '녹음 글은 바로 저장됩니다. 말한 사람을 나누려면 로그인하세요. 구분은 글이 저장된 뒤에 이어집니다.';
+      subtitle = '로그인하지 않아도 화자 구분은 됩니다. 로그인하고 모델 사용에 동의하면 pyannote 원본으로 구분합니다. 구분은 글이 저장된 뒤에 이어집니다.';
     }
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(hf?.loggedIn == true ? Icons.check_circle_outline : Icons.record_voice_over_outlined),
-      title: const Text('화자 구분'),
+      title: const Text('Hugging Face 모델로 구분 (선택)'),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(subtitle, style: hf?.loginError != null ? t.bodySmall?.copyWith(color: scheme.error) : null),
         if (hf != null && hf.accept.isNotEmpty)

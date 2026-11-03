@@ -2,7 +2,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, normalize, sep } from "node:path";
 import type { AskOutcome } from "./ask.ts";
 import type { RefreshPhase, SearchBackend } from "./autorag.ts";
@@ -10,6 +10,7 @@ import type { HfStatus } from "./hf.ts";
 import type { CollectProgress } from "./sources/index.ts";
 import { AUDIO_EXT } from "./transcribe.ts";
 import { contentDisposition, findFiles, listWorklogFiles } from "./files.ts";
+import { cleanSpeakerName, renameSpeakers, transcriptSpeakers } from "./diarize.ts";
 import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
 export type CollectReportLike = Array<{ name: string; ok: boolean; days: string[]; note?: string; error?: string }>;
@@ -32,7 +33,7 @@ export type AppOptions = {
   };
   settings?: {
     get(): Promise<Record<string, unknown>>;
-    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string; memoryPaths?: string[] }): Promise<Record<string, unknown>>;
+    update(patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; memoryPaths?: string[] }): Promise<Record<string, unknown>>;
     indexOnInject(): boolean;
   };
   /** Weekly digest: agents found on this machine and the run itself. */
@@ -348,6 +349,32 @@ export function createApp(opts: AppOptions): Server {
           const paths = [...new Set((r?.ok ? r.hits : []).filter((h) => !h.weak).map((h) => h.path))].filter((p) => known.has(p)).slice(0, 5);
           const files = paths.map((p) => findFiles([known.get(p)!], p)[0]).filter(Boolean);
           return send(res, 200, { files, by: files.length ? "search" : "none" });
+        }
+
+        case "PUT /transcripts": {
+          // PUT /api/transcripts/speakers { path, names: { "A": "재박" } } → { path, speakers[], markdown }
+          // Names speakers in a transcript: "[A] " at the start of each turn becomes "[재박] ". Nothing else changes.
+          if (arg !== "speakers") return notFound(res);
+          const b = await readJson(req);
+          const rel = typeof b.path === "string" ? b.path.trim() : "";
+          if (!/^(inbox|processed)\/transcripts\/[^/\\]+\.txt$/.test(rel) || rel.includes("..")) return send(res, 400, { error: "bad_path", message: "전사본(.txt)만 바꿀 수 있습니다." });
+          const raw = b.names && typeof b.names === "object" ? (b.names as Record<string, unknown>) : {};
+          const names: Record<string, string> = {};
+          for (const [label, value] of Object.entries(raw)) {
+            const name = typeof value === "string" ? cleanSpeakerName(value) : null;
+            if (!name) return send(res, 400, { error: "bad_name", message: "이름은 한 줄, 20자 이하, 대괄호 없이 적어 주세요." });
+            names[label] = name;
+          }
+          const file = join(worklog.root, rel);
+          let text: string;
+          try {
+            text = await readFile(file, "utf8");
+          } catch {
+            return notFound(res);
+          }
+          const next = renameSpeakers(text, names);
+          if (next !== text) await writeFile(file, next);
+          return send(res, 200, { path: rel, speakers: transcriptSpeakers(next), markdown: next });
         }
 
         case "GET /download": {
@@ -721,11 +748,13 @@ export function createApp(opts: AppOptions): Server {
           if (arg) return notFound(res);
           if (!opts.settings) return notFound(res);
           const b = await readJson(req);
-          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; hotkey?: string; memoryPaths?: string[] } = {};
+          const patch: { dailyAt?: string; indexOnInject?: boolean; localEmbedding?: boolean; notifications?: boolean; speakers?: boolean; transcribeSpeed?: "quiet" | "fast"; hotkey?: string; memoryPaths?: string[] } = {};
           if (typeof b.dailyAt === "string") patch.dailyAt = b.dailyAt;
           if (typeof b.indexOnInject === "boolean") patch.indexOnInject = b.indexOnInject;
           if (typeof b.localEmbedding === "boolean") patch.localEmbedding = b.localEmbedding;
           if (typeof b.notifications === "boolean") patch.notifications = b.notifications;
+          if (typeof b.speakers === "boolean") patch.speakers = b.speakers;
+          if (b.transcribeSpeed === "quiet" || b.transcribeSpeed === "fast") patch.transcribeSpeed = b.transcribeSpeed;
           if (typeof b.hotkey === "string" && /^[a-z0-9+]{0,60}$/i.test(b.hotkey)) patch.hotkey = b.hotkey; // "meta+shift+space", "" = default
           if (Array.isArray(b.memoryPaths)) patch.memoryPaths = b.memoryPaths.filter((x): x is string => typeof x === "string");
           try {

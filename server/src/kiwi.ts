@@ -248,7 +248,7 @@ export async function downloadVerified(url: string, file: string, asset: KiwiAss
   renameSync(part, file);
 }
 
-async function tarExtract(archive: string, dest: string, members: string[]): Promise<void> {
+export async function tarExtract(archive: string, dest: string, members: string[]): Promise<void> {
   // bsdtar (macOS, Windows 10+) and GNU tar both read .tgz and .zip with -xf and auto-detect the format.
   await new Promise<void>((res, rej) => {
     const child = spawn("tar", ["-xf", archive, "-C", dest, ...members], { stdio: ["ignore", "ignore", "pipe"] });

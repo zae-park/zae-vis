@@ -14,6 +14,7 @@ import { scheduleStatus } from "./schedule.ts";
 import { exec, parseSetupArgs, runSetup, which } from "./setup.ts";
 import { extBinDir, extNpmBinDir, findBin, installPlan } from "./datasources.ts";
 import { KIWI_VERSION, installKiwi, probeKiwi } from "./kiwi.ts";
+import { diarizeDir, installDiarizer } from "./diarize.ts";
 
 const WIN = process.platform === "win32";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -76,6 +77,7 @@ ${B("관리")}
   zaevis build web|app        앱 빌드만
   zaevis start | stop | status | logs   백그라운드 서버 관리
   zaevis ext install whisperx  녹음 전사 확장 설치 (<상태 폴더>/ext/whisperx)
+  zaevis ext install diarize   화자 구분 모델 (whisperX 설치에 포함, 계정 없이 sherpa-onnx, 약 33MB)
   zaevis ext install kiwi      한국어 형태소 분석기 설치 — 활용형(인증서를)도 키워드 검색 (<상태 폴더>/ext/kiwi, 약 130MB)
   zaevis ext install <cli>     외부 소스 CLI 설치 (slacrawl·notcrawl·mailcrawl… → <상태 폴더>/ext/npm, rclone·hister → brew)
   zaevis doctor               필요한 도구 점검`);
@@ -368,7 +370,21 @@ async function extInstallWhisperx(): Promise<void> {
   if (WIN) writeFileSync(link, readFileSync(ff));
   else symlinkSync(ff, link);
   say(`${G("✓")} whisperX 설치 완료. 앱에서 녹음을 올리거나 'zaevis ingest 녹음.m4a'.`);
-  say("  화자 구분은 앱 설정에서 Hugging Face에 로그인하면 연결됩니다.");
+  try {
+    await installDiarizer({ python: py, uv, log: info });
+    say(`${G("✓")} 화자 구분 준비 완료 (계정 없이, sherpa-onnx)`);
+  } catch (err) {
+    say(`${D("○")} 화자 구분은 첫 녹음 때 다시 준비합니다: ${(err as Error).message}`);
+  }
+}
+
+/** sherpa-onnx + the two speaker models into the whisperX venv / ext/diarize (see diarize.ts). */
+async function extInstallDiarize(): Promise<void> {
+  const venv = join(STATE, "ext", "whisperx");
+  const py = WIN ? join(venv, "Scripts", "python.exe") : join(venv, "bin", "python");
+  if (!existsSync(py)) die("whisperX가 없습니다. 먼저 'zaevis ext install whisperx'를 실행하세요.");
+  await installDiarizer({ python: py, log: info });
+  say(`${G("✓")} 화자 구분 준비 완료 → ${diarizeDir()}`);
 }
 
 /** Installs the Kiwi library + model for MinSync's Korean BM25 tokenizer (see kiwi.ts). `--force` re-downloads. */
@@ -541,6 +557,7 @@ async function main(argv: string[]): Promise<void> {
     case "ext":
       if (rest[0] === "install" && rest[1] === "whisperx") return extInstallWhisperx();
       if (rest[0] === "install" && rest[1] === "kiwi") return extInstallKiwi(rest.includes("--force"));
+      if (rest[0] === "install" && rest[1] === "diarize") return extInstallDiarize();
       if (rest[0] === "install" && rest[1]) return extInstallCli(rest[1]);
       die("사용법: zaevis ext install whisperx | kiwi [--force] | <외부 소스 CLI: slacrawl, notcrawl, rclone …>");
       return;

@@ -167,6 +167,12 @@ class WorklogApi {
   /// A markdown file inside the worklog (the original behind a search hit).
   Future<WorklogFile> file(String path) async => WorklogFile.fromJson(await _get('/file', {'path': path}));
 
+  /// Names speakers in a transcript ("A" → "재박"); returns the labels now in the file.
+  Future<List<String>> renameSpeakers(String path, Map<String, String> names) async {
+    final j = await _send('PUT', '/transcripts/speakers', {'path': path, 'names': names});
+    return (j['speakers'] is List ? j['speakers'] as List : const <Object?>[]).whereType<String>().toList();
+  }
+
   /// The worklog files a sentence names ("11월 2일 전사본"), or the files behind its top search hits.
   Future<FileMatches> findFiles(String request) async => FileMatches.fromJson(await _get('/files', {'q': request}));
 
@@ -417,13 +423,15 @@ class WorklogApi {
 
   Future<AppSettings> settings() async => AppSettings.fromJson(await _get('/settings'));
 
-  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, String? hotkey, List<String>? memoryPaths}) async =>
+  Future<AppSettings> updateSettings({String? dailyAt, bool? indexOnInject, bool? localEmbedding, bool? notifications, bool? speakers, String? transcribeSpeed, String? hotkey, List<String>? memoryPaths}) async =>
       AppSettings.fromJson(
         await _send('PUT', '/settings', {
           if (dailyAt != null) 'dailyAt': dailyAt,
           if (indexOnInject != null) 'indexOnInject': indexOnInject,
           if (localEmbedding != null) 'localEmbedding': localEmbedding,
           if (notifications != null) 'notifications': notifications,
+          if (speakers != null) 'speakers': speakers,
+          if (transcribeSpeed != null) 'transcribeSpeed': transcribeSpeed,
           if (hotkey != null) 'hotkey': hotkey,
           if (memoryPaths != null) 'memoryPaths': memoryPaths,
         }),

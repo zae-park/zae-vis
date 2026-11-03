@@ -13,6 +13,7 @@ import 'package:zaevis/download.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
+import 'package:zaevis/screens/file_screen.dart';
 import 'package:zaevis/screens/search_screen.dart';
 import 'package:zaevis/shortcuts.dart';
 
@@ -42,6 +43,13 @@ Completer<http.Response>? mockAskHold;
 
 /// The first question gets a question back instead of an answer.
 bool mockAskClarify = false;
+
+/// whisperX installed, and the speakers block GET /settings reports (null = not reported).
+bool mockWhisperx = false;
+
+/// The transcript GET /file serves for inbox/transcripts paths; PUT /transcripts/speakers renames in it.
+String mockTranscript = '# 녹음\n\n(whisperX 자동 전사)\n\n[A] 안녕하세요.\n오늘은 색인 얘기입니다.\n\n[B] 네, 좋아요.\n';
+Map<String, Object?>? mockSpeakers;
 
 /// `tokenizer` as GET /settings and GET /index report it (see server/src/kiwi.ts).
 Map<String, Object?> _tokenizer() => {
@@ -84,10 +92,6 @@ class _FakeBackend implements Backend {
   Future<void> open(String target) async {}
   @override
   Future<void> installUpdate(String url, void Function(double? progress) onProgress) async {}
-  @override
-  String? get quarantineCommand => null;
-  @override
-  Future<void> clearQuarantine() async {}
 }
 
 WorklogApi _fakeApi() => WorklogApi(
@@ -183,6 +187,13 @@ WorklogApi _fakeApi() => WorklogApi(
                 {'path': 'inbox/transcripts/2026-11-02_1703_녹음.txt', 'name': '2026-11-02_1703_녹음.txt', 'bytes': 2048, 'date': '2026-11-02', 'kind': '전사본'},
               ],
             });
+          case '/api/transcripts/speakers' when req.method == 'PUT':
+            posted.add(req);
+            final names = ((jsonDecode(req.body) as Map)['names'] as Map).cast<String, String>();
+            names.forEach((from, to) => mockTranscript = mockTranscript.replaceAll('[$from] ', '[$to] '));
+            return _json({'path': (jsonDecode(req.body) as Map)['path'], 'speakers': ['재박', 'B'], 'markdown': mockTranscript});
+          case '/api/file' when (req.url.queryParameters['path'] ?? '').contains('transcripts/'):
+            return _json({'path': req.url.queryParameters['path'], 'markdown': mockTranscript});
           case '/api/file':
             return _json({'path': req.url.queryParameters['path'], 'markdown': '# git · 2026-10-09\n\n## notes\n\n- 색인할 파일이 빠져서 — 박재'});
           case '/api/sources' when req.method == 'GET':
@@ -218,7 +229,8 @@ WorklogApi _fakeApi() => WorklogApi(
             });
           case '/api/settings' when req.method == 'GET':
             return _json({
-              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': false, 'localEmbedding': true, 'hotkey': mockHotkey,
+              'dailyAt': '18:30', 'indexOnInject': false, 'worklogDir': '/w', 'whisperx': mockWhisperx, 'localEmbedding': true, 'hotkey': mockHotkey,
+              if (mockSpeakers != null) 'speakers': mockSpeakers, 'transcribeSpeed': 'quiet',
               'schedule': {'supported': true, 'installed': true, 'loaded': true},
               'tokenizer': _tokenizer(),
               'rerank': {'enabled': false, 'hasKey': false, 'keyHint': null, 'model': 'voyageai/rerank-3-lite', 'external': '없음 — 모든 검색은 이 맥 안에서 처리됩니다.'},
@@ -1018,6 +1030,62 @@ void main() {
       posted.where((r) => r.method == 'DELETE' && r.url.queryParameters['name'] == '2026-10-30_1424_녹음.wav').length,
       1,
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a transcript keeps its line breaks; a speaker chip renames that speaker in the file', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    final original = mockTranscript;
+    addTearDown(() => mockTranscript = original);
+    const path = 'inbox/transcripts/2026-11-02_1703_녹음.txt';
+
+    await tester.pumpWidget(MaterialApp(home: FileScreen(api: _fakeApi(), path: path)));
+    await tester.pumpAndSettle();
+    final shown = tester.widget<SelectableText>(find.byType(SelectableText)).textSpan!.toPlainText();
+    expect(shown, contains('[A] 안녕하세요.\n오늘은 색인 얘기입니다.\n\n[B] 네, 좋아요.'), reason: 'line breaks stay');
+    expect(find.widgetWithText(ActionChip, 'A'), findsOneWidget);
+    expect(find.widgetWithText(ActionChip, 'B'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ActionChip, 'A'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '재박');
+    await tester.tap(find.text('바꾸기'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.last.body), {'path': path, 'names': {'A': '재박'}});
+    expect(find.widgetWithText(ActionChip, '재박'), findsOneWidget, reason: 'the view reloads with the new name');
+    expect(tester.widget<SelectableText>(find.byType(SelectableText)).textSpan!.toPlainText(), contains('[재박] 안녕하세요.'));
+  });
+
+  testWidgets('settings: speakers work without an account; the quiet/fast switch saves', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    mockWhisperx = true;
+    mockSpeakers = {'enabled': true, 'state': 'missing', 'downloadMb': 33, 'hfReady': false};
+    addTearDown(() {
+      mockWhisperx = false;
+      mockSpeakers = null;
+    });
+
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: _FakeBackend()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('설정'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('화자 구분'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('계정 없이 이 맥에서 구분합니다. 첫 녹음 때 화자 모델(약 33MB)'), findsOneWidget);
+    expect(find.text('Hugging Face 모델로 구분 (선택)'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(SwitchListTile, '빠르게 전사'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.last.body), {'transcribeSpeed': 'fast'});
+    await tester.tap(find.widgetWithText(SwitchListTile, '화자 구분'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.last.body), {'speakers': false});
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

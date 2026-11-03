@@ -82,6 +82,8 @@ export const transcriptsSource: Source = {
             language: String(settings.language ?? "ko"),
             model: String(settings.model ?? "large-v3-turbo"),
             whisperxBin: settings.whisperxBin as string | undefined,
+            speakers: config.speakers,
+            speed: config.transcribeSpeed,
             onTick: tick,
             onProgress: (p) => log(`${where} · ${p.line}`, p.fraction),
           });

@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -31,8 +31,11 @@ const fake: SearchBackend = {
   async close() {},
 };
 
+let worklogRoot = "";
+
 before(async () => {
   const root = await mkdtemp(join(tmpdir(), "wl-app-"));
+  worklogRoot = root;
   await mkdir(join(root, "log"));
   await mkdir(join(root, "summaries"));
   await mkdir(join(root, "projects"));
@@ -152,6 +155,23 @@ test("GET /download sends the file itself with its Korean name, and nothing outs
   assert.equal(await r.text(), "# 2026-09 작업 정리\n");
   assert.equal((await get("/api/download?path=../../etc/passwd")).status, 404);
   assert.equal((await get("/api/download")).status, 400);
+});
+
+test("PUT /transcripts/speakers names speakers in a transcript and refuses other files", async () => {
+  const dir = join(worklogRoot, "inbox", "transcripts");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "2026-11-02_1703_녹음.txt"), "# 녹음\n\n[A] 안녕하세요.\n\n[B] 네.\n");
+  const put = (body: unknown) => fetch(base + "/api/transcripts/speakers", { method: "PUT", headers: { "content-type": "application/json", "x-zaevis": "1" }, body: JSON.stringify(body) });
+  const ok = await put({ path: "inbox/transcripts/2026-11-02_1703_녹음.txt", names: { A: "재박", B: "민수" } });
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.deepEqual(body.speakers, ["재박", "민수"]);
+  assert.equal(await readFile(join(dir, "2026-11-02_1703_녹음.txt"), "utf8"), "# 녹음\n\n[재박] 안녕하세요.\n\n[민수] 네.\n");
+  assert.equal((await put({ path: "log/2026-10.md", names: { A: "x" } })).status, 400);
+  assert.equal((await put({ path: "inbox/transcripts/../../log/2026-10.md", names: { A: "x" } })).status, 400);
+  assert.equal((await put({ path: "inbox/transcripts/2026-11-02_1703_녹음.txt", names: { A: "[이상한]" } })).status, 200, "brackets are dropped");
+  assert.equal((await put({ path: "inbox/transcripts/2026-11-02_1703_녹음.txt", names: { 재박: "" } })).status, 400);
+  assert.equal((await put({ path: "inbox/transcripts/없음.txt", names: {} })).status, 404);
 });
 
 test("normalizeSearch attaches context: source, date, section, author, best passage, weak flag", () => {

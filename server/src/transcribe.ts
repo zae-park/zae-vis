@@ -11,6 +11,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expandHome, stateDir } from "./config.ts";
+import { diarizeDir, ensureDiarizer, formatSpeakerTurns } from "./diarize.ts";
 import { tokenForDiarize } from "./hf.ts";
 import { notify } from "./notify.ts";
 import { redact } from "./redact.ts";
@@ -24,6 +25,10 @@ export type TranscribeOptions = {
   model?: string;
   whisperxBin?: string;
   hfToken?: string;
+  /** Label speakers after the text is saved (default on). Hugging Face pyannote when logged in, else sherpa-onnx. */
+  speakers?: boolean;
+  /** CPU use: "quiet" (default, 4 threads) or "fast" (every core). */
+  speed?: TranscribeSpeed;
   /** A line whisperX printed. */
   onBeat?: (line: string) => void;
   /** Still inside this file, even when whisperX has not printed anything. */
@@ -34,9 +39,17 @@ export type TranscribeOptions = {
   onSpeakers?: (file: string) => void;
 };
 
-/** CPU threads for the one recognition process. CTranslate2 here has no GPU device. */
-export function transcribeThreads(): number {
-  return Math.max(1, availableParallelism());
+/** "quiet" keeps the fan down (4 threads), "fast" takes every core. */
+export type TranscribeSpeed = "quiet" | "fast";
+
+/** Threads in quiet mode. Measured on an M-series Mac: 4 threads took 1.4× as long as all 14 cores but
+ * kept about 3 cores busy instead of 7 and used 40% less CPU time in total, with the same text. */
+export const QUIET_THREADS = 4;
+
+/** CPU threads for recognition (CTranslate2 here has no GPU device) and the speaker pass. */
+export function transcribeThreads(speed: TranscribeSpeed = "quiet"): number {
+  const all = Math.max(1, availableParallelism());
+  return speed === "fast" ? all : Math.min(QUIET_THREADS, all);
 }
 
 /** Arguments for the fast pass: text first, no alignment model, no speaker labels. */
@@ -169,7 +182,7 @@ export function cancelTranscribe(file: string): boolean {
   return true;
 }
 
-function venvPython(bin: string): string | null {
+export function venvPython(bin: string): string | null {
   const py = join(dirname(bin), process.platform === "win32" ? "python.exe" : "python");
   return existsSync(py) ? py : null;
 }
@@ -179,7 +192,10 @@ type SpeakerJob = {
   audio: string;
   jsonPath: string;
   transcript: string;
+  /** pyannote with a Hugging Face token, or sherpa-onnx (`token` empty) — see diarize.ts. */
+  engine: "pyannote" | "onnx";
   token: string;
+  threads: number;
   onSpeakers?: (file: string) => void;
 };
 
@@ -191,13 +207,17 @@ function scheduleSpeakers(job: SpeakerJob): void {
 
 async function labelSpeakers(job: SpeakerJob): Promise<void> {
   const py = venvPython(job.bin);
-  const script = join(dirname(fileURLToPath(import.meta.url)), "diarize_later.py");
-  const fail = (msg: string) => console.error(`화자 구분 실패: ${msg.replaceAll(job.token, "…")}`);
+  const onnx = job.engine === "onnx";
+  const script = join(dirname(fileURLToPath(import.meta.url)), onnx ? "diarize_onnx.py" : "diarize_later.py");
+  const fail = (msg: string) => console.error(`화자 구분 실패: ${job.token ? msg.replaceAll(job.token, "…") : msg}`);
   try {
     if (!py || !existsSync(script) || !existsSync(job.audio)) return;
+    // the first transcript that needs speakers brings sherpa-onnx and the models (about 33 MB)
+    if (onnx && !(await ensureDiarizer(py, { log: (l) => console.log(`[speakers] ${l}`) }))) throw new Error("화자 구분 모델을 준비하지 못했습니다");
+    const args = onnx ? [script, job.audio, job.jsonPath, diarizeDir()] : [script, job.audio, job.jsonPath];
     const text = await new Promise<string>((resolve, reject) => {
-      const child = spawnBin(py, [script, job.audio, job.jsonPath], {
-        env: { ...process.env, PYTHONUNBUFFERED: "1", HF_TOKEN: job.token, PATH: [dirname(py), process.env.PATH ?? ""].filter(Boolean).join(delimiter) },
+      const child = spawnBin(py, args, {
+        env: { ...process.env, PYTHONUNBUFFERED: "1", ...(job.token ? { HF_TOKEN: job.token } : {}), OMP_NUM_THREADS: String(job.threads), ZAEVIS_DIARIZE_THREADS: String(job.threads), PATH: [dirname(py), process.env.PATH ?? ""].filter(Boolean).join(delimiter) },
         stdio: ["ignore", "pipe", "pipe"],
       });
       let out = "";
@@ -216,7 +236,7 @@ async function labelSpeakers(job: SpeakerJob): Promise<void> {
     const marker = raw.indexOf("(whisperX ");
     const splitAt = marker >= 0 ? raw.indexOf("\n\n", marker) : -1;
     const header = splitAt >= 0 ? raw.slice(0, splitAt) : raw.trimEnd();
-    await writeFile(job.transcript, `${header}\n\n${redact(text.trim())}\n`);
+    await writeFile(job.transcript, `${header}\n\n${redact(formatSpeakerTurns(text))}\n`);
     const name = basename(job.transcript);
     try { job.onSpeakers?.(name); } catch {}
     notify("화자 구분 완료", `${name}에 말한 사람을 붙였습니다.`);
@@ -242,7 +262,7 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
     const dir = await mkdtemp(join(tmpdir(), "zaevis-wx-"));
     out = dir;
     if (slot.cancelled) throw new TranscribeCancelled();
-    const threads = transcribeThreads();
+    const threads = transcribeThreads(opts.speed);
     const args = transcribeLaunchArgs(audio, dir, { model: opts.model, language: opts.language, threads });
     let view: WhisperView = { label: "모델 불러오는 중", fraction: null };
     const emit = () => opts.onProgress?.({ line: whisperStatusLine(view), fraction: view.fraction });
@@ -310,11 +330,11 @@ export async function transcribeFile(audio: string, worklogDir: string, opts: Tr
     const audioDest = uniquePath(join(worklogDir, "processed", "audio"), basename(audio, extname(audio)), extname(audio));
     await moveFile(audio, audioDest);
     const jsonSrc = join(dir, basename(audio, extname(audio)) + ".json");
-    const hf = opts.hfToken ?? await tokenForDiarize().catch(() => null);
-    if (hf && existsSync(jsonSrc)) {
+    if (opts.speakers !== false && existsSync(jsonSrc)) {
+      const hf = opts.hfToken ?? await tokenForDiarize().catch(() => null);
       const jsonCopy = join(tmpdir(), `zaevis-diarize-${process.pid}-${Date.now()}.json`);
       await copyFile(jsonSrc, jsonCopy);
-      scheduleSpeakers({ bin, audio: audioDest, jsonPath: jsonCopy, transcript: dest, token: hf, onSpeakers: opts.onSpeakers });
+      scheduleSpeakers({ bin, audio: audioDest, jsonPath: jsonCopy, transcript: dest, engine: hf ? "pyannote" : "onnx", token: hf ?? "", threads, onSpeakers: opts.onSpeakers });
     }
     return dest;
   } finally {

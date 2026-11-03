@@ -24,7 +24,8 @@ import * as review from "./review.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
 import { enableExtendedHistory } from "./sources/shellHistory.ts";
-import { TranscribeQueue, whisperxBin } from "./transcribe.ts";
+import { TranscribeQueue, venvPython, whisperxBin } from "./transcribe.ts";
+import { diarizerStatus, ensureDiarizer } from "./diarize.ts";
 import { TokenizerGate } from "./kiwi.ts";
 import { Worklog } from "./worklog.ts";
 
@@ -51,6 +52,11 @@ const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
 queue.onDone = (job) => notify(job.state === "done" ? "전사 완료" : "전사 실패", job.state === "done" ? `${job.result} — inbox에 들어갔습니다.` : `${job.file}: ${job.error ?? ""}`);
 const transcriptSettings = () => loadSources(cfg).transcripts ?? { enabled: true };
+/** The whisperX venv's python, where sherpa-onnx goes; null without whisperX. */
+const speakerPython = (custom?: string): string | null => {
+  const bin = whisperxBin(custom);
+  return bin ? venvPython(bin) : null;
+};
 
 const server = createApp({
   worklog: new Worklog(cfg.worklogDir),
@@ -82,6 +88,9 @@ const server = createApp({
         lastDaily: loadState().daily ?? null,
         whisperx: whisperxBin(ts.whisperxBin as string | undefined) !== null,
         hf: hfStatus(),
+        // `speakers`: the switch, and whether labels can run without an account (sherpa-onnx, diarize.ts)
+        transcribeSpeed: cfg.transcribeSpeed,
+        speakers: { enabled: cfg.speakers, ...diarizerStatus(speakerPython(ts.whisperxBin as string | undefined)), hfReady: hfStatus().loggedIn && hfStatus().accept.length === 0 },
         localEmbedding: cfg.localEmbedding,
         notifications: cfg.notifications,
         hotkey: cfg.hotkey,
@@ -102,6 +111,11 @@ const server = createApp({
         search.setRoots(indexRoots(cfg));
         await search.restart();
         void search.refresh(true).catch(() => {});
+      }
+      if (patch.speakers === true) {
+        // turning it on prepares the package and models now, so the first recording does not wait
+        const py = speakerPython(transcriptSettings().whisperxBin as string | undefined);
+        if (py) void ensureDiarizer(py, { log: (l) => console.log(`[speakers] ${l}`) });
       }
       if (patch.dailyAt !== undefined) {
         const st = await scheduleStatus();
@@ -247,7 +261,7 @@ const server = createApp({
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),
     enqueue: (file) => {
       const ts = transcriptSettings();
-      queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), whisperxBin: ts.whisperxBin as string | undefined });
+      queue.enqueue(file, cfg.worklogDir, { language: String(ts.language ?? "ko"), model: String(ts.model ?? "large-v3-turbo"), speakers: cfg.speakers, speed: cfg.transcribeSpeed, whisperxBin: ts.whisperxBin as string | undefined });
     },
     jobs: () => queue.jobs,
     cancel: (file) => queue.cancel(file),

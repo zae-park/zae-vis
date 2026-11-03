@@ -32,6 +32,8 @@ export type AppConfig = {
   indexOnInject: boolean; // re-index right after a log line / transcript is added
   localEmbedding: boolean; // keep a local `minsync serve` embedding daemon for semantic search (default on)
   notifications: boolean; // OS notifications for digest / collect / transcription results (default on)
+  speakers: boolean; // label who spoke in transcripts after the text is saved (default on, see diarize.ts)
+  transcribeSpeed: "quiet" | "fast"; // whisperX CPU use: 4 threads (default) or every core (transcribe.ts)
   hotkey: string; // global quick-capture hotkey, e.g. "meta+shift+space"; "" = the platform default
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
   digest: { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean; order: AgentId[]; skip: AgentId[] };
@@ -83,6 +85,8 @@ export function loadConfig(): AppConfig {
     indexOnInject: fc.indexOnInject === true,
     localEmbedding: fc.localEmbedding !== false,
     notifications: fc.notifications !== false,
+    speakers: fc.speakers !== false,
+    transcribeSpeed: fc.transcribeSpeed === "fast" ? "fast" : "quiet",
     hotkey: typeof fc.hotkey === "string" ? fc.hotkey : "",
     rerank: { enabled: fc.rerank?.enabled === true, model: typeof fc.rerank?.model === "string" && fc.rerank.model ? fc.rerank.model : "voyageai/rerank-3-lite" },
     digest: normalizeDigest(fc.digest),
@@ -165,7 +169,7 @@ export function removeCustomSource(name: string): boolean {
 }
 
 /** Update top-level settings in ~/.zaevis/config.json (dailyAt, indexOnInject, …). */
-export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "hotkey" | "rerank" | "digest" | "reports" | "memoryPaths">>): void {
+export function saveAppSettings(patch: Partial<Pick<AppConfig, "dailyAt" | "indexOnInject" | "localEmbedding" | "notifications" | "speakers" | "transcribeSpeed" | "hotkey" | "rerank" | "digest" | "reports" | "memoryPaths">>): void {
   const file = join(stateDir(), "config.json");
   writeJson(file, { ...readJson<Record<string, unknown>>(file, {}), ...patch });
 }

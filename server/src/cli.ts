@@ -257,6 +257,8 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
           const dest = await transcribeFile(staged, cfg.worklogDir, {
             language: String(ts.language ?? "ko"),
             model: String(ts.model ?? "large-v3-turbo"),
+            speakers: cfg.speakers,
+            speed: cfg.transcribeSpeed,
             onProgress: (p) => process.stderr.write(`\r${p.line}   `),
           });
           process.stderr.write("\n");

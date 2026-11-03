@@ -718,6 +718,8 @@ class AppSettings {
     this.tokenizer,
     this.scheduleHint,
     this.lastDaily,
+    this.speakers,
+    this.transcribeSpeed = 'quiet',
   });
 
   factory AppSettings.fromJson(Json j) {
@@ -739,8 +741,16 @@ class AppSettings {
       rerank: j['rerank'] is Json ? RerankStatus.fromJson(j['rerank'] as Json) : null,
       tokenizer: j['tokenizer'] is Json ? TokenizerStatus.fromJson(j['tokenizer'] as Json) : null,
       lastDaily: d is Json ? DateTime.tryParse(_str(d['lastRun'])) : null,
+      speakers: j['speakers'] is Json ? SpeakersStatus.fromJson(j['speakers'] as Json) : null,
+      transcribeSpeed: _str(j['transcribeSpeed']) == 'fast' ? 'fast' : 'quiet',
     );
   }
+
+  /// Speaker labels on transcripts; null when the server does not report them.
+  final SpeakersStatus? speakers;
+
+  /// whisperX CPU use: `quiet` (4 threads, default) or `fast` (every core).
+  final String transcribeSpeed;
 
   final String dailyAt;
   final bool indexOnInject;
@@ -765,6 +775,27 @@ class AppSettings {
   final String? scheduleHint;
   final bool whisperx;
   final DateTime? lastDaily;
+}
+
+/// Speaker labels: the switch, and the account-free engine's state (server/src/diarize.ts).
+class SpeakersStatus {
+  const SpeakersStatus({required this.enabled, required this.state, this.error, this.downloadMb = 33, this.hfReady = false});
+  factory SpeakersStatus.fromJson(Json j) => SpeakersStatus(
+        enabled: j['enabled'] != false,
+        state: _str(j['state']),
+        error: _strOrNull(j['error']),
+        downloadMb: (j['downloadMb'] as num?)?.toInt() ?? 33,
+        hfReady: j['hfReady'] == true,
+      );
+  final bool enabled;
+
+  /// unavailable (no whisperX) · missing · installing · ready · failed
+  final String state;
+  final String? error;
+  final int downloadMb;
+
+  /// A Hugging Face login that accepted the pyannote models: that engine is used instead.
+  final bool hfReady;
 }
 
 /// Search re-ranking through OpenRouter: the one external model AutoRAG Lite can use. Off by default.
