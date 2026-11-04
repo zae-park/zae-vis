@@ -303,6 +303,9 @@ WorklogApi _fakeApi() => WorklogApi(
                 if (mockDigestRail != null) 'rail': mockDigestRail,
               },
             });
+          case '/api/digest' when req.method == 'PUT':
+            posted.add(req);
+            return _json({'running': false, 'setting': {'agent': 'auto', 'model': '', 'weekly': true, ...jsonDecode(req.body) as Map}, 'agents': const [], 'chosen': 'claude'});
           case '/api/digest/run':
             posted.add(req);
             return _json({'started': true}, 202);
@@ -813,6 +816,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsOneWidget);
     expect(find.text('에이전트 순서'), findsOneWidget, reason: 'it opens on the section that picks the agent');
+  });
+
+  testWidgets('settings 정리: the daily digest switch saves; 주간 정리 runs the weekly scope', (tester) async {
+    tester.view.physicalSize = const Size(1300, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) => Scaffold(body: Center(child: TextButton(
+        onPressed: () => SettingsScreen.show(context, api: _fakeApi(), onServerChanged: () {}, initial: SettingsSection.digest),
+        child: const Text('열기'),
+      )))),
+    ));
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    final daily = find.widgetWithText(SwitchListTile, '매일 정리');
+    expect(daily, findsOneWidget);
+    expect(find.textContaining('검토 없이 바로 들어갑니다'), findsOneWidget);
+    expect(find.text('프로젝트 갱신은 검토 후 적용'), findsOneWidget);
+    // the weekly button first: the toast after it would cover the bottom of the dialog
+    await tester.tap(find.widgetWithText(TextButton, '주간 정리'));
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.lastWhere((r) => r.url.path == '/api/digest/run').body), {'scope': 'weekly'});
+    await tester.tap(daily);
+    await tester.pumpAndSettle();
+    expect(jsonDecode(posted.lastWhere((r) => r.method == 'PUT').body), {'daily': false});
   });
 
   testWidgets('settings is a modal over the app; 일반 shows the version, install date and the update', (tester) async {
@@ -1516,8 +1545,10 @@ void main() {
     expect(find.text('기다리는 제안 없음'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, '지금 정리하기'));
     await tester.pumpAndSettle();
-    expect(posted.where((r) => r.url.path == '/api/digest/run'), hasLength(1));
-    expect(find.text('정리를 시작했습니다. 몇 분 걸립니다.'), findsOneWidget);
+    final run = posted.where((r) => r.url.path == '/api/digest/run').toList();
+    expect(run, hasLength(1));
+    expect(jsonDecode(run.single.body), {'scope': 'daily'}, reason: 'collect first, then the days since the last digest');
+    expect(find.text('정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).'), findsOneWidget);
   });
 
   testWidgets('log tab shows the pending proposal; the review screen applies only the chosen lines', (tester) async {

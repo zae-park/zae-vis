@@ -14,7 +14,7 @@ import { AutoRAGMcp } from "./autorag.ts";
 import { createApp } from "./app.ts";
 import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
 import * as datasources from "./datasources.ts";
-import { DigestRunner, detectAgents, lastWeeklyDate, noAgentReason, pickAgent } from "./digest.ts";
+import { DigestRunner, detectAgents, digestDays, lastDigestDate, noAgentReason, pickAgent, type DigestScope } from "./digest.ts";
 import { knowledgeStatus } from "./knowledge.ts";
 import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
 import { agentsInOrder, normalizeAgentOrder, normalizeAgentSkip, plannedRail, DEFAULT_AGENT_ORDER } from "./rail.ts";
@@ -57,6 +57,25 @@ const voice = new VoiceTranscriber({
   log: (m) => console.log(`[voice] ${m}`),
 });
 const digest = new DigestRunner({ notify });
+
+/**
+ * "지금 정리하기" (app, chat, CLI): a daily run collects first so today's work is in, then digests every day
+ * since the last digest; a weekly run is the Monday one now. New log lines are put into search afterwards.
+ */
+async function startDigest(scope: DigestScope): Promise<{ started: boolean; reason?: string; scope?: DigestScope }> {
+  const agents = agentsInOrder(cfg.digest, await detectAgents());
+  const chosen = pickAgent(cfg.digest, agents);
+  if (!chosen) return { started: false, reason: noAgentReason(agents) };
+  if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
+  const prepare = async () => {
+    const report = await collect(cfg, { log: (m) => console.log(`[digest] ${m}`) });
+    return digestDays(cfg.worklogDir, report.flatMap((r) => r.days));
+  };
+  void digest.run(cfg, cfg.digest, chosen, agents, scope === "daily" ? { scope, prepare } : { scope }).then((r) => {
+    if (r.changed) void search.refresh(false).catch(() => {});
+  });
+  return { started: true, scope };
+}
 const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
 queue.onDone = (job) => {
@@ -149,11 +168,11 @@ const server = createApp({
     const chosen = pickAgent(cfg.digest, agentsInOrder(cfg.digest, await detectAgents()));
     const daily = loadState().daily;
     return knowledgeStatus(cfg.worklogDir, {
-      lastDigest: lastWeeklyDate(cfg.worklogDir),
+      lastDigest: lastDigestDate(cfg.worklogDir),
       proposals: await review.listProposals(),
       collect: daily ? { lastRun: daily.lastRun, ok: daily.ok } : null,
       reports: { daily: cfg.reports.daily.enabled, weekly: cfg.reports.weekly.enabled, monthly: cfg.reports.monthly.enabled },
-      digest: { running: st.running, agent: chosen?.id ?? null, weekly: cfg.digest.weekly, nextWeekly: st.nextWeekly, review: cfg.digest.review },
+      digest: { running: st.running, agent: chosen?.id ?? null, weekly: cfg.digest.weekly, daily: cfg.digest.daily, nextWeekly: st.nextWeekly, review: cfg.digest.review },
     });
   },
   digest: {
@@ -168,7 +187,7 @@ const server = createApp({
       const agent = names.find((a) => a === patch.agent) ?? cfg.digest.agent;
       const order = patch.order ? normalizeAgentOrder(patch.order) : cfg.digest.order;
       const skip = patch.skip ? normalizeAgentSkip(patch.skip) : cfg.digest.skip;
-      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly, review: patch.review ?? cfg.digest.review, order, skip } });
+      saveAppSettings({ digest: { agent, model: patch.model ?? cfg.digest.model, weekly: patch.weekly ?? cfg.digest.weekly, daily: patch.daily ?? cfg.digest.daily, review: patch.review ?? cfg.digest.review, order, skip } });
       cfg = loadConfig();
       return this.status();
     },
@@ -197,13 +216,8 @@ const server = createApp({
       notify("정리 적용", `로그 ${applied.lines}줄 · 프로젝트 ${applied.projects.length}개가 worklog에 들어갔습니다.`);
       return { ok: true, status: p.status, applied };
     },
-    async run() {
-      const agents = agentsInOrder(cfg.digest, await detectAgents());
-      const chosen = pickAgent(cfg.digest, agents);
-      if (!chosen) return { started: false, reason: noAgentReason(agents) };
-      if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
-      void digest.run(cfg, cfg.digest, chosen, agents);
-      return { started: true };
+    async run(scope = "daily") {
+      return startDigest(scope);
     },
   },
   ask: {
@@ -218,7 +232,7 @@ const server = createApp({
       const agents = agentsInOrder(cfg.digest, await detectAgents());
       const agent = pickAgent(cfg.digest, agents);
       const key = rerank.getKey();
-      return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId, judge: key ? jevJudge(key) : null, shown: extra?.shown, force: extra?.force });
+      return ask.ask(q, { search, agent, agents, setting: cfg.digest, worklogDir: cfg.worklogDir, topK, conversationId, judge: key ? jevJudge(key) : null, shown: extra?.shown, force: extra?.force, digestNow: () => startDigest("daily") });
     },
     cancel: () => ask.cancel(),
     conversation: (id) => ask.store.get(id),

@@ -512,3 +512,29 @@ test("ask with Jev: a lookup calls no agent and is not saved; files come straigh
   const noAgentAnswer = await runner.ask("요약", { ...common, agent: null, judge: about.judge });
   assert.equal(!noAgentAnswer.ok && noAgentAnswer.error, "no_agent");
 });
+
+test("ask: \"정리:\" from the agent starts a daily digest instead of an answer, only when one can be started", async () => {
+  const prompts: string[] = [];
+  const exec: Exec = async (_bin, args) => {
+    prompts.push(args[1]);
+    return { ok: true, stdout: "정리:\n", stderr: "" };
+  };
+  const store = new ConversationStore(await mkdtemp(join(tmpdir(), "zv-ask-conv-")));
+  let started = 0;
+  const base = { search: fakeSearch, agent: claude, setting: { model: "" }, worklogDir: "/w" };
+  const r = await new AskRunner({ exec, store }).ask("오늘 거 정리해줘", { ...base, digestNow: async () => (started++, { started: true }) });
+  assert.equal(started, 1);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.result.route?.intent, "digest");
+  assert.match(r.result.answer, /^정리를 시작했습니다/);
+  assert.match(prompts[0], /답 대신 "정리:" 한 줄만 쓴다/);
+
+  const busy = await new AskRunner({ exec, store }).ask("정리해", { ...base, digestNow: async () => ({ started: false, reason: "이미 정리가 실행 중입니다." }) });
+  assert.ok(busy.ok && /시작하지 못했습니다: 이미 정리가 실행 중/.test(busy.result.answer));
+
+  prompts.length = 0;
+  const plain = await new AskRunner({ exec, store }).ask("정리해", base);
+  assert.doesNotMatch(prompts[0], /"정리:"/, "not offered without a way to start one");
+  assert.ok(plain.ok && plain.result.route?.intent === "answer");
+});

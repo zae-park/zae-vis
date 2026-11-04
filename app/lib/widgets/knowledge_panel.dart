@@ -68,6 +68,20 @@ class _KnowledgePanelState extends State<KnowledgePanel> {
     }
   }
 
+  /// Collects what is new and turns every day since the last digest into log lines (the server's daily scope).
+  Future<void> _digest() async {
+    setState(() => _busy = true);
+    try {
+      await widget.api.runDigest();
+      if (mounted) toast(context, context.l10n.knDigestStarted);
+    } on ApiException catch (e) {
+      if (mounted) toast(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    await _load();
+  }
+
   Future<void> _act(KnowledgeNext next) async {
     final s = _s!;
     switch (next) {
@@ -76,16 +90,7 @@ class _KnowledgePanelState extends State<KnowledgePanel> {
         if (changed) widget.onChanged?.call();
         await _load();
       case KnowledgeNext.digest:
-        setState(() => _busy = true);
-        try {
-          await widget.api.runDigest();
-          if (mounted) toast(context, context.l10n.knDigestStarted);
-        } on ApiException catch (e) {
-          if (mounted) toast(context, e.message, error: true);
-        } finally {
-          if (mounted) setState(() => _busy = false);
-        }
-        await _load();
+        await _digest();
       case KnowledgeNext.collectFailed || KnowledgeNext.nothingCollected:
         widget.onOpenConnect?.call();
       case KnowledgeNext.noAgent:
@@ -116,6 +121,7 @@ class _KnowledgePanelState extends State<KnowledgePanel> {
       case KnowledgeNext.reports:
         return l.knNextReports;
       case KnowledgeNext.allSet:
+        if (s.daily) return l.knNextAllSetDaily;
         return s.weekly && s.nextWeekly != null ? l.knNextAllSetWhen(s.nextWeekly!) : l.knNextAllSet;
     }
   }
@@ -190,6 +196,9 @@ class _KnowledgePanelState extends State<KnowledgePanel> {
             Row(children: [
               Text(l.knTitle, style: t.labelLarge?.copyWith(color: scheme.outline)),
               const Spacer(),
+              // "지금 정리" is always one click away, not only when the material has piled up
+              if (s.agent != null && next != KnowledgeNext.digest && next != KnowledgeNext.digestRunning)
+                TextButton.icon(onPressed: _busy ? null : _digest, icon: const Icon(Icons.auto_awesome, size: 16), label: Text(l.knActionDigest)),
               TextButton(onPressed: () => setState(() => _steps = !_steps), child: Text(_steps ? l.knHideSteps : l.knShowSteps)),
             ]),
             Padding(padding: const EdgeInsets.only(right: 6), child: line),

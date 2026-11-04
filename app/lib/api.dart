@@ -365,11 +365,12 @@ class WorklogApi {
   // ── weekly digest ────────────────────────────────────────────────────────
   Future<DigestStatus> digest() async => DigestStatus.fromJson(await _get('/digest'));
 
-  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly, bool? review, List<String>? order, List<String>? skip}) async => DigestStatus.fromJson(
+  Future<DigestStatus> updateDigest({String? agent, String? model, bool? weekly, bool? daily, bool? review, List<String>? order, List<String>? skip}) async => DigestStatus.fromJson(
         await _send('PUT', '/digest', {
           if (agent != null) 'agent': agent,
           if (model != null) 'model': model,
           if (weekly != null) 'weekly': weekly,
+          if (daily != null) 'daily': daily,
           if (review != null) 'review': review,
           if (order != null) 'order': order,
           if (skip != null) 'skip': skip,
@@ -412,8 +413,9 @@ class WorklogApi {
   }
 
   /// Starts a digest run; the server answers 409 (an [ApiException]) when nothing can run.
-  Future<void> runDigest() async {
-    await _send('POST', '/digest/run', {});
+  /// `daily` (default): collect first, then every day since the last digest → log lines. `weekly`: the project look back.
+  Future<void> runDigest({bool weekly = false}) async {
+    await _send('POST', '/digest/run', {'scope': weekly ? 'weekly' : 'daily'});
   }
 
   // ── reports (daily / weekly / monthly) ──────────────────────────────────

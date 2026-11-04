@@ -81,8 +81,8 @@ before(async () => {
         calls.push(`digest:${JSON.stringify(p)}`);
         return { setting: { agent: digestAgent, model: p.model ?? "", weekly: p.weekly ?? true } };
       },
-      run: async () => {
-        calls.push("digest:run");
+      run: async (scope) => {
+        calls.push(`digest:run:${scope}`);
         return digestAgent === "gemini" ? { started: false, reason: "없음" } : { started: true };
       },
       proposals: async () => [{ id: "p1", status: "pending", lines: 2 }],
@@ -251,6 +251,10 @@ test("digest endpoints: status, update, run (202 / 409)", async () => {
   assert.equal((await call("PUT", "/api/digest", { agent: "openrouter", model: " m ", weekly: false })).body.setting.agent, "openrouter");
   assert.deepEqual(calls, ['digest:{"agent":"openrouter","model":"m","weekly":false}']);
   assert.equal((await call("POST", "/api/digest/run", {})).status, 202);
+  assert.equal((await call("POST", "/api/digest/run", { scope: "weekly" })).status, 202);
+  assert.deepEqual(calls.slice(-2), ["digest:run:daily", "digest:run:weekly"], "daily unless weekly is asked for");
+  await call("PUT", "/api/digest", { daily: false });
+  assert.equal(calls.at(-1), 'digest:{"daily":false}');
   await call("PUT", "/api/digest", { agent: "gemini" });
   const r = await call("POST", "/api/digest/run", {});
   assert.equal(r.status, 409);

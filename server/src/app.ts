@@ -41,9 +41,9 @@ export type AppOptions = {
   /** Weekly digest: agents found on this machine and the run itself. */
   digest?: {
     status(): Promise<Record<string, unknown>>;
-    update(patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean; order?: string[]; skip?: string[] }): Promise<Record<string, unknown>>;
-    /** Starts a run in the background; `started: false` with a reason when nothing can run. */
-    run(): Promise<{ started: boolean; reason?: string }>;
+    update(patch: { agent?: string; model?: string; weekly?: boolean; daily?: boolean; review?: boolean; order?: string[]; skip?: string[] }): Promise<Record<string, unknown>>;
+    /** Starts a run in the background (`daily`: collect, then the days since the last digest → log lines; `weekly`: the project look back). `started: false` with a reason when nothing can run. */
+    run(scope?: "daily" | "weekly"): Promise<{ started: boolean; reason?: string }>;
     /** Review flow: proposals a run left for the user to approve. */
     proposals(): Promise<unknown[]>;
     proposal(id: string): Promise<unknown | null>;
@@ -762,10 +762,11 @@ export function createApp(opts: AppOptions): Server {
         case "PUT /digest": {
           if (!opts.digest) return notFound(res);
           const b = await readJson(req);
-          const patch: { agent?: string; model?: string; weekly?: boolean; review?: boolean; order?: string[]; skip?: string[] } = {};
+          const patch: { agent?: string; model?: string; weekly?: boolean; daily?: boolean; review?: boolean; order?: string[]; skip?: string[] } = {};
           if (typeof b.agent === "string") patch.agent = b.agent;
           if (typeof b.model === "string") patch.model = b.model.trim();
           if (typeof b.weekly === "boolean") patch.weekly = b.weekly;
+          if (typeof b.daily === "boolean") patch.daily = b.daily;
           if (typeof b.review === "boolean") patch.review = b.review;
           if (Array.isArray(b.order)) patch.order = b.order.filter((x): x is string => typeof x === "string");
           if (Array.isArray(b.skip)) patch.skip = b.skip.filter((x): x is string => typeof x === "string");
@@ -775,7 +776,9 @@ export function createApp(opts: AppOptions): Server {
         case "POST /digest": {
           if (!opts.digest) return notFound(res);
           if (arg === "run") {
-            const r = await opts.digest.run();
+            // POST /api/digest/run { scope?: "daily" (default) | "weekly" }
+            const b = await readJson(req);
+            const r = await opts.digest.run(b.scope === "weekly" ? "weekly" : "daily");
             return send(res, r.started ? 202 : 409, r);
           }
           if (arg === "proposals" && parts[3]) {

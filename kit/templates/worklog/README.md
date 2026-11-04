@@ -2,7 +2,7 @@
 
 혼자 쓰는 작업 기록이다. 팀과 공유하지 않는다.
 zaevis가 매일 데이터소스(git 커밋, Claude Code 세션, 셸 명령, 회의 전사본, 직접 추가한 커넥터)를 `sources/`에 모으고 검색 색인을 갱신한다.
-Claude가 매주 그 원본과 inbox를 읽어 로그·프로젝트를 정리하고, 매월 요약을 쓴다.
+수집 뒤에는 에이전트가 그날 원본과 inbox를 읽어 로그 줄을 쓰고(하루 정리), 매주 프로젝트를 정리하며, 매월 요약을 쓴다.
 zaevis 앱으로 검색·열람하거나, Obsidian으로 이 폴더를 볼트로 열어도 된다.
 
 - 코드 저장소 위치: {{REPOS_ROOT}}
@@ -21,7 +21,7 @@ worklog/
   log/YYYY-MM.md            ← 월별 한 줄 로그 (나와 Claude가 함께 씀)
   projects/<slug>.md        ← 프로젝트별 현재 상태, 결정, 링크
   summaries/YYYY-MM.md      ← 월간 정리 결과물
-  .state.md                 ← 마지막 주간 정리 날짜
+  .state.md                 ← 마지막 주간 정리 날짜(last_weekly)와 하루 정리가 다룬 마지막 날짜(last_daily)
   .autorag/                 ← 검색 색인 (AutoRAG가 관리, 손대지 않음)
 ```
 
@@ -46,9 +46,18 @@ worklog/
 `projects/_template.md`를 복사해 쓴다. `repos`는 이 프로젝트에 속한 git 저장소 이름 목록이다.
 어느 프로젝트에도 없는 저장소의 커밋은 저장소 이름을 slug로 새 프로젝트 파일을 만든다.
 
-## 주간 정리 (매주 월요일 오전, Claude 예약 작업)
+## 하루 정리 (매일 수집 뒤, 또는 앱의 "지금 정리하기")
 
-1. `.state.md`에서 마지막 정리 날짜를 읽는다. 없으면 7일 전부터.
+1. 그날(또는 마지막 정리 뒤) 수집된 `sources/*/YYYY-MM-DD.md`와 `inbox/`의 모든 파일을 읽는다.
+2. 아래 주간 정리 3번과 같은 규칙으로 `log/YYYY-MM.md`에 한 줄씩 추가하고, 처리한 inbox 파일을 `processed/`로 옮긴다.
+3. `projects/`, `summaries/`, `.state.md`는 고치지 않는다. 로그 줄은 검토 없이 바로 들어간다.
+
+## 주간 정리 (매주 월요일, 수집 뒤)
+
+하루 정리가 로그 줄을 쓰고 있으니, 주간 정리는 빠진 날의 로그만 채우고 주로 프로젝트를 갱신한다. 앱에서 "검토 후 적용"을 켜 두면 프로젝트·월간 정리는 검토를 거쳐 들어간다.
+
+
+1. `.state.md`에서 `last_weekly`(마지막 주간 정리 날짜)를 읽는다. 없으면 7일 전부터.
 2. 입력을 읽는다.
    - `sources/*/YYYY-MM-DD.md` 중 마지막 정리 날짜 이후 파일 전부 (git, agent-sessions, shell-history, transcripts, 사용자 커넥터)
    - `inbox/transcripts/`, `inbox/claude-sessions/`의 모든 파일
@@ -59,7 +68,7 @@ worklog/
    - 이미 같은 내용의 줄(내가 쓴 줄 포함)이 있으면 추가하지 않는다.
 4. 관련 `projects/*.md`의 현재 상태·주요 결정·열린 문제를 갱신한다.
 5. 처리한 inbox 파일을 `processed/`의 같은 하위 폴더로 옮긴다. 삭제하지 않는다. `sources/`는 건드리지 않는다.
-6. `.state.md`에 오늘 날짜를 적는다.
+6. `.state.md`의 `last_weekly:` 줄을 오늘 날짜로 바꾼다. 다른 줄(`last_daily:`)은 그대로 둔다.
 
 ## 월간 정리 (그 달의 첫 월요일, 주간 정리 직후)
 

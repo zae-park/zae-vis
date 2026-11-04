@@ -189,14 +189,14 @@ void main() {
   });
 
   test('knowledgeNext: a waiting review first, then collection trouble, then the digest, then reports', () {
-    KnowledgeStatus k({List<Object> review = const [], bool? ok = true, int days = 10, int transcripts = 0, int sourceDays = 0, String? agent = 'claude', int logLines = 5, bool weekly = false, bool running = false}) =>
+    KnowledgeStatus k({List<Object> review = const [], bool? ok = true, int days = 10, int transcripts = 0, int sourceDays = 0, String? agent = 'claude', int logLines = 5, bool weekly = false, bool running = false, bool daily = true}) =>
         KnowledgeStatus.fromJson({
           'collect': {'days': days, 'ok': ok},
           'waiting': {'transcripts': transcripts, 'sessions': 0, 'sourceDays': sourceDays},
           'review': review,
           'knowledge': {'logLines': logLines, 'projects': 1, 'summaries': 0},
           'reports': {'weekly': {'enabled': weekly}},
-          'digest': {'running': running, 'agent': agent},
+          'digest': {'running': running, 'agent': agent, 'daily': daily},
         });
     final pending = [{'id': 'p', 'status': 'pending', 'lines': 126, 'projects': 9}];
     expect(knowledgeNext(k(running: true, review: pending)), KnowledgeNext.digestRunning);
@@ -208,7 +208,9 @@ void main() {
     expect(knowledgeNext(k(sourceDays: 14, agent: null)), KnowledgeNext.noAgent);
     expect(knowledgeNext(k(sourceDays: 14)), KnowledgeNext.digest);
     expect(knowledgeNext(k(transcripts: 1)), KnowledgeNext.digest, reason: 'a transcript waits even when sources are fresh');
-    expect(knowledgeNext(k(sourceDays: 2)), KnowledgeNext.reports, reason: 'two days of sources is not worth a digest yet');
+    expect(knowledgeNext(k(sourceDays: 1)), KnowledgeNext.reports, reason: "today's collection is digested in the evening");
+    expect(knowledgeNext(k(sourceDays: 2)), KnowledgeNext.digest, reason: 'the daily digest fell two days behind');
+    expect(knowledgeNext(k(sourceDays: 2, daily: false)), KnowledgeNext.reports, reason: 'weekly only: two days is not worth a digest yet');
     expect(knowledgeNext(k(weekly: true)), KnowledgeNext.allSet);
   });
 }

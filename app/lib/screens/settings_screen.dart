@@ -946,9 +946,9 @@ class _DigestSectionState extends State<_DigestSection> {
     if (s.running) _poll = Timer(const Duration(seconds: 4), _reload);
   }
 
-  Future<void> _update({String? agent, String? model, bool? weekly, bool? review, List<String>? order, List<String>? skip}) async {
+  Future<void> _update({String? agent, String? model, bool? weekly, bool? daily, bool? review, List<String>? order, List<String>? skip}) async {
     try {
-      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly, review: review, order: order, skip: skip);
+      await widget.api.updateDigest(agent: agent, model: model, weekly: weekly, daily: daily, review: review, order: order, skip: skip);
       if (mounted) toast(context, context.l10n.commonSaved);
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
@@ -956,10 +956,10 @@ class _DigestSectionState extends State<_DigestSection> {
     _reload();
   }
 
-  Future<void> _run() async {
+  Future<void> _run({bool weekly = false}) async {
     try {
-      await widget.api.runDigest();
-      if (mounted) toast(context, context.l10n.settingsDigestStarted);
+      await widget.api.runDigest(weekly: weekly);
+      if (mounted) toast(context, weekly ? context.l10n.settingsWeeklyStarted : context.l10n.settingsDigestStarted);
     } on ApiException catch (e) {
       if (mounted) toast(context, e.message, error: true);
     }
@@ -1024,6 +1024,14 @@ class _DigestSectionState extends State<_DigestSection> {
           _Group(title: context.l10n.settingsRun, children: [
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.today),
+              title: Text(context.l10n.settingsDailyDigest),
+              subtitle: Text(s.daily ? context.l10n.settingsDailyOn : context.l10n.settingsDailyOff),
+              value: s.daily,
+              onChanged: s.running ? null : (v) => _update(daily: v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.rule),
               title: Text(context.l10n.settingsReviewFirst),
               subtitle: Text(s.review
@@ -1050,7 +1058,11 @@ class _DigestSectionState extends State<_DigestSection> {
                   : Text(context.l10n.settingsDigestBy(chosen.title)),
               trailing: s.running
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : FilledButton(onPressed: chosen == null ? null : _run, child: Text(context.l10n.settingsRun)),
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      TextButton(onPressed: chosen == null ? null : () => _run(weekly: true), child: Text(context.l10n.settingsWeeklyNow)),
+                      const SizedBox(width: 6),
+                      FilledButton(onPressed: chosen == null ? null : _run, child: Text(context.l10n.settingsRun)),
+                    ]),
             ),
           ]),
           FutureBuilder<List<ProposalSummary>>(

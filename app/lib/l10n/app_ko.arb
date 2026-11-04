@@ -1237,7 +1237,7 @@
       }
     }
   },
-  "settingsDigestStarted": "정리를 시작했습니다. 몇 분 걸립니다.",
+  "settingsDigestStarted": "정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).",
   "settingsAgentAuto": "자동 (할당량이면 다음 서비스)",
   "settingsQuotaSkipped": "{names} 할당량으로 건너뜀",
   "@settingsQuotaSkipped": {
@@ -1251,10 +1251,10 @@
   "settingsAgentOrderHint": "inbox의 전사본·세션 노트와 매일 수집한 원본을 읽어 로그 줄·프로젝트 상태·월간 정리를 씁니다. 블록을 왼쪽부터 시도하고, 할당량으로 막히면 다음 블록으로 넘깁니다. 끌어다 놓아 순서를 바꿉니다.",
   "settingsOpenRouterModel": "OpenRouter 모델",
   "settingsRun": "실행",
-  "settingsReviewFirst": "적용 전에 검토",
-  "settingsReviewOn": "정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.",
-  "settingsReviewOff": "끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.",
-  "settingsWeekly": "매주 월요일 자동 정리",
+  "settingsReviewFirst": "프로젝트 갱신은 검토 후 적용",
+  "settingsReviewOn": "로그 줄은 바로 들어가고, 프로젝트 페이지와 월간 정리는 제안으로 남아 검토한 뒤 적용합니다.",
+  "settingsReviewOff": "끄면 프로젝트 페이지와 월간 정리도 바로 worklog에 들어갑니다.",
+  "settingsWeekly": "매주 월요일 주간 정리 (프로젝트 갱신)",
   "settingsWeeklyNext": "다음 실행: {next} (매일 수집 뒤에 이어서)",
   "@settingsWeeklyNext": {
     "placeholders": {
@@ -1264,7 +1264,7 @@
     }
   },
   "settingsNextMonday": "다음 월요일",
-  "settingsWeeklyOff": "끄면 아래 버튼으로만 실행합니다",
+  "settingsWeeklyOff": "끄면 프로젝트 갱신은 아래 '주간 정리' 버튼으로만 합니다",
   "settingsDigestRunning": "정리 중… ({agent})",
   "@settingsDigestRunning": {
     "placeholders": {
@@ -1275,7 +1275,7 @@
   },
   "settingsDigestNow": "지금 정리하기",
   "settingsNoAgent": "쓸 수 있는 에이전트가 없습니다. Claude Code·Codex·Gemini CLI를 설치하거나 검색 → 외부 서비스에서 OpenRouter 키를 저장하세요.",
-  "settingsDigestBy": "{agent}가 정리합니다. 몇 분 걸립니다.",
+  "settingsDigestBy": "지금까지의 기록을 수집해 로그 줄로 옮깁니다 · {agent}",
   "@settingsDigestBy": {
     "placeholders": {
       "agent": {
@@ -2018,7 +2018,7 @@
   "knKindDaily": "일간",
   "knKindWeekly": "주간",
   "knKindMonthly": "월간",
-  "knNextRunning": "정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.",
+  "knNextRunning": "정리하는 중입니다. 로그 줄은 바로 들어가고, 프로젝트 갱신이 있으면 검토할 제안이 생깁니다.",
   "knNextReview": "정리 제안이 {days}일째 검토를 기다립니다 — 로그 {lines}줄, 프로젝트 {projects}개. 검토해 적용해야 검색·질문·리포트의 근거가 됩니다.",
   "@knNextReview": {
     "placeholders": {
@@ -2047,7 +2047,7 @@
   "knNextCollectFailed": "마지막 매일 수집이 실패했습니다. 연결 탭에서 어떤 소스가 실패했는지 보세요.",
   "knNextNothing": "아직 모은 기록이 없습니다. 연결 탭에서 소스를 켜고 지금 수집해 보세요.",
   "knNextNoAgent": "정리할 원본이 쌓였지만 정리할 에이전트가 없습니다. Claude Code 같은 CLI에 로그인하거나 OpenRouter 키를 저장하세요.",
-  "knNextDigest": "마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.",
+  "knNextDigest": "마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄이 됩니다.",
   "@knNextDigest": {
     "placeholders": {
       "days": {
@@ -2073,7 +2073,7 @@
   "knActionSettings": "설정 열기",
   "knActionDigest": "지금 정리하기",
   "knActionReports": "리포트 설정",
-  "knDigestStarted": "정리를 시작했습니다. 몇 분 걸립니다.",
+  "knDigestStarted": "정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).",
   "knShowSteps": "단계 보기",
   "knHideSteps": "단계 숨기기",
   "reviewGroupsTitle": "프로젝트 {projects}개 · 로그 {lines}줄",
@@ -2109,7 +2109,7 @@
     }
   },
   "onbFirstDigestTitle": "첫 정리 해 보기",
-  "onbFirstDigestBody": "{agent}가 방금 모은 원본을 읽고 로그 줄·프로젝트 상태 제안을 만듭니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 끝나면 검토해 적용하면 됩니다.",
+  "onbFirstDigestBody": "{agent}가 방금 모은 원본을 읽고 로그 줄로 정리합니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 앞으로는 매일 수집 뒤 자동으로 정리됩니다.",
   "@onbFirstDigestBody": {
     "placeholders": {
       "agent": {
@@ -2118,7 +2118,7 @@
     }
   },
   "onbFirstDigestButton": "첫 정리 시작",
-  "onbFirstDigestStarted": "첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 검토할 제안이 생깁니다.",
+  "onbFirstDigestStarted": "첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 로그 줄이 바로 들어가 있습니다.",
   "onbFirstDigestNoAgent": "정리할 에이전트가 없어 첫 정리는 건너뜁니다. Claude Code 같은 CLI에 로그인한 뒤 메모리 탭의 '지금 정리하기'로 하면 됩니다.",
   "askBasis": "근거: 정리된 기록 {knowledge} · 원본 {raw}",
   "@askBasis": {
@@ -2133,5 +2133,11 @@
   },
   "askBasisRawOnly": "정리된 기록이 없어 원본만 근거로 썼습니다. 메모리 탭에서 정리하면 근거가 짧고 분명해집니다.",
   "askSourceKnowledge": "정리된 기록",
-  "askSourceRaw": "원본"
+  "askSourceRaw": "원본",
+  "settingsDailyOn": "매일 수집 뒤 그날 기록을 로그 줄로 옮깁니다. 검토 없이 바로 들어갑니다.",
+  "settingsDailyOff": "끄면 월요일 주간 정리와 '지금 정리하기'로만 로그가 생깁니다.",
+  "settingsWeeklyNow": "주간 정리",
+  "settingsWeeklyStarted": "주간 정리를 시작했습니다. 프로젝트 갱신은 검토할 제안으로 남습니다.",
+  "knNextAllSetDaily": "모두 정리돼 있습니다. 매일 수집 뒤 그날 치가 로그로 정리됩니다.",
+  "settingsDailyDigest": "매일 정리"
 }

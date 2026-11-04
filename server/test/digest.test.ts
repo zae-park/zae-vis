@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-digest-state-"));
-const { DigestRunner, buildPrompt, checkLogin, cliArgs, detectAgents, findBin, gatherInputs, isFirstMonday, noAgentReason, parseCursorAuth, parseLoggedIn, pickAgent, runOpenRouter, setSection, weeklyDue } = await import("../src/digest.ts");
+const { DigestRunner, buildPrompt, checkLogin, cliArgs, detectAgents, digestDays, findBin, gatherInputs, isFirstMonday, lastDigestDate, noAgentReason, parseCursorAuth, parseLoggedIn, pickAgent, readStateKey, runOpenRouter, setSection, weeklyDue, writeStateKey } = await import("../src/digest.ts");
+const { listProposals, loadProposal } = await import("../src/review.ts");
 
 // Test doubles for agent CLIs: tiny shell scripts that print a version or append one log line.
 async function stubCli(dir: string, name: string, body: string): Promise<string> {
@@ -217,4 +218,96 @@ test("digest: auto skips a quota failure that wrote nothing, and stops once the 
 test("digest: setSection replaces or appends", () => {
   assert.equal(setSection("# T\n\n## A\n\nold\n\n## B\n\nb\n", "A", "new"), "# T\n\n## A\n\nnew\n\n## B\n\nb\n");
   assert.match(setSection("# T\n", "C", "c"), /# T\n\n## C\n\nc\n$/);
+});
+
+test("digest: .state.md keeps last_weekly and last_daily apart; the days a daily run covers", async () => {
+  const w = await worklog();
+  writeStateKey(w, "last_daily", "2026-10-20");
+  writeStateKey(w, "last_daily", "2026-10-22");
+  assert.equal(await readFile(join(w, ".state.md"), "utf8"), "last_weekly: 2026-10-19\nlast_daily: 2026-10-22\n");
+  assert.equal(readStateKey(w, "last_weekly"), "2026-10-19");
+  assert.equal(lastDigestDate(w), "2026-10-22", "the newer of the two");
+  assert.deepEqual(await digestDays(w), ["2026-10-25"], "source days after the last digest");
+  assert.deepEqual(await digestDays(w, ["2026-10-18", "x"]), ["2026-10-18", "2026-10-25"], "plus what collection just touched (re-collected days too)");
+  assert.deepEqual(await digestDays(w, ["2026-10-01", "2026-10-02"], 2), ["2026-10-02", "2026-10-25"], "the newest few only");
+  assert.match(buildPrompt({ worklogDir: w, reposRoot: "/r" }, "daily", ["2026-10-25"]), /하루 정리 작업이다\. 정리할 날짜: 2026-10-25\./);
+  assert.match(buildPrompt({ worklogDir: w, reposRoot: "/r" }), /주간 작업이다/);
+});
+
+test("digest: a daily run in review mode puts log lines in now and holds project pages for review", async () => {
+  const w = await worklog();
+  const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
+  const bin = await stubCli(
+    bins,
+    "claude",
+    [
+      '[[ "$2" == *"정리할 날짜: 2026-10-25"* ]] || { echo "wrong prompt"; exit 3; }',
+      'printf "# 2026-10 로그\\n\\n- 10-25 [[notes]] #done 정리 분리 (src: git notes bbbbbbb)\\n" > log/2026-10.md',
+      'echo "새 상태" >> projects/notes.md',
+      "/bin/mkdir -p processed/transcripts && /bin/mv inbox/transcripts/2026-10-24_회의.txt processed/transcripts/",
+      'echo "last_weekly: 2099-01-01" > .state.md',
+      'echo "로그 1줄"',
+    ].join("\n"),
+  );
+  const claude = { id: "claude" as const, title: "Claude Code", available: true, detail: "x", bin, loggedIn: true };
+  const r = await new DigestRunner({ env: { PATH: bins, HOME: bins } }).run({ worklogDir: w, reposRoot: "/r" } as never, { agent: "claude", model: "", weekly: true, review: true }, claude, undefined, { scope: "daily", days: ["2026-10-25"] });
+  assert.equal(r.ok, true, r.report);
+  assert.equal(r.scope, "daily");
+  assert.equal(r.changed, true);
+  assert.match(r.report, /^로그 1줄 적용 · inbox 1개 처리 · 검토 대기: 프로젝트 1개/);
+  assert.match(await readFile(join(w, "log", "2026-10.md"), "utf8"), /정리 분리/, "the log line is in without review");
+  assert.equal(existsSync(join(w, "processed", "transcripts", "2026-10-24_회의.txt")), true);
+  assert.doesNotMatch(await readFile(join(w, "projects", "notes.md"), "utf8"), /새 상태/, "the project page waits");
+  const p = await loadProposal(r.proposalId!);
+  assert.equal(p?.logLines.length, 0);
+  assert.deepEqual(p?.projects.map((x) => x.slug), ["notes"]);
+  assert.equal(await readFile(join(w, ".state.md"), "utf8"), "last_weekly: 2026-10-19\nlast_daily: 2026-10-25\n", "a daily run's .state.md edits are dropped; it marks its own day");
+});
+
+test("digest: a daily run with nothing to read does not call an agent", async () => {
+  const w = await worklog();
+  await writeFile(join(w, "inbox", "transcripts", "2026-10-24_회의.txt"), "");
+  const { rm } = await import("node:fs/promises");
+  await rm(join(w, "inbox", "transcripts", "2026-10-24_회의.txt"));
+  const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
+  const bin = await stubCli(bins, "claude", "echo CALLED > called.txt");
+  const claude = { id: "claude" as const, title: "Claude Code", available: true, detail: "x", bin, loggedIn: true };
+  let prepared = false;
+  const r = await new DigestRunner({ env: { PATH: bins, HOME: bins } }).run({ worklogDir: w, reposRoot: "/r" } as never, { agent: "claude", model: "", weekly: true, review: true }, claude, undefined, {
+    scope: "daily",
+    prepare: async () => {
+      prepared = true;
+      return ["2026-11-01"];
+    },
+  });
+  assert.equal(prepared, true);
+  assert.equal(r.ok, true);
+  assert.equal(r.changed, false);
+  assert.deepEqual(r.days, ["2026-11-01"]);
+  assert.match(r.report, /새 기록이 없습니다/);
+  assert.equal(existsSync(join(w, "called.txt")), false);
+});
+
+test("digest: OpenRouter daily scope writes log lines only and leaves last_weekly alone", async () => {
+  const w = await worklog();
+  const { setKey } = await import("../src/rerank.ts");
+  setKey("sk-or-test");
+  let system = "";
+  let user = "";
+  const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+    [system, user] = [body.messages[0].content, body.messages[1].content];
+    const plan = { logLines: [{ date: "2026-10-25", projects: ["notes"], tags: ["done"], text: "하루 정리 줄", src: "git notes bbbbbbb" }], projects: [{ slug: "notes", currentState: "바뀌면 안 됨" }], processed: [], monthlySummary: "# 2026-09 작업 정리" };
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 });
+  }) as typeof fetch;
+  const r = await runOpenRouter({ worklogDir: w }, "m", { fetchImpl: fakeFetch, today: new Date("2026-11-02T10:00:00"), scope: "daily", days: ["2026-10-25"] });
+  assert.equal(r.ok, true, r.output);
+  assert.match(system, /하루 정리다/);
+  assert.match(user, /정리할 날짜: 2026-10-25/);
+  assert.doesNotMatch(user, /old commit/, "only the given days");
+  assert.match(await readFile(join(w, "log", "2026-10.md"), "utf8"), /하루 정리 줄/);
+  assert.doesNotMatch(await readFile(join(w, "projects", "notes.md"), "utf8"), /바뀌면 안 됨/);
+  assert.equal(existsSync(join(w, "summaries")), false);
+  assert.equal(await readFile(join(w, ".state.md"), "utf8"), "last_weekly: 2026-10-19\n");
+  void listProposals;
 });

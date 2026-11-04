@@ -906,9 +906,10 @@ class RailStop {
 }
 
 class DigestRun {
-  const DigestRun({required this.at, required this.agent, required this.ok, required this.report, this.proposalId, this.rail = const []});
+  const DigestRun({required this.at, required this.agent, required this.ok, required this.report, this.proposalId, this.rail = const [], this.weekly = true});
   factory DigestRun.fromJson(Json j) => DigestRun(
         at: DateTime.tryParse(_str(j['lastRun'])),
+        weekly: j['scope'] != 'daily',
         agent: _str(j['agent']),
         ok: j['ok'] == true,
         report: _str(j['report']),
@@ -920,9 +921,12 @@ class DigestRun {
   final bool ok;
   final String report;
 
-  /// Set when the run was held for review instead of being written to the worklog.
+  /// Set when part of the run (project pages, summaries) was held for review.
   final String? proposalId;
   final List<RailStop> rail;
+
+  /// The Monday look back (projects), or a daily run (log lines).
+  final bool weekly;
 }
 
 /// GET /api/digest: detected agents, the setting, what would run, and the last run.
@@ -933,6 +937,7 @@ class DigestStatus {
     required this.model,
     required this.weekly,
     required this.agents,
+    this.daily = true,
     this.review = true,
     this.chosen,
     this.runningAgent,
@@ -950,6 +955,7 @@ class DigestStatus {
       agent: _str(s['agent']).isEmpty ? 'auto' : _str(s['agent']),
       model: _str(s['model']),
       weekly: s['weekly'] != false,
+      daily: s['daily'] != false,
       review: s['review'] != false,
       agents: (j['agents'] is List ? j['agents'] as List : const <Object?>[]).whereType<Json>().map(AgentInfo.fromJson).toList(),
       skip: s['skip'] is List ? (s['skip'] as List).whereType<String>().toList() : const [],
@@ -965,6 +971,9 @@ class DigestStatus {
   final String agent; // auto | claude | codex | gemini | openrouter
   final String model;
   final bool weekly;
+
+  /// A daily digest after each collection (log lines, no review).
+  final bool daily;
   final List<AgentInfo> agents;
 
   /// Ids left in the fallback order but not tried.
@@ -978,7 +987,7 @@ class DigestStatus {
   /// Who would run, or the live attempt while a digest is in progress.
   final List<RailStop> rail;
 
-  /// Review before apply: a run leaves a proposal instead of writing the worklog directly.
+  /// Review before apply: project pages and summaries wait in a proposal; log lines always go in directly.
   final bool review;
 }
 
@@ -1525,6 +1534,7 @@ class KnowledgeStatus {
     this.digestRunning = false,
     this.agent,
     this.weekly = true,
+    this.daily = true,
     this.nextWeekly,
   });
 
@@ -1555,6 +1565,7 @@ class KnowledgeStatus {
       digestRunning: d['running'] == true,
       agent: _strOrNull(d['agent']),
       weekly: d['weekly'] != false,
+      daily: d['daily'] != false,
       nextWeekly: _strOrNull(d['nextWeekly']),
     );
   }
@@ -1581,6 +1592,9 @@ class KnowledgeStatus {
   final bool digestRunning;
   final String? agent;
   final bool weekly;
+
+  /// Collected days are turned into log lines every day (digest.daily).
+  final bool daily;
   final String? nextWeekly;
 
   int get waitingFiles => waitingTranscripts + waitingSessions;
@@ -1597,7 +1611,8 @@ KnowledgeNext knowledgeNext(KnowledgeStatus s) {
   if (s.review.isNotEmpty) return KnowledgeNext.review;
   if (s.collectOk == false) return KnowledgeNext.collectFailed;
   if (s.collectDays == 0 && s.waitingFiles == 0) return KnowledgeNext.nothingCollected;
-  final waiting = s.waitingSourceDays >= 3 || s.waitingFiles > 0;
+  // with the daily digest on, two days behind means it is not keeping up (today's is digested in the evening)
+  final waiting = s.waitingSourceDays >= (s.daily ? 2 : 3) || s.waitingFiles > 0;
   if (waiting && s.agent == null) return KnowledgeNext.noAgent;
   if (waiting) return KnowledgeNext.digest;
   if (s.logLines > 0 && !s.dailyReports && !s.weeklyReports) return KnowledgeNext.reports;

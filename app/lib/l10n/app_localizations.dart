@@ -3041,7 +3041,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDigestStarted.
   ///
   /// In ko, this message translates to:
-  /// **'정리를 시작했습니다. 몇 분 걸립니다.'**
+  /// **'정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).'**
   String get settingsDigestStarted;
 
   /// No description provided for @settingsAgentAuto.
@@ -3083,25 +3083,25 @@ abstract class AppLocalizations {
   /// No description provided for @settingsReviewFirst.
   ///
   /// In ko, this message translates to:
-  /// **'적용 전에 검토'**
+  /// **'프로젝트 갱신은 검토 후 적용'**
   String get settingsReviewFirst;
 
   /// No description provided for @settingsReviewOn.
   ///
   /// In ko, this message translates to:
-  /// **'정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.'**
+  /// **'로그 줄은 바로 들어가고, 프로젝트 페이지와 월간 정리는 제안으로 남아 검토한 뒤 적용합니다.'**
   String get settingsReviewOn;
 
   /// No description provided for @settingsReviewOff.
   ///
   /// In ko, this message translates to:
-  /// **'끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.'**
+  /// **'끄면 프로젝트 페이지와 월간 정리도 바로 worklog에 들어갑니다.'**
   String get settingsReviewOff;
 
   /// No description provided for @settingsWeekly.
   ///
   /// In ko, this message translates to:
-  /// **'매주 월요일 자동 정리'**
+  /// **'매주 월요일 주간 정리 (프로젝트 갱신)'**
   String get settingsWeekly;
 
   /// No description provided for @settingsWeeklyNext.
@@ -3119,7 +3119,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsWeeklyOff.
   ///
   /// In ko, this message translates to:
-  /// **'끄면 아래 버튼으로만 실행합니다'**
+  /// **'끄면 프로젝트 갱신은 아래 \'주간 정리\' 버튼으로만 합니다'**
   String get settingsWeeklyOff;
 
   /// No description provided for @settingsDigestRunning.
@@ -3143,7 +3143,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDigestBy.
   ///
   /// In ko, this message translates to:
-  /// **'{agent}가 정리합니다. 몇 분 걸립니다.'**
+  /// **'지금까지의 기록을 수집해 로그 줄로 옮깁니다 · {agent}'**
   String settingsDigestBy(String agent);
 
   /// No description provided for @settingsPendingReviews.
@@ -4656,7 +4656,7 @@ abstract class AppLocalizations {
   /// No description provided for @knNextRunning.
   ///
   /// In ko, this message translates to:
-  /// **'정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.'**
+  /// **'정리하는 중입니다. 로그 줄은 바로 들어가고, 프로젝트 갱신이 있으면 검토할 제안이 생깁니다.'**
   String get knNextRunning;
 
   /// No description provided for @knNextReview.
@@ -4692,7 +4692,7 @@ abstract class AppLocalizations {
   /// No description provided for @knNextDigest.
   ///
   /// In ko, this message translates to:
-  /// **'마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.'**
+  /// **'마지막 정리 뒤 원본 {days}일 치와 전사본·세션 {files}개가 쌓였습니다. 정리하면 로그 줄이 됩니다.'**
   String knNextDigest(int days, int files);
 
   /// No description provided for @knNextReports.
@@ -4746,7 +4746,7 @@ abstract class AppLocalizations {
   /// No description provided for @knDigestStarted.
   ///
   /// In ko, this message translates to:
-  /// **'정리를 시작했습니다. 몇 분 걸립니다.'**
+  /// **'정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).'**
   String get knDigestStarted;
 
   /// No description provided for @knShowSteps.
@@ -4800,7 +4800,7 @@ abstract class AppLocalizations {
   /// No description provided for @onbFirstDigestBody.
   ///
   /// In ko, this message translates to:
-  /// **'{agent}가 방금 모은 원본을 읽고 로그 줄·프로젝트 상태 제안을 만듭니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 끝나면 검토해 적용하면 됩니다.'**
+  /// **'{agent}가 방금 모은 원본을 읽고 로그 줄로 정리합니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 앞으로는 매일 수집 뒤 자동으로 정리됩니다.'**
   String onbFirstDigestBody(String agent);
 
   /// No description provided for @onbFirstDigestButton.
@@ -4812,7 +4812,7 @@ abstract class AppLocalizations {
   /// No description provided for @onbFirstDigestStarted.
   ///
   /// In ko, this message translates to:
-  /// **'첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 검토할 제안이 생깁니다.'**
+  /// **'첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 로그 줄이 바로 들어가 있습니다.'**
   String get onbFirstDigestStarted;
 
   /// No description provided for @onbFirstDigestNoAgent.
@@ -4844,6 +4844,42 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'원본'**
   String get askSourceRaw;
+
+  /// No description provided for @settingsDailyOn.
+  ///
+  /// In ko, this message translates to:
+  /// **'매일 수집 뒤 그날 기록을 로그 줄로 옮깁니다. 검토 없이 바로 들어갑니다.'**
+  String get settingsDailyOn;
+
+  /// No description provided for @settingsDailyOff.
+  ///
+  /// In ko, this message translates to:
+  /// **'끄면 월요일 주간 정리와 \'지금 정리하기\'로만 로그가 생깁니다.'**
+  String get settingsDailyOff;
+
+  /// No description provided for @settingsWeeklyNow.
+  ///
+  /// In ko, this message translates to:
+  /// **'주간 정리'**
+  String get settingsWeeklyNow;
+
+  /// No description provided for @settingsWeeklyStarted.
+  ///
+  /// In ko, this message translates to:
+  /// **'주간 정리를 시작했습니다. 프로젝트 갱신은 검토할 제안으로 남습니다.'**
+  String get settingsWeeklyStarted;
+
+  /// No description provided for @knNextAllSetDaily.
+  ///
+  /// In ko, this message translates to:
+  /// **'모두 정리돼 있습니다. 매일 수집 뒤 그날 치가 로그로 정리됩니다.'**
+  String get knNextAllSetDaily;
+
+  /// No description provided for @settingsDailyDigest.
+  ///
+  /// In ko, this message translates to:
+  /// **'매일 정리'**
+  String get settingsDailyDigest;
 }
 
 class _AppLocalizationsDelegate

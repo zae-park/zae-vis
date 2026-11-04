@@ -58,7 +58,7 @@ ${B("바로 쓰기")}
   zaevis ask "<질문>"         기록을 근거로 답 — 설치된 에이전트 CLI(Claude Code·Codex·Gemini)나 OpenRouter 키로, 출처 [n] 포함
   zaevis projects             프로젝트 목록  zaevis summary [YYYY-MM] 월간 정리
   zaevis index [--refresh]    색인 상태 / 갱신 (--force: 처음부터)
-  zaevis digest [--run]       주간 정리(지식화) 상태 / 지금 실행 — 설치된 에이전트(Claude Code·Codex·Gemini) 또는 OpenRouter 키로
+  zaevis digest [--run [--weekly]]  정리(지식화) 상태 / 지금 수집하고 로그로 정리(--weekly: 프로젝트 갱신) — 설치된 에이전트(Claude Code·Codex·Gemini) 또는 OpenRouter 키로
 
 ${B("기록 넣기 (실시간)")}
   zaevis add "#decision [[프로젝트]] 무엇을, 왜"   한 줄 기록

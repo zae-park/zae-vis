@@ -30,7 +30,8 @@ export type AskSource = { n: number; path: string; label: string; passage: strin
 /** The agent's question back when the request could mean different things in the records. */
 export type Clarify = { question: string; options: string[] };
 /** Who decided what the line wanted: Jev (OpenRouter key saved) or the answering agent itself. */
-export type AskRoute = { by: "jev" | "agent"; intent: ChatIntent; ms?: number };
+/** `digest`: the line asked to organize the records, and a daily digest was started instead of an answer. */
+export type AskRoute = { by: "jev" | "agent"; intent: ChatIntent | "digest"; ms?: number };
 export type AskResult = {
   q: string;
   answer: string;
@@ -114,8 +115,14 @@ export const CLARIFY_PREFIX = "되묻기:";
 
 export const FILES_PREFIX = "파일:";
 export const READ_PREFIX = "읽기:";
+export const DIGEST_PREFIX = "정리:";
 
-export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<AskResult, "q" | "answer" | "clarify">[] = [], extra: { files?: Candidate[]; canRead?: boolean } = {}): string {
+/** The reply is the digest directive ("정리:" on its first line). */
+export const isDigestDirective = (text: string): boolean => (text.trim().split("\n")[0] ?? "").replace(/^\*\*|\*\*$/g, "").trim().startsWith(DIGEST_PREFIX);
+
+export const DIGEST_STARTED = "정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤, 마지막 정리 이후의 날들을 로그 줄로 옮깁니다(몇 분 걸립니다). 메모리 탭 맨 위에서 진행을 볼 수 있고, 끝나면 그 줄로 다시 물어볼 수 있습니다.";
+
+export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<AskResult, "q" | "answer" | "clarify">[] = [], extra: { files?: Candidate[]; canRead?: boolean; canDigest?: boolean } = {}): string {
   const list = sources.map((s) => `[${s.n}] (${s.label}) ${s.path}\n${s.passage}`).join("\n\n") || "(검색된 발췌 없음)";
   const files = extra.files ?? [];
   const prior = history.slice(-HISTORY_TURNS);
@@ -130,7 +137,8 @@ export function buildAskPrompt(q: string, sources: AskSource[], history: Pick<As
 - 각 문장 끝에 근거가 된 발췌 번호를 [n] 꼴로 단다. 여러 발췌가 근거면 [1][3]처럼 붙인다.
 - 발췌에 없는 내용은 쓰지 않는다. 발췌로 답할 수 없으면 "기록에서 근거를 찾지 못했습니다."라고 쓰고, 가장 가까운 내용이 있으면 그것만 한 문장으로 덧붙인다.
 - 파일을 열거나 명령을 실행하지 않는다. 서론·제목·인사 없이 답만 쓴다 (5문장 이내, 필요하면 짧은 목록).${prior.length ? "\n- 이전 대화의 맥락을 이어받되(예: \"그건\"이 가리키는 것), 근거는 이번 발췌에서만 든다." : ""}
-- 질문이 아니라 찾을 말만 있으면, 발췌가 보여 주는 것을 2~3문장으로 정리한다.${files.length ? `
+- 질문이 아니라 찾을 말만 있으면, 발췌가 보여 주는 것을 2~3문장으로 정리한다.${extra.canDigest ? `
+- 사용자가 답이 아니라 기록 정리(지식화) 자체를 해 달라고 하면(예: "오늘 거 정리해줘", "지금까지 기록 정리해"), 답 대신 "${DIGEST_PREFIX}" 한 줄만 쓴다. 정리된 내용을 묻는 질문(예: "오늘 뭐 했는지 정리해서 알려줘")에는 평소대로 답한다.` : ""}${files.length ? `
 - 사용자가 내용이 아니라 파일 자체를 원하면(받기·저장·보내기 등), 답 대신 첫 줄에 "${FILES_PREFIX}"만 쓰고 다음 줄부터 "- 경로"를 아래 파일 목록에서 골라 1~5줄 적는다. 목록에 없는 경로는 쓰지 않는다.${extra.canRead ? `
 - 답하려면 목록에 있는 파일의 내용이 필요한데 발췌에 없으면(예: "가장 최근 회의 요약"), 답 대신 첫 줄에 "${READ_PREFIX}"만 쓰고 "- 경로"를 1~3줄 적는다. 그 파일 전체를 발췌에 붙여 다시 묻는다.` : ""}` : ""}
 ${justAsked
@@ -387,6 +395,8 @@ export class AskRunner {
     /** What the chat showed last ("[2]" → path), so "[2] 받을래" can be resolved. */
     shown?: Array<{ n: number; path: string }>;
     force?: "answer";
+    /** Starts a daily digest when the line asks for one ("오늘 거 정리해줘"); without it the agent is not offered that. */
+    digestNow?: () => Promise<{ started: boolean; reason?: string }>;
   }): Promise<AskOutcome> {
     const question = q.trim();
     if (!question) return { ok: false, status: 400, error: "missing_query", message: "질문을 입력하세요." };
@@ -474,7 +484,7 @@ export class AskRunner {
       this.opts.log?.(`질문 (${chain.map((a) => a.title).join(" → ")}, 발췌 ${sources.length}개, 파일 ${candidates.length}개): ${question}`);
       let produced: { text: string; agent: AgentInfo; rail: RailStop[] };
       try {
-        produced = await generate(buildAskPrompt(question, sources, history, { files: candidates, canRead: !named.length }));
+        produced = await generate(buildAskPrompt(question, sources, history, { files: candidates, canRead: !named.length, canDigest: !!opts.digestNow }));
         const toRead = named.length ? null : parseDirective(produced.text, READ_PREFIX, known);
         if (toRead?.length && !abort.signal.aborted) {
           // the agent asked for whole files: once, with them in front of the search passages
@@ -491,6 +501,13 @@ export class AskRunner {
         return { ok: false, status: 502, error: "agent_failed", message: (err as Error).message, ...(failed ? { rail: failed } : {}) };
       }
       if (abort.signal.aborted) return cancelled();
+      if (opts.digestNow && isDigestDirective(produced.text)) {
+        const d = await opts.digestNow();
+        this.opts.log?.(`정리 요청: ${d.started ? "시작" : d.reason}`);
+        const answer = d.started ? DIGEST_STARTED : `정리를 시작하지 못했습니다: ${d.reason ?? "알 수 없는 이유"}`;
+        const route = { by: (jevDecided ? "jev" : "agent") as AskRoute["by"], intent: "digest" as const };
+        return { ok: true, result: save({ q: question, answer, sources: [], agent: produced.agent.id, ms: Date.now() - started, at: new Date().toISOString(), rail: produced.rail, route }) };
+      }
       const handed = parseDirective(produced.text, FILES_PREFIX, known);
       const by: AskRoute["by"] = jevDecided ? "jev" : "agent";
       const clarify = handed ? null : parseClarify(produced.text);

@@ -8,7 +8,7 @@ import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { indexRoots, syncSearchPaths } from "./indexpaths.ts";
 import { kiwiEnv } from "./kiwi.ts";
-import { DigestRunner, detectAgents, pickAgent, weeklyDue } from "./digest.ts";
+import { DigestRunner, detectAgents, digestDays, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
 import { waitingDays } from "./knowledge.ts";
@@ -95,15 +95,38 @@ async function main(): Promise<void> {
     }
   }
 
-  // Mondays: the weekly digest, with whatever agent the user has (see digest.ts).
-  if (!only.length && weeklyDue(cfg.digest, cfg.worklogDir)) {
+  // Every day: what was just collected becomes log lines (the daily digest). Mondays: the weekly look
+  // back that updates project pages. Both with whatever agent the user has (see digest.ts).
+  const runDaily = !only.length && cfg.digest.daily;
+  const runWeekly = !only.length && weeklyDue(cfg.digest, cfg.worklogDir);
+  if (runDaily || runWeekly) {
     const agents = await detectAgents();
     const chosen = pickAgent(cfg.digest, agents);
-    if (!chosen) console.log(`[${ts()}] 주간 정리 건너뜀: 쓸 수 있는 에이전트가 없습니다 (Claude Code·Codex·Gemini CLI 또는 OpenRouter 키).`);
+    if (!chosen) console.log(`[${ts()}] 정리 건너뜀: 쓸 수 있는 에이전트가 없습니다 (Claude Code·Codex·Gemini CLI 또는 OpenRouter 키).`);
     else {
-      console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
-      const r = await new DigestRunner({ notify }).run(cfg, cfg.digest, chosen, agents);
-      console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
+      const runner = new DigestRunner({ notify });
+      let changed = false;
+      if (runDaily) {
+        const days = await digestDays(cfg.worklogDir, report.flatMap((r) => r.days));
+        console.log(`[${ts()}] 하루 정리 시작 (${chosen.title} · ${days.join(", ") || "inbox만"})`);
+        const r = await runner.run(cfg, cfg.digest, chosen, agents, { scope: "daily", days });
+        changed ||= r.changed === true;
+        console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n")[0]}`);
+      }
+      if (runWeekly) {
+        console.log(`[${ts()}] 주간 정리 시작 (${chosen.title})`);
+        const r = await runner.run(cfg, cfg.digest, chosen, agents, { scope: "weekly" });
+        changed ||= r.changed === true;
+        console.log(`  ${r.ok ? "✓" : "✗"} ${r.report.split("\n").slice(-2).join(" / ")}`);
+      }
+      // the new log lines go into search now, not tomorrow
+      if (changed && index === "완료") {
+        try {
+          console.log(`  정리 뒤 색인: ${await refreshIndex(cfg)}`);
+        } catch (err) {
+          console.log(`  정리 뒤 색인 실패: ${(err as Error).message}`);
+        }
+      }
     }
   }
   // Reports that are due today (reports.ts): the day's, the week's on its day, last month's on its day.

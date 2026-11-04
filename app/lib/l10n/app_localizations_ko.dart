@@ -1718,7 +1718,8 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get settingsDigestStarted => '정리를 시작했습니다. 몇 분 걸립니다.';
+  String get settingsDigestStarted =>
+      '정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).';
 
   @override
   String get settingsAgentAuto => '자동 (할당량이면 다음 서비스)';
@@ -1742,17 +1743,17 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsRun => '실행';
 
   @override
-  String get settingsReviewFirst => '적용 전에 검토';
+  String get settingsReviewFirst => '프로젝트 갱신은 검토 후 적용';
 
   @override
   String get settingsReviewOn =>
-      '정리 결과를 바로 쓰지 않고 제안으로 둡니다. 로그 탭이나 아래에서 줄마다 골라 적용합니다.';
+      '로그 줄은 바로 들어가고, 프로젝트 페이지와 월간 정리는 제안으로 남아 검토한 뒤 적용합니다.';
 
   @override
-  String get settingsReviewOff => '끄면 에이전트가 쓴 내용이 바로 worklog에 들어갑니다.';
+  String get settingsReviewOff => '끄면 프로젝트 페이지와 월간 정리도 바로 worklog에 들어갑니다.';
 
   @override
-  String get settingsWeekly => '매주 월요일 자동 정리';
+  String get settingsWeekly => '매주 월요일 주간 정리 (프로젝트 갱신)';
 
   @override
   String settingsWeeklyNext(String next) {
@@ -1763,7 +1764,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsNextMonday => '다음 월요일';
 
   @override
-  String get settingsWeeklyOff => '끄면 아래 버튼으로만 실행합니다';
+  String get settingsWeeklyOff => '끄면 프로젝트 갱신은 아래 \'주간 정리\' 버튼으로만 합니다';
 
   @override
   String settingsDigestRunning(String agent) {
@@ -1779,7 +1780,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsDigestBy(String agent) {
-    return '$agent가 정리합니다. 몇 분 걸립니다.';
+    return '지금까지의 기록을 수집해 로그 줄로 옮깁니다 · $agent';
   }
 
   @override
@@ -2678,7 +2679,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get knKindMonthly => '월간';
 
   @override
-  String get knNextRunning => '정리하는 중입니다. 끝나면 검토할 제안이 생깁니다.';
+  String get knNextRunning =>
+      '정리하는 중입니다. 로그 줄은 바로 들어가고, 프로젝트 갱신이 있으면 검토할 제안이 생깁니다.';
 
   @override
   String knNextReview(int days, int lines, int projects) {
@@ -2703,7 +2705,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String knNextDigest(int days, int files) {
-    return '마지막 정리 뒤 원본 $days일 치와 전사본·세션 $files개가 쌓였습니다. 정리하면 로그 줄과 프로젝트 상태가 됩니다.';
+    return '마지막 정리 뒤 원본 $days일 치와 전사본·세션 $files개가 쌓였습니다. 정리하면 로그 줄이 됩니다.';
   }
 
   @override
@@ -2733,7 +2735,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get knActionReports => '리포트 설정';
 
   @override
-  String get knDigestStarted => '정리를 시작했습니다. 몇 분 걸립니다.';
+  String get knDigestStarted =>
+      '정리를 시작했습니다. 지금까지의 기록을 먼저 수집한 뒤 로그로 정리합니다(몇 분).';
 
   @override
   String get knShowSteps => '단계 보기';
@@ -2768,7 +2771,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String onbFirstDigestBody(String agent) {
-    return '$agent가 방금 모은 원본을 읽고 로그 줄·프로젝트 상태 제안을 만듭니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 끝나면 검토해 적용하면 됩니다.';
+    return '$agent가 방금 모은 원본을 읽고 로그 줄로 정리합니다. 몇 분 걸리고, 앱을 열면 메모리 탭 맨 위에 진행 상황이 보입니다. 앞으로는 매일 수집 뒤 자동으로 정리됩니다.';
   }
 
   @override
@@ -2776,7 +2779,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get onbFirstDigestStarted =>
-      '첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 검토할 제안이 생깁니다.';
+      '첫 정리를 시작했습니다. 앱을 열면 메모리 탭 맨 위에 진행 상황이 보이고, 끝나면 로그 줄이 바로 들어가 있습니다.';
 
   @override
   String get onbFirstDigestNoAgent =>
@@ -2796,4 +2799,22 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get askSourceRaw => '원본';
+
+  @override
+  String get settingsDailyOn => '매일 수집 뒤 그날 기록을 로그 줄로 옮깁니다. 검토 없이 바로 들어갑니다.';
+
+  @override
+  String get settingsDailyOff => '끄면 월요일 주간 정리와 \'지금 정리하기\'로만 로그가 생깁니다.';
+
+  @override
+  String get settingsWeeklyNow => '주간 정리';
+
+  @override
+  String get settingsWeeklyStarted => '주간 정리를 시작했습니다. 프로젝트 갱신은 검토할 제안으로 남습니다.';
+
+  @override
+  String get knNextAllSetDaily => '모두 정리돼 있습니다. 매일 수집 뒤 그날 치가 로그로 정리됩니다.';
+
+  @override
+  String get settingsDailyDigest => '매일 정리';
 }

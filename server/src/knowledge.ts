@@ -9,13 +9,13 @@ import type { ProposalSummary } from "./review.ts";
 
 export type KnowledgeStatus = {
   collect: { lastRun: string | null; ok: boolean | null; days: number; latestDay: string | null };
-  /** Material the next digest reads: inbox files, and source days newer than the last applied digest. */
+  /** Material the next digest reads: inbox files, and source days newer than the last digest (daily or weekly). */
   waiting: { transcripts: number; sessions: number; sourceDays: number; lastDigest: string | null };
   /** Digest runs left for the user to approve, oldest first. */
   review: ProposalSummary[];
   knowledge: { logLines: number; latestLogDay: string | null; projects: number; summaries: number };
   reports: { daily: { enabled: boolean; count: number }; weekly: { enabled: boolean; count: number }; monthly: { enabled: boolean; count: number } };
-  digest: { running: boolean; agent: string | null; weekly: boolean; nextWeekly: string | null; review: boolean };
+  digest: { running: boolean; agent: string | null; weekly: boolean; daily?: boolean; nextWeekly: string | null; review: boolean };
 };
 
 const DAY = /^(\d{4}-\d{2}-\d{2})\.md$/;
@@ -67,7 +67,7 @@ export async function knowledgeStatus(
     proposals: ProposalSummary[];
     collect: { lastRun: string; ok: boolean } | null;
     reports: { daily: boolean; weekly: boolean; monthly: boolean };
-    digest: { running: boolean; agent: string | null; weekly: boolean; nextWeekly: string | null; review: boolean };
+    digest: { running: boolean; agent: string | null; weekly: boolean; daily?: boolean; nextWeekly: string | null; review: boolean };
   },
 ): Promise<KnowledgeStatus> {
   const days = await sourceDays(root);

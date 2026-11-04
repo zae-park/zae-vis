@@ -39,7 +39,7 @@ export type AppConfig = {
   language: string; // the language the user mostly speaks and writes ("ko"), asked on first run; the default for transcription
   transcribeLanguage: string; // "user" (follow `language`, default) | "auto" (whisper detects) | a language code
   rerank: { enabled: boolean; model: string }; // optional OpenRouter re-ranking of search results (default off)
-  digest: { agent: "auto" | AgentId; model: string; weekly: boolean; review: boolean; order: AgentId[]; skip: AgentId[] };
+  digest: { agent: "auto" | AgentId; model: string; weekly: boolean; daily: boolean; review: boolean; order: AgentId[]; skip: AgentId[] };
   reports: ReportsSetting; // daily / weekly / monthly reports written by the same agent (reports.ts)
   /** Folders indexed in addition to the worklog (a notebook that lives somewhere else). */
   memoryPaths: string[];
@@ -58,6 +58,7 @@ function normalizeDigest(raw: AppConfig["digest"] | undefined): AppConfig["diges
     agent: names.find((a) => a === raw?.agent) ?? "auto",
     model: typeof raw?.model === "string" ? raw.model : "",
     weekly: raw?.weekly !== false,
+    daily: raw?.daily !== false,
     review: raw?.review !== false,
     order: normalizeAgentOrder(raw?.order),
     skip: normalizeAgentSkip(raw?.skip),

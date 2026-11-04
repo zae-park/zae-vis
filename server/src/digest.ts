@@ -9,7 +9,7 @@
 //   state    state.json  → digest: { lastRun, agent, ok, report }
 //   log      $ZAEVIS_HOME/digest.log
 
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
@@ -18,16 +18,21 @@ import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
 import { spawnBin } from "./spawnbin.ts";
 import { agentsInOrder, fallbackCandidates, plannedRail, replyQuota, withStop, type RailStop } from "./rail.ts";
 import { getKey as openrouterKey } from "./rerank.ts";
-import { diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot } from "./review.ts";
+import { applyProposal, diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot, type Proposal } from "./review.ts";
 import { Worklog } from "./worklog.ts";
 
 export type AgentId = "claude" | "codex" | "cursor" | "gemini" | "openrouter";
-/** `review`: lift the run's changes into a proposal the user approves in the app (default), or apply directly. */
+/**
+ * `daily`: after each day's collection, turn that day's sources into log lines (default on).
+ * `review`: project pages and monthly summaries wait in a proposal the user approves in the app (default);
+ * log lines and the inbox files they came from always go in directly. Off: everything goes in directly.
+ */
 export type DigestSetting = {
   agent: "auto" | AgentId;
   model: string;
   weekly: boolean;
   review: boolean;
+  daily?: boolean;
   /** Fallback order. Missing ids are appended in the default order. */
   order?: AgentId[];
   /** Ids left in `order` but not tried. */
@@ -57,8 +62,15 @@ export type DetectOptions = {
 };
 export type AgentCacheEntry = { at: number; version?: string; loggedIn?: boolean | null };
 
-export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string; rail?: RailStop[] };
-export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; last: DigestRun | null; nextWeekly: string | null; rail: RailStop[] };
+/** `daily`: the given days' sources → log lines. `weekly`: the look back that also updates project pages (and the month's summary). */
+export type DigestScope = "daily" | "weekly";
+/** `changed`: an agent ran and the worklog may have new lines (the index wants a refresh). */
+export type DigestRun = { lastRun: string; agent: AgentId; ok: boolean; report: string; proposalId?: string; rail?: RailStop[]; scope?: DigestScope; days?: string[]; changed?: boolean };
+export type DigestStatus = { running: boolean; startedAt?: string; agent?: AgentId; scope?: DigestScope; last: DigestRun | null; nextWeekly: string | null; rail: RailStop[] };
+/** How a run starts: its scope, the days (daily), and work to do first inside the run (collecting), which may pick the days. */
+export type DigestHow = { scope?: DigestScope; days?: string[]; prepare?: () => Promise<string[]> };
+/** Days older than this are left to the weekly run, so a long gap does not become one huge daily run. */
+export const DAILY_MAX_DAYS = 14;
 
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5";
 const RUN_TIMEOUT_MS = 30 * 60_000;
@@ -218,11 +230,17 @@ function kitDir(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "kit");
 }
 
-/** The weekly prompt (kit/claude/weekly-task-prompt.md) filled in for this worklog. */
-export function buildPrompt(cfg: Pick<AppConfig, "worklogDir" | "reposRoot">): string {
-  const file = join(kitDir(), "claude", "weekly-task-prompt.md");
-  let p = existsSync(file) ? readFileSync(file, "utf8") : `${cfg.worklogDir}/README.md 를 읽고 "주간 정리" 절차를 따른다.`;
-  p = p.replace(/\{\{WORKLOG_DIR\}\}/g, cfg.worklogDir).replace(/\{\{REPOS_ROOT\}\}/g, cfg.reposRoot);
+/** The weekly or daily prompt (kit/claude/<scope>-task-prompt.md) filled in for this worklog. */
+export function buildPrompt(cfg: Pick<AppConfig, "worklogDir" | "reposRoot">, scope: DigestScope = "weekly", days: string[] = []): string {
+  const file = join(kitDir(), "claude", `${scope}-task-prompt.md`);
+  const fallback = scope === "daily"
+    ? `${cfg.worklogDir}/README.md 의 "로그 형식"대로 {{DAYS}} 의 sources/*/날짜.md 와 inbox/ 파일을 읽어 log/ 에 한 줄씩 추가한다. projects/·summaries/·.state.md 는 고치지 않는다.`
+    : `${cfg.worklogDir}/README.md 를 읽고 "주간 정리" 절차를 따른다.`;
+  let p = existsSync(file) ? readFileSync(file, "utf8") : fallback;
+  p = p
+    .replace(/\{\{WORKLOG_DIR\}\}/g, cfg.worklogDir)
+    .replace(/\{\{REPOS_ROOT\}\}/g, cfg.reposRoot)
+    .replace(/\{\{DAYS\}\}/g, days.length ? days.join(", ") : "(없음 — inbox 파일만)");
   return p + `\n\n추가 규칙: ${cfg.worklogDir} 폴더 밖의 파일은 읽지도 쓰지도 않는다. 질문하지 말고 끝까지 진행한 뒤 보고만 한다.`;
 }
 
@@ -230,12 +248,48 @@ export function isFirstMonday(d = new Date()): boolean {
   return d.getDay() === 1 && d.getDate() <= 7;
 }
 
-export function lastWeeklyDate(worklogDir: string): string | null {
+/** A `key: YYYY-MM-DD` line of the worklog's .state.md (last_weekly, last_daily). */
+export function readStateKey(worklogDir: string, key: string): string | null {
   try {
-    return /last_weekly:\s*(\d{4}-\d{2}-\d{2})/.exec(readFileSync(join(worklogDir, ".state.md"), "utf8"))?.[1] ?? null;
+    return new RegExp(`^${key}:\\s*(\\d{4}-\\d{2}-\\d{2})`, "m").exec(readFileSync(join(worklogDir, ".state.md"), "utf8"))?.[1] ?? null;
   } catch {
     return null;
   }
+}
+
+/** Sets one `key: value` line of .state.md and keeps the others. */
+export function writeStateKey(worklogDir: string, key: string, value: string): void {
+  const file = join(worklogDir, ".state.md");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    // a new file
+  }
+  const lines = text.split("\n").filter((l) => l.trim() && !l.startsWith(`${key}:`));
+  writeFileSync(file, [...lines, `${key}: ${value}`].join("\n") + "\n");
+}
+
+export const lastWeeklyDate = (worklogDir: string): string | null => readStateKey(worklogDir, "last_weekly");
+export const lastDailyDate = (worklogDir: string): string | null => readStateKey(worklogDir, "last_daily");
+
+/** The newest day any digest covered: material after it is still waiting. */
+export function lastDigestDate(worklogDir: string): string | null {
+  const [w, d] = [lastWeeklyDate(worklogDir), lastDailyDate(worklogDir)];
+  return !w ? d : !d ? w : w > d ? w : d;
+}
+
+/** Days a daily run covers: the ones collection just touched, and every source day after the last digest (the newest DAILY_MAX_DAYS). */
+export async function digestDays(worklogDir: string, touched: string[] = [], limit = DAILY_MAX_DAYS): Promise<string[]> {
+  const since = lastDigestDate(worklogDir);
+  const all = new Set(touched.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
+  for (const src of await listFiles(join(worklogDir, "sources"))) {
+    for (const f of await listFiles(src)) {
+      const day = /(\d{4}-\d{2}-\d{2})\.md$/.exec(f)?.[1];
+      if (day && (!since || day > since)) all.add(day);
+    }
+  }
+  return [...all].sort().slice(-limit);
 }
 
 /** The weekly run is due on Mondays when the last one is more than 6 days old. */
@@ -309,6 +363,9 @@ tags 는 done / decision / blocked / learned 중에서만. projects 의 slug 는
  "processed":["inbox/transcripts/파일.txt"],
  "monthlySummary": null 또는 "# YYYY-MM 작업 정리\\n## 한 줄 요약\\n…\\n## 프로젝트별\\n…\\n## 막힌 것 / 다음 달로 넘어간 것\\n…\\n## 배운 것\\n…"}`;
 
+const DAILY_RULES = `${RULES}
+이번 실행은 하루 정리다: 주어진 날짜의 원본과 inbox만 로그 줄로 옮긴다. projects 는 [] 로, monthlySummary 는 null 로 둔다 (프로젝트 갱신은 주간 정리가 한다).`;
+
 type Plan = {
   logLines?: Array<{ date?: string; projects?: string[]; tags?: string[]; text?: string; src?: string }>;
   projects?: Array<{ slug?: string; title?: string; currentState?: string; decisions?: string[]; openIssues?: string[] }>;
@@ -324,21 +381,26 @@ async function listFiles(dir: string): Promise<string[]> {
   }
 }
 
-/** Everything the weekly step reads, capped so the request stays within a model's context. */
-export async function gatherInputs(worklogDir: string, since: string | null, capChars = 160_000): Promise<{ files: string[]; text: string }> {
+/** The files a run reads: source days after `since` (or exactly `days`), then every inbox transcript and session note. */
+export async function inputFiles(worklogDir: string, since: string | null, days?: string[]): Promise<string[]> {
   const picked: string[] = [];
-  const sourcesRoot = join(worklogDir, "sources");
-  for (const src of await listFiles(sourcesRoot)) {
+  const only = days ? new Set(days) : null;
+  for (const src of await listFiles(join(worklogDir, "sources"))) {
     for (const f of await listFiles(src)) {
       const day = /(\d{4}-\d{2}-\d{2})\.md$/.exec(f)?.[1];
-      if (day && (!since || day > since)) picked.push(f);
+      if (day && (only ? only.has(day) : !since || day > since)) picked.push(f);
     }
   }
   for (const sub of ["transcripts", "claude-sessions"]) picked.push(...(await listFiles(join(worklogDir, "inbox", sub))));
+  return picked.filter((f) => statSync(f).isFile());
+}
+
+/** Everything a run reads, capped so the request stays within a model's context. */
+export async function gatherInputs(worklogDir: string, since: string | null, capChars = 160_000, days?: string[]): Promise<{ files: string[]; text: string }> {
+  const picked = await inputFiles(worklogDir, since, days);
   let text = "";
   const files: string[] = [];
   for (const f of picked) {
-    if (!statSync(f).isFile()) continue;
     const rel = f.slice(worklogDir.length + 1).replaceAll("\\", "/");
     let body = await readFile(f, "utf8");
     if (body.length > 12_000) body = body.slice(0, 12_000) + "\n…(잘림)";
@@ -375,7 +437,8 @@ export function setSection(markdown: string, heading: string, body: string): str
   return [...lines.slice(0, start), ...block, ...lines.slice(end)].join("\n");
 }
 
-export async function applyPlan(worklogDir: string, plan: Plan, today = new Date()): Promise<{ lines: number; projects: string[]; processed: number; summary: string | null }> {
+export async function applyPlan(worklogDir: string, plan: Plan, today = new Date(), scope: DigestScope = "weekly"): Promise<{ lines: number; projects: string[]; processed: number; summary: string | null }> {
+  if (scope === "daily") plan = { ...plan, projects: [], monthlySummary: null };
   const wl = new Worklog(worklogDir);
   let lines = 0;
   for (const l of plan.logLines ?? []) {
@@ -427,32 +490,38 @@ export async function applyPlan(worklogDir: string, plan: Plan, today = new Date
       summary = name;
     }
   }
-  await writeFile(join(worklogDir, ".state.md"), `last_weekly: ${today.toISOString().slice(0, 10)}\n`);
+  if (scope === "weekly") writeStateKey(worklogDir, "last_weekly", today.toISOString().slice(0, 10));
   return { lines, projects: touched, processed, summary };
 }
 
-export async function runOpenRouter(cfg: Pick<AppConfig, "worklogDir">, model: string, opts: { fetchImpl?: typeof fetch; log?: (l: string) => void; today?: Date } = {}): Promise<{ ok: boolean; output: string }> {
+export async function runOpenRouter(
+  cfg: Pick<AppConfig, "worklogDir">,
+  model: string,
+  opts: { fetchImpl?: typeof fetch; log?: (l: string) => void; today?: Date; scope?: DigestScope; days?: string[] } = {},
+): Promise<{ ok: boolean; output: string }> {
   const key = openrouterKey();
   if (!key) return { ok: false, output: "OpenRouter 키가 없습니다." };
+  const scope = opts.scope ?? "weekly";
   const since = lastWeeklyDate(cfg.worklogDir);
-  const inputs = await gatherInputs(cfg.worklogDir, since);
+  const inputs = await gatherInputs(cfg.worklogDir, since, undefined, scope === "daily" ? (opts.days ?? []) : undefined);
   if (!inputs.files.length) return { ok: true, output: `정리할 새 입력이 없습니다 (마지막 정리: ${since ?? "없음"}).` };
   opts.log?.(`입력 ${inputs.files.length}개 파일, ${inputs.text.length}자 → ${model}`);
   const wl = new Worklog(cfg.worklogDir);
   const projects = (await wl.projects()).map((p) => `- ${p.slug}: ${p.title} (${p.status}) ${p.currentState.slice(0, 120)}`).join("\n") || "(없음)";
   const month = `${(opts.today ?? new Date()).getFullYear()}-${String((opts.today ?? new Date()).getMonth() + 1).padStart(2, "0")}`;
   const recent = ((await wl.log(month)) ?? []).slice(-60).map((e) => `- ${e.date} ${e.text}`).join("\n") || "(없음)";
-  const monthly = isFirstMonday(opts.today) ? "오늘은 이 달의 첫 월요일이다. 지난달 로그와 프로젝트로 monthlySummary 초안도 쓴다." : "monthlySummary 는 null 로 둔다.";
-  const user = `오늘: ${(opts.today ?? new Date()).toISOString().slice(0, 10)} · 마지막 정리: ${since ?? "없음"}\n${monthly}\n\n기존 프로젝트:\n${projects}\n\n이 달의 기존 로그 줄(중복 금지):\n${recent}\n\n입력:${inputs.text}`;
-  const plan = await chatJson(key, model, RULES, user, opts.fetchImpl);
-  const r = await applyPlan(cfg.worklogDir, plan, opts.today);
+  const monthly = scope === "weekly" && isFirstMonday(opts.today) ? "오늘은 이 달의 첫 월요일이다. 지난달 로그와 프로젝트로 monthlySummary 초안도 쓴다." : "monthlySummary 는 null 로 둔다.";
+  const head = scope === "daily" ? `정리할 날짜: ${(opts.days ?? []).join(", ") || "(없음 — inbox만)"}` : `마지막 정리: ${since ?? "없음"}`;
+  const user = `오늘: ${(opts.today ?? new Date()).toISOString().slice(0, 10)} · ${head}\n${monthly}\n\n기존 프로젝트:\n${projects}\n\n이 달의 기존 로그 줄(중복 금지):\n${recent}\n\n입력:${inputs.text}`;
+  const plan = await chatJson(key, model, scope === "daily" ? DAILY_RULES : RULES, user, opts.fetchImpl);
+  const r = await applyPlan(cfg.worklogDir, plan, opts.today, scope);
   return { ok: true, output: `로그 ${r.lines}줄 추가 · 프로젝트 ${r.projects.length}개 갱신(${r.projects.join(", ") || "-"}) · inbox ${r.processed}개 처리${r.summary ? ` · 월간 초안 ${r.summary}` : ""}` };
 }
 
 // ── the runner the server and the daily job share ──────────────────────────────
 
 export class DigestRunner {
-  private running: { startedAt: string; agent: AgentId; promise: Promise<DigestRun> } | null = null;
+  private running: { startedAt: string; agent: AgentId; scope: DigestScope; promise: Promise<DigestRun> } | null = null;
   private rail: RailStop[] = [];
   private readonly opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; notify?: (title: string, body: string) => void };
 
@@ -464,7 +533,7 @@ export class DigestRunner {
     const last = (loadState() as { digest?: DigestRun }).digest ?? null;
     return {
       running: this.running !== null,
-      ...(this.running ? { startedAt: this.running.startedAt, agent: this.running.agent } : {}),
+      ...(this.running ? { startedAt: this.running.startedAt, agent: this.running.agent, scope: this.running.scope } : {}),
       last,
       nextWeekly: setting.weekly ? nextMonday() : null,
       rail: this.running ? this.rail : [],
@@ -475,9 +544,11 @@ export class DigestRunner {
    * Starts a run unless one is in progress. `chain` is the detected agent list: in auto mode a quota
    * error before any file change tries the next usable agent. Once the worklog has changed, the run
    * stops on that agent. Without `chain` (and whenever the setting is pinned) only `agent` runs.
+   * A daily run (`how.scope`) with nothing to read ends without calling an agent.
    */
-  run(cfg: AppConfig, setting: DigestSetting, agent: AgentInfo, chain?: AgentInfo[]): Promise<DigestRun> {
+  run(cfg: AppConfig, setting: DigestSetting, agent: AgentInfo, chain?: AgentInfo[], how: DigestHow = {}): Promise<DigestRun> {
     if (this.running) return this.running.promise;
+    const scope: DigestScope = how.scope ?? "weekly";
     const startedAt = new Date().toISOString();
     const candidates = chain && setting.agent === "auto" ? fallbackCandidates(setting, chain) : [];
     const list = candidates.length ? candidates : [agent];
@@ -487,30 +558,45 @@ export class DigestRunner {
     const log = (line: string) => {
       void appendFile(logFile, `[${new Date().toLocaleString("sv-SE")}] ${line}\n`).catch(() => {});
     };
-    const holder: { startedAt: string; agent: AgentId; promise: Promise<DigestRun> } = { startedAt, agent: list[0].id, promise: undefined as never };
+    const root = cfg.worklogDir;
+    const holder: { startedAt: string; agent: AgentId; scope: DigestScope; promise: Promise<DigestRun> } = { startedAt, agent: list[0].id, scope, promise: undefined as never };
+    const title = scope === "daily" ? "하루 정리" : "주간 정리";
     const promise = (async (): Promise<DigestRun> => {
+      let days = how.days ?? [];
+      if (how.prepare) {
+        try {
+          days = await how.prepare();
+        } catch (err) {
+          log(`정리 전 수집 실패: ${(err as Error).message}`);
+        }
+      }
+      const prevDaily = lastDailyDate(root);
       let run: DigestRun | undefined;
-      for (let i = 0; i < list.length; i++) {
+      if (scope === "daily" && !(await inputFiles(root, null, days)).length) {
+        log(`${title}: 정리할 새 기록이 없습니다 (${days.join(", ") || "날짜 없음"})`);
+        run = { lastRun: new Date().toISOString(), agent: list[0].id, ok: true, report: "정리할 새 기록이 없습니다.", scope, days, changed: false };
+      }
+      for (let i = 0; !run && i < list.length; i++) {
         const current = list[i];
         const more = setting.agent === "auto" && i < list.length - 1;
         holder.agent = current.id;
         this.rail = withStop(this.rail, current.id, "running");
-        log(`정리 시작 (${current.title}${setting.review ? ", 검토 후 적용" : ""})`);
-        // A snapshot when we might fall through, and always in review mode (the proposal is the diff).
-        const before = setting.review || more ? await takeSnapshot(cfg.worklogDir) : null;
+        log(`${title} 시작 (${current.title}${scope === "daily" ? ` · ${days.join(", ") || "inbox만"}` : ""}${setting.review ? ", 프로젝트는 검토 후 적용" : ""})`);
+        // A snapshot when we might fall through, and always in review mode (the held-back part is the diff).
+        const before = setting.review || more ? await takeSnapshot(root) : null;
         let r: { ok: boolean; output: string };
         try {
-          if (current.id === "openrouter") r = await runOpenRouter(cfg, setting.model || DEFAULT_OPENROUTER_MODEL, { fetchImpl: this.opts.fetchImpl, log });
-          else r = await runCli(current.bin!, cliArgs(current.id, buildPrompt(cfg)), cfg.worklogDir, { env: this.opts.env, log });
+          if (current.id === "openrouter") r = await runOpenRouter(cfg, setting.model || DEFAULT_OPENROUTER_MODEL, { fetchImpl: this.opts.fetchImpl, log, scope, days });
+          else r = await runCli(current.bin!, cliArgs(current.id, buildPrompt(cfg, scope, days)), root, { env: this.opts.env, log });
         } catch (err) {
           r = { ok: false, output: (err as Error).message };
         }
         const quota = replyQuota(r.output, "", r.ok);
         if (before && quota && more) {
-          const diff = await diffSnapshot(cfg.worklogDir, before);
+          const diff = await diffSnapshot(root, before);
           const wrote = !isEmptyProposal(diff) || diff.removedLines.length > 0 || diff.stateAfter != null;
           if (!wrote) {
-            await restoreSnapshot(cfg.worklogDir, before);
+            await restoreSnapshot(root, before);
             this.rail = withStop(this.rail, current.id, "quota", quota);
             log(`${current.title} 할당량으로 건너뜀 (${quota})`);
             continue;
@@ -519,28 +605,49 @@ export class DigestRunner {
         this.rail = withStop(this.rail, current.id, r.ok ? "wrote" : quota ? "quota" : "error", quota ?? (!r.ok ? r.output.split("\n").filter((l) => l.trim()).at(-1)?.slice(0, 80) : undefined));
         let proposalId: string | undefined;
         if (before && setting.review) {
-          const diff = await diffSnapshot(cfg.worklogDir, before);
-          await restoreSnapshot(cfg.worklogDir, before);
-          if (!isEmptyProposal(diff)) {
-            proposalId = newProposalId();
-            await saveProposal({ id: proposalId, createdAt: new Date().toISOString(), agent: current.id, report: r.output.slice(-4000), status: "pending", ...diff });
-            const summary = `검토 대기: 로그 ${diff.logLines.length}줄 · 프로젝트 ${diff.projects.length}개 · inbox ${diff.processed.length}개${diff.summaries.length ? ` · 월간 초안 ${diff.summaries.length}` : ""}${diff.removedLines.length ? ` · 지운 줄 ${diff.removedLines.length}(검토 필요)` : ""}`;
-            log(summary);
-            r = { ok: r.ok, output: `${summary}\n\n${r.output}` };
-          } else if (r.ok) {
-            r = { ok: true, output: `바뀐 것이 없습니다.\n\n${r.output}` };
+          const diff = await diffSnapshot(root, before);
+          await restoreSnapshot(root, before);
+          // A finished run: its log lines (and the inbox files they came from) go in now; project pages and
+          // summaries wait for review. A failed run is held back whole, as before.
+          let applied = { lines: 0, processed: 0 };
+          let held = diff;
+          if (r.ok) {
+            const now = { ...diff, projects: [], summaries: [], stateAfter: scope === "weekly" ? diff.stateAfter : null } as unknown as Proposal;
+            const a = await applyProposal(root, now);
+            applied = { lines: a.lines, processed: a.processed };
+            held = { ...diff, logLines: [], processed: [], stateAfter: null };
           }
+          if (!isEmptyProposal(held)) {
+            proposalId = newProposalId();
+            await saveProposal({ id: proposalId, createdAt: new Date().toISOString(), agent: current.id, report: r.output.slice(-4000), status: "pending", ...held });
+          }
+          const parts = [
+            r.ok ? `로그 ${applied.lines}줄 적용` : "",
+            r.ok && applied.processed ? `inbox ${applied.processed}개 처리` : "",
+            proposalId
+              ? `검토 대기: ${[held.logLines.length ? `로그 ${held.logLines.length}줄` : "", held.projects.length ? `프로젝트 ${held.projects.length}개` : "", held.summaries.length ? `월간 초안 ${held.summaries.length}` : "", held.processed.length ? `inbox ${held.processed.length}개` : ""].filter(Boolean).join(" · ")}`
+              : "",
+            diff.removedLines.length ? `지운 줄 ${diff.removedLines.length}(되살림)` : "",
+          ].filter(Boolean);
+          const summary = parts.join(" · ") || "바뀐 것이 없습니다.";
+          log(summary);
+          r = { ok: r.ok, output: `${summary}\n\n${r.output}` };
         }
-        log(`정리 ${r.ok ? "완료" : "실패"}: ${r.output.split("\n").slice(-3).join(" / ")}`);
+        if (r.ok && scope === "daily" && days.length) writeStateKey(root, "last_daily", [...days].sort().at(-1)!);
+        // a weekly agent rewrites .state.md: keep the daily mark it may have dropped
+        if (prevDaily && !lastDailyDate(root)) writeStateKey(root, "last_daily", prevDaily);
+        log(`${title} ${r.ok ? "완료" : "실패"}: ${r.output.split("\n").slice(-3).join(" / ")}`);
         const skipped = this.rail.filter((s) => s.state === "quota").map((s) => s.title);
-        run = { lastRun: new Date().toISOString(), agent: current.id, ok: r.ok, report: r.output.slice(-4000), rail: this.rail.map((s) => ({ ...s })), ...(proposalId ? { proposalId } : {}) };
-        this.opts.notify?.(
-          proposalId ? "정리 제안이 준비됐습니다" : r.ok ? "정리 완료" : "정리 실패",
-          skipped.length ? `${skipped.join(", ")} 할당량 → ${current.title}. ${proposalId ? "앱에서 검토하세요." : ""}`.trim() : proposalId ? "앱의 로그 탭이나 설정 → 정리에서 검토하고 적용하세요." : r.output.split("\n").find((l) => l.trim()) ?? "",
-        );
-        break;
+        run = { lastRun: new Date().toISOString(), agent: current.id, ok: r.ok, report: r.output.slice(-4000), rail: this.rail.map((s) => ({ ...s })), scope, days, changed: true, ...(proposalId ? { proposalId } : {}) };
+        // the daily run is quiet unless it needs the user: a proposal to review, or a failure
+        if (scope === "weekly" || proposalId || !r.ok) {
+          this.opts.notify?.(
+            proposalId ? "정리 제안이 준비됐습니다" : r.ok ? "정리 완료" : "정리 실패",
+            skipped.length ? `${skipped.join(", ")} 할당량 → ${current.title}. ${proposalId ? "앱에서 검토하세요." : ""}`.trim() : proposalId ? "프로젝트 갱신을 메모리 탭에서 검토하고 적용하세요." : r.output.split("\n").find((l) => l.trim()) ?? "",
+          );
+        }
       }
-      const finished = run ?? { lastRun: new Date().toISOString(), agent: list[0].id, ok: false, report: "넘길 서비스가 없습니다.", rail: this.rail };
+      const finished = run ?? { lastRun: new Date().toISOString(), agent: list[0].id, ok: false, report: "넘길 서비스가 없습니다.", rail: this.rail, scope, days };
       const state = loadState() as Record<string, unknown>;
       state.digest = finished;
       saveState(state as never);

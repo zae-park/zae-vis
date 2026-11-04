@@ -1883,7 +1883,8 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsDigestStarted => 'Digest started. It takes a few minutes.';
+  String get settingsDigestStarted =>
+      'Digest started. It collects what is new first, then writes log lines (a few minutes).';
 
   @override
   String get settingsAgentAuto => 'Auto (next service on quota)';
@@ -1907,18 +1908,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsRun => 'Run';
 
   @override
-  String get settingsReviewFirst => 'Review before applying';
+  String get settingsReviewFirst => 'Review project updates before applying';
 
   @override
   String get settingsReviewOn =>
-      'Keeps digest results as a proposal instead of writing them. Pick lines to apply in the Log tab or below.';
+      'Log lines go in right away; project pages and monthly summaries wait as a proposal you review.';
 
   @override
   String get settingsReviewOff =>
-      'When off, what the agent writes goes straight into the worklog.';
+      'When off, project pages and monthly summaries also go straight into the worklog.';
 
   @override
-  String get settingsWeekly => 'Automatic digest every Monday';
+  String get settingsWeekly => 'Weekly digest every Monday (project updates)';
 
   @override
   String settingsWeeklyNext(String next) {
@@ -1929,7 +1930,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsNextMonday => 'next Monday';
 
   @override
-  String get settingsWeeklyOff => 'When off, runs only from the button below';
+  String get settingsWeeklyOff =>
+      'When off, project updates run only from the Weekly digest button below';
 
   @override
   String settingsDigestRunning(String agent) {
@@ -1945,7 +1947,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settingsDigestBy(String agent) {
-    return '$agent will write the digest. It takes a few minutes.';
+    return 'Collects what is new and turns it into log lines · $agent';
   }
 
   @override
@@ -2865,7 +2867,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get knNextRunning =>
-      'Digesting now. A proposal to review will follow.';
+      'Digesting now. Log lines go in right away; project updates, if any, wait for review.';
 
   @override
   String knNextReview(int days, int lines, int projects) {
@@ -2891,7 +2893,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String knNextDigest(int days, int files) {
-    return '$days days of sources and $files transcripts/sessions arrived since the last digest. A digest turns them into log lines and project status.';
+    return '$days days of sources and $files transcripts/sessions arrived since the last digest. A digest turns them into log lines.';
   }
 
   @override
@@ -2922,7 +2924,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get knActionReports => 'Report settings';
 
   @override
-  String get knDigestStarted => 'Digest started. It takes a few minutes.';
+  String get knDigestStarted =>
+      'Digest started. It collects what is new first, then writes log lines (a few minutes).';
 
   @override
   String get knShowSteps => 'Show steps';
@@ -2957,7 +2960,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String onbFirstDigestBody(String agent) {
-    return '$agent reads what was just collected and proposes log lines and project status. It takes a few minutes; the memory tab shows its progress, and you review the proposal when it is done.';
+    return '$agent reads what was just collected and writes log lines. It takes a few minutes; open the app to see progress at the top of the Memory tab. From now on this runs after every daily collection.';
   }
 
   @override
@@ -2965,7 +2968,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get onbFirstDigestStarted =>
-      'The first digest has started. The memory tab shows its progress, and a proposal to review appears when it is done.';
+      'First digest started. Progress shows at the top of the Memory tab, and the log lines go in when it finishes.';
 
   @override
   String get onbFirstDigestNoAgent =>
@@ -2985,4 +2988,26 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get askSourceRaw => 'Raw source';
+
+  @override
+  String get settingsDailyOn =>
+      'After each daily collection, that day\'s records become log lines, without review.';
+
+  @override
+  String get settingsDailyOff =>
+      'When off, log lines come only from the Monday digest and Digest now.';
+
+  @override
+  String get settingsWeeklyNow => 'Weekly digest';
+
+  @override
+  String get settingsWeeklyStarted =>
+      'Weekly digest started. Project updates will wait for your review.';
+
+  @override
+  String get knNextAllSetDaily =>
+      'Everything is digested. Each day\'s records become log lines after collection.';
+
+  @override
+  String get settingsDailyDigest => 'Daily digest';
 }
