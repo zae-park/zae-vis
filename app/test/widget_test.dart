@@ -10,8 +10,10 @@ import 'package:http/testing.dart';
 import 'package:zaevis/api.dart';
 import 'package:zaevis/backend/backend.dart';
 import 'package:zaevis/download.dart';
+import 'package:zaevis/l10n/app_localizations.dart';
 import 'package:zaevis/main.dart';
 import 'package:zaevis/recording/recorder.dart';
+import 'package:zaevis/screens/launch_screen.dart';
 import 'package:zaevis/screens/onboarding_screen.dart';
 import 'package:zaevis/screens/ask_view.dart' show isKnowledgePath;
 import 'package:zaevis/screens/file_screen.dart';
@@ -437,6 +439,22 @@ WorklogApi _fakeApi() => WorklogApi(
           case '/api/datasources/obsidian/sync':
             posted.add(req);
             return _json({'syncing': true}, 202);
+          case '/api/launch' when req.method == 'POST':
+            posted.add(req);
+            return _json({'running': true}, 202);
+          case '/api/launch':
+            return _json({
+              'running': false,
+              'launch': {
+                'startedAt': '2026-11-04T00:00:00.000Z',
+                'finishedAt': '2026-11-04T00:00:05.000Z',
+                'steps': [
+                  {'name': 'collect', 'state': 'done'},
+                  {'name': 'index', 'state': 'done'},
+                  {'name': 'digest', 'state': 'skipped', 'note': '3분 전에 정리했습니다.'},
+                ],
+              },
+            });
           default:
             return _json({'error': 'not_found'}, 404);
         }
@@ -1782,6 +1800,146 @@ void main() {
     expect(rebuild.length, 1);
     expect(jsonDecode(rebuild.single.body), {'force': true});
     expect(find.textContaining('Kiwi 설치됨 — 처음부터 다시 색인하면'), findsOneWidget, reason: 'the tile reloads with the server\'s new status');
+  });
+
+  testWidgets('launch splash: collect → index → digest with times; opens by itself when done, or at once on "바로 열기" with the progress flown to a pill at the top', (tester) async {
+    var gets = 0;
+    final now = DateTime.now().toUtc();
+    String at(int s) => now.subtract(Duration(seconds: s)).toIso8601String();
+    final api = WorklogApi(
+      baseUrl: 'http://127.0.0.1:4710',
+      client: MockClient((req) async {
+        if (req.url.path != '/api/launch') return _json({'error': 'not_found'}, 404);
+        if (req.method == 'POST') return _json({'running': true}, 202);
+        gets++;
+        final done = gets >= 3;
+        return _json({
+          'running': !done,
+          'launch': {
+            'startedAt': at(40),
+            if (done) 'finishedAt': at(0),
+            'steps': [
+              {'name': 'collect', 'state': 'done', 'note': '2일 치 새 기록', 'startedAt': at(40), 'finishedAt': at(33)},
+              {'name': 'index', 'state': 'done', 'startedAt': at(33), 'finishedAt': at(21)},
+              {'name': 'digest', 'state': done ? 'done' : 'running', 'startedAt': at(21), if (done) 'finishedAt': at(0), if (done) 'note': '로그 12줄 적용'},
+            ],
+          },
+        });
+      }),
+    );
+    Future<void> show() => tester.pumpWidget(MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: const Locale('ko'),
+          home: LaunchGate(
+            api: api,
+            poll: const Duration(milliseconds: 100),
+            linger: const Duration(seconds: 1),
+            child: const Scaffold(body: Center(child: Text('홈 화면'))),
+          ),
+        ));
+    await show();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('기록 수집'), findsOneWidget);
+    expect(find.text('2일 치 새 기록'), findsOneWidget);
+    expect(find.text('7초'), findsOneWidget, reason: 'how long the collect took');
+    expect(find.text('12초'), findsOneWidget);
+    expect(find.textContaining('보통 2~3분'), findsOneWidget, reason: 'the digest is running: its usual length');
+    expect(find.text('바로 열어도 정리는 뒤에서 계속됩니다.'), findsOneWidget);
+    expect(find.text('홈 화면'), findsNothing, reason: 'the home waits behind the splash');
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
+    expect(find.text('홈 화면'), findsOneWidget, reason: 'the app opens by itself once the launch run is over');
+    expect(find.text('기록 수집'), findsNothing);
+
+    // "바로 열기": the home now, the progress as a pill at the top that keeps polling and then fades out
+    gets = -100;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await show();
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('launch-open-now')));
+    await tester.pump(const Duration(milliseconds: 600)); // the flight; the spinner never settles
+    expect(find.text('홈 화면'), findsOneWidget);
+    expect(find.byKey(const ValueKey('launch-pill')), findsOneWidget);
+    expect(find.textContaining('지식화 (하루 정리) 중 · '), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.getTopLeft(find.byKey(const ValueKey('launch-pill'))).dy, lessThan(40), reason: 'flown to the top');
+    await tester.tap(find.byKey(const ValueKey('launch-pill')));
+    await tester.pump(const Duration(milliseconds: 600)); // the flight; the spinner never settles
+    expect(find.text('기록 수집'), findsOneWidget, reason: 'the pill opens into the steps');
+    await tester.tap(find.byKey(const ValueKey('launch-collapse')));
+    await tester.pump(const Duration(milliseconds: 600)); // the flight; the spinner never settles
+    gets = 10; // the server says it is over
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+    expect(find.text('정리 끝 · 로그 12줄 적용'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('launch-pill')), findsNothing, reason: 'gone a moment after the run');
+    expect(find.text('홈 화면'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a digest started from the app (button, chat) shows the same pill at the top until it ends', (tester) async {
+    var running = false;
+    final started = DateTime.now().toUtc().subtract(const Duration(seconds: 75)).toIso8601String();
+    final api = WorklogApi(
+      baseUrl: 'http://127.0.0.1:4710',
+      client: MockClient((req) async {
+        switch (req.url.path) {
+          case '/api/digest/run':
+            return _json({'started': true, 'scope': 'daily'}, 202);
+          case '/api/digest':
+            return _json({
+              'running': running,
+              if (running) 'startedAt': started,
+              if (running) 'scope': 'daily',
+              'setting': {'agent': 'auto'},
+              'last': {'lastRun': '2026-11-04T10:00:00Z', 'agent': 'claude', 'ok': true, 'report': '로그 5줄 적용\n\n자세히'},
+            });
+          default:
+            return _json({'error': 'not_found'}, 404);
+        }
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('ko'),
+      home: LaunchGate(api: api, enabled: false, poll: const Duration(milliseconds: 100), linger: const Duration(seconds: 1), child: const Scaffold(body: Text('홈 화면'))),
+    ));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const ValueKey('digest-pill')), findsNothing, reason: 'nothing running when the home opens');
+    running = true;
+    await api.runDigest(); // what "지금 정리하기" calls
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('지식화 (하루 정리) 중 · 1분 1'), findsOneWidget);
+    running = false;
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('정리 끝 · 로그 5줄 적용'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const ValueKey('digest-pill')), findsNothing, reason: 'gone a moment after it ends');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('the installed app runs the launch once after the server is up, then opens the home shell', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    posted.clear();
+    await tester.pumpWidget(ZaevisApp(desktopIntegration: false, api: _fakeApi(), backend: _FakeBackend()));
+    await tester.pumpAndSettle();
+    expect(posted.where((r) => r.url.path == '/api/launch').length, 1);
+    expect(find.byKey(const ValueKey('launch-scrim')), findsNothing, reason: 'done → the home shell alone');
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('onboarding installs Kiwi before the first collect when the box is ticked', (tester) async {

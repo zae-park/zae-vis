@@ -16,7 +16,7 @@ import { join, posix } from "node:path";
 import { generateWithFallback, type GenerateOpts } from "./ask.ts";
 import { fallbackCandidates, plannedRail, type RailStop } from "./rail.ts";
 import { loadState, saveState, stateDir, type AppConfig } from "./config.ts";
-import { DEFAULT_OPENROUTER_MODEL, type AgentId, type AgentInfo } from "./digest.ts";
+import { DEFAULT_OPENROUTER_MODEL, lastDigestOk, type AgentId, type AgentInfo } from "./digest.ts";
 import { parseFrontMatter, parseLog } from "./worklog.ts";
 
 export type ReportKind = "daily" | "weekly" | "monthly";
@@ -47,7 +47,8 @@ export const DEFAULT_REPORTS: ReportsSetting = {
   monthly: { enabled: true, day: 1 },
 };
 
-export type ReportRun = { kind: ReportKind; period: string; at: string; ok: boolean; agent: AgentId; ms: number; path?: string; error?: string; rail?: RailStop[] };
+/** `empty`: the period had no records; the report says so (and what it looked at) without an agent. */
+export type ReportRun = { kind: ReportKind; period: string; at: string; ok: boolean; agent: AgentId; ms: number; path?: string; error?: string; rail?: RailStop[]; empty?: boolean };
 export type ReportsState = { lastRun: Partial<Record<ReportKind, ReportRun>> };
 export type ReportEntry = { kind: ReportKind; period: string; path: string; createdAt: string; agent: string | null };
 export type Report = ReportEntry & { range: { from: string; to: string; label: string }; markdown: string };
@@ -164,6 +165,19 @@ export function defaultPeriod(kind: ReportKind, now = new Date()): string {
   }
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1, 12);
   return `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}`;
+}
+
+/**
+ * Should a report collect before it reads? Yes when the last full collect (`state.daily.lastRun`) came
+ * before the period's last day was over — today's report in the morning, or yesterday's after 18:30.
+ */
+export function collectBefore(to: string, lastCollect: string | undefined | null): boolean {
+  if (!lastCollect) return true;
+  const last = new Date(lastCollect);
+  if (Number.isNaN(last.getTime())) return true;
+  const end = addDays(parseYmd(to), 1);
+  end.setHours(0, 0, 0, 0); // local midnight after the period
+  return last < end;
 }
 
 /** First and last day (inclusive) a period covers, and how the title names it. */
@@ -336,6 +350,36 @@ ${inputs.text}`;
 
 // ── files ──────────────────────────────────────────────────────────────────────
 
+const hhmm = (d: Date | null): string =>
+  d ? `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : "없음";
+
+/**
+ * The lines under a report's title: which records it read (the period, digested log lines, collected
+ * source files, transcripts and session notes, lower reports) and how fresh they were (the last
+ * collect, the last digest). Written by zaevis, not the agent, so it is always there and always true.
+ */
+export function scopeNote(
+  label: string,
+  inputs: Pick<ReportInputs, "files" | "logLines">,
+  at: { collected: Date | null; digested: Date | null },
+): string {
+  const sources = inputs.files.filter((f) => f.startsWith("sources/")).length;
+  const notes = inputs.files.filter((f) => /^(inbox|processed)\//.test(f)).length;
+  const lower = inputs.files.filter((f) => /^(reports|summaries)\//.test(f)).length;
+  const parts = [`정리된 로그 ${inputs.logLines}줄`, `수집 원본 ${sources}개 파일`];
+  if (notes) parts.push(`전사본·세션 노트 ${notes}개`);
+  if (lower) parts.push(`하위 리포트 ${lower}개`);
+  return `> 참조한 기록: ${label} · ${parts.join(" · ")}\n> 마지막 수집 ${hhmm(at.collected)} · 마지막 정리 ${hhmm(at.digested)}`;
+}
+
+/** The newest collect any source finished (state.json `sources.*.lastRun`). */
+function lastCollected(): Date | null {
+  const times = Object.values(loadState().sources ?? {})
+    .map((s) => (s.lastRun ? new Date(s.lastRun).getTime() : NaN))
+    .filter((t) => !Number.isNaN(t));
+  return times.length ? new Date(Math.max(...times)) : null;
+}
+
 function frontMatter(meta: Record<string, string | number>): string {
   return `---\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join("\n")}\n---\n`;
 }
@@ -408,7 +452,7 @@ export class ReportRunner {
    * Writes the report for `period` (overwriting an older one), records the outcome in state.json
    * and notifies. While a run is in progress the same promise is returned to a second caller.
    */
-  run(cfg: Pick<AppConfig, "worklogDir" | "digest">, agent: AgentInfo, kind: ReportKind, period: string, chain?: AgentInfo[]): Promise<ReportRun> {
+  run(cfg: Pick<AppConfig, "worklogDir" | "digest">, agent: AgentInfo, kind: ReportKind, period: string, chain?: AgentInfo[], how: { prepare?: () => Promise<void> } = {}): Promise<ReportRun> {
     if (this.running) return this.running.promise;
     if (!isValidPeriod(kind, period)) return Promise.reject(new Error(`기간 형식이 올바르지 않습니다: ${period}`));
     const startedAt = new Date().toISOString();
@@ -424,8 +468,33 @@ export class ReportRunner {
       let run: ReportRun;
       try {
         const range = periodRange(kind, period);
+        // "지금 만들기" for a period the last collect did not reach (today, or yesterday after 18:30): collect first
+        if (how.prepare) {
+          log(`${title}: 먼저 수집`);
+          try {
+            await how.prepare();
+          } catch (err) {
+            log(`${title}: 수집 실패 — 있는 기록으로 만듭니다 (${(err as Error).message})`);
+          }
+        }
         const inputs = await gatherReportInputs(cfg.worklogDir, kind, range);
-        if (!inputs.files.length) throw new Error(`${range.label} 에 해당하는 기록이 없습니다.`);
+        const scope = scopeNote(range.label, inputs, { collected: lastCollected(), digested: lastDigestOk() });
+        const path = reportPath(kind, period);
+        const file = join(cfg.worklogDir, path);
+        await mkdir(join(file, ".."), { recursive: true });
+        if (!inputs.files.length) {
+          // nothing in the period yet: not an error — say what was looked at and that there was nothing new
+          const createdAt = new Date().toISOString();
+          const body = `# ${reportTitle(kind, period)}\n\n${scope}\n\n이 기간에는 새 기록이 없습니다. 정리된 로그도, 수집된 원본(git·세션·셸·전사본)도 없었습니다. 기록이 생기면 다시 만들 수 있습니다.`;
+          await writeFile(file, frontMatter({ kind, period, range: `${range.from}..${range.to}`, createdAt, agent: "none", inputs: 0 }) + body + "\n");
+          run = { kind, period, at: createdAt, ok: true, agent: agent.id, ms: Date.now() - started, path, empty: true };
+          log(`${title}: 새 기록 없음 → ${path}`);
+          this.opts.notify?.(`${KIND_LABEL[kind]} 리포트`, `${range.label} — 새 기록이 없습니다.`);
+          const state = loadState();
+          state.reports = { lastRun: { ...(state.reports?.lastRun ?? {}), [kind]: run } };
+          saveState(state);
+          return run;
+        }
         const candidates = chain && cfg.digest.agent === "auto" ? fallbackCandidates(cfg.digest, chain) : [];
         const list = candidates.length ? candidates : [agent];
         this.rail = chain ? plannedRail(cfg.digest, chain) : plannedRail({ agent: agent.id }, [agent]);
@@ -443,10 +512,10 @@ export class ReportRunner {
         });
         let body = produced.text.replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/, "$1").trim(); // a fenced answer
         if (!body.startsWith("#")) body = `# ${reportTitle(kind, period)}\n\n${body}`;
-        const path = reportPath(kind, period);
+        // the scope goes right under the title
+        const nl = body.indexOf("\n");
+        body = nl < 0 ? `${body}\n\n${scope}` : `${body.slice(0, nl)}\n\n${scope}\n${body.slice(nl).replace(/^\n*/, "\n")}`;
         const createdAt = new Date().toISOString();
-        const file = join(cfg.worklogDir, path);
-        await mkdir(join(file, ".."), { recursive: true });
         await writeFile(file, frontMatter({ kind, period, range: `${range.from}..${range.to}`, createdAt, agent: produced.agent.id, inputs: inputs.files.length }) + body + "\n");
         run = { kind, period, at: createdAt, ok: true, agent: produced.agent.id, ms: Date.now() - started, path, rail: produced.rail };
         log(`${title} 완료 (${run.ms}ms, ${produced.agent.title}) → ${path}`);

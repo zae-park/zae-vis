@@ -17,6 +17,15 @@ import { freePath, safeStem, type Worklog } from "./worklog.ts";
 
 export type CollectReportLike = Array<{ name: string; ok: boolean; days: string[]; note?: string; error?: string }>;
 
+/** How a digest starts from the API: `launch` (opening the app) may skip it; `touched` = days the launch just collected. */
+export type DigestStart = { launch?: boolean; touched?: string[] };
+/** `done` settles when the run (and the index refresh after it) is over; it never goes out over HTTP. */
+export type DigestStarted = { started: boolean; reason?: string; scope?: "daily" | "weekly"; done?: Promise<{ ok: boolean; report: string; changed?: boolean }> };
+
+/** Opening the app: collect → index → daily digest, once, each step reported (GET/POST /api/launch). */
+export type LaunchStep = { name: "collect" | "index" | "digest"; state: "pending" | "running" | "done" | "skipped" | "failed"; note?: string; startedAt?: string; finishedAt?: string };
+export type LaunchRun = { startedAt: string; finishedAt?: string; steps: LaunchStep[] };
+
 export type AppOptions = {
   worklog: Worklog;
   search: SearchBackend;
@@ -43,7 +52,7 @@ export type AppOptions = {
     status(): Promise<Record<string, unknown>>;
     update(patch: { agent?: string; model?: string; weekly?: boolean; daily?: boolean; review?: boolean; order?: string[]; skip?: string[] }): Promise<Record<string, unknown>>;
     /** Starts a run in the background (`daily`: collect, then the days since the last digest → log lines; `weekly`: the project look back). `started: false` with a reason when nothing can run. */
-    run(scope?: "daily" | "weekly"): Promise<{ started: boolean; reason?: string }>;
+    run(scope?: "daily" | "weekly", how?: DigestStart): Promise<DigestStarted>;
     /** Review flow: proposals a run left for the user to approve. */
     proposals(): Promise<unknown[]>;
     proposal(id: string): Promise<unknown | null>;
@@ -229,6 +238,115 @@ export function createApp(opts: AppOptions): Server {
       })
       .finally(() => {
         refreshing = null;
+      });
+  }
+
+
+  /** A collect (+ index) in the background; joins the one in progress. Settles when both are over. */
+  function startCollect(only: string[] | undefined, withIndex: boolean, onCollected?: () => void): Promise<unknown> {
+    if (collecting) return collecting;
+    if (!opts.sources) return Promise.resolve();
+    const srcs = opts.sources;
+    const full = !only || only.length === 0;
+    collecting = (async () => {
+      let report: CollectReportLike | null = null;
+      try {
+        report = await srcs.collect(only, { onProgress: (p) => (progress = p) });
+        lastCollect = { finishedAt: new Date().toISOString(), report };
+        onCollected?.();
+      } catch (err) {
+        lastCollect = { finishedAt: new Date().toISOString(), report: [], error: String((err as Error)?.message ?? err) };
+      }
+      let index = "건너뜀";
+      if (withIndex && report) {
+        const now = new Date().toISOString();
+        const steps = (progress?.steps ?? []).map((s) => (s.state === "running" ? { ...s, state: "done" as const } : s));
+        progress = {
+          startedAt: progress?.startedAt ?? now,
+          beat: now,
+          outputAt: now,
+          current: { name: "index", title: "검색 색인", line: "모은 기록을 검색에 넣는 중", fraction: null },
+          steps: [...steps, { name: "index", title: "검색 색인", state: "running", line: "모은 기록을 검색에 넣는 중", since: now }],
+        };
+        startRefresh(false);
+        const beat = setInterval(() => {
+          if (!progress) return;
+          const t = new Date().toISOString();
+          progress = { ...progress, beat: t, outputAt: t };
+        }, 5000);
+        try {
+          await refreshing;
+        } finally {
+          clearInterval(beat);
+        }
+        index = lastRefresh?.ok ? "완료" : `실패: ${lastRefresh?.error ?? "?"}`;
+      }
+      if (full && report) srcs.recordDaily?.({ ok: report.every((r) => r.ok), index });
+    })().finally(() => {
+      collecting = null;
+      progress = null;
+    });
+    return collecting;
+  }
+
+  // ── opening the app: collect → index → daily digest, once (GET/POST /api/launch) ──
+  let launch: LaunchRun | null = null;
+  let launching: Promise<void> | null = null;
+
+  function step(name: LaunchStep["name"], patch: Partial<LaunchStep>): void {
+    if (!launch) return;
+    const now = new Date().toISOString();
+    launch.steps = launch.steps.map((s) =>
+      s.name !== name ? s : { ...s, ...patch, ...(patch.state === "running" ? { startedAt: now } : patch.state && patch.state !== "pending" ? { finishedAt: now } : {}) },
+    );
+  }
+
+  function startLaunch(): void {
+    if (launching) return;
+    launch = {
+      startedAt: new Date().toISOString(),
+      steps: (["collect", "index", "digest"] as const).map((name) => ({ name, state: "pending" as const })),
+    };
+    launching = (async () => {
+      let touched: string[] = [];
+      if (opts.sources) {
+        step("collect", { state: "running" });
+        const before = lastCollect;
+        // the collect (and the index right after it) of POST /collect, joined if one is running
+        await startCollect(undefined, true, () => {
+          step("collect", { state: "done" });
+          step("index", { state: "running" });
+        });
+        const c = lastCollect !== before ? lastCollect : null;
+        const report = c?.report ?? [];
+        touched = [...new Set(report.flatMap((r) => r.days ?? []))].sort();
+        const failed = report.filter((r) => !r.ok).length;
+        step(
+          "collect",
+          c?.error
+            ? { state: "failed", note: c.error }
+            : { state: "done", note: `${touched.length ? `${touched.length}일 치 새 기록` : "새 기록 없음"}${failed ? ` · 실패 ${failed}개` : ""}` },
+        );
+        step("index", c && !c.error ? (lastRefresh?.ok ? { state: "done" } : { state: "failed", note: lastRefresh?.error ?? "" }) : { state: "skipped" });
+      } else {
+        step("collect", { state: "skipped" });
+        step("index", { state: "skipped" });
+      }
+      if (!opts.digest) return step("digest", { state: "skipped" });
+      step("digest", { state: "running" });
+      try {
+        const r = await opts.digest.run("daily", { launch: true, touched });
+        if (!r.started || !r.done) return step("digest", { state: "skipped", note: r.reason });
+        const d = await r.done;
+        step("digest", { state: d.ok ? "done" : "failed", note: d.report.split("\n").find((l) => l.trim()) ?? "" });
+      } catch (err) {
+        step("digest", { state: "failed", note: String((err as Error)?.message ?? err) });
+      }
+    })()
+      .catch(() => {})
+      .finally(() => {
+        if (launch) launch.finishedAt = new Date().toISOString();
+        launching = null;
       });
   }
 
@@ -646,6 +764,14 @@ export function createApp(opts: AppOptions): Server {
           return send(res, 202, { syncing: true });
         }
 
+        case "GET /launch":
+          return send(res, 200, { running: launching !== null, launch });
+
+        case "POST /launch":
+          // POST /api/launch: the app's splash on a cold start; joins a launch in progress
+          startLaunch();
+          return send(res, 202, { running: true, launch });
+
         case "GET /collect":
           return send(res, 200, { collecting: collecting !== null, progress, lastCollect });
 
@@ -669,47 +795,7 @@ export function createApp(opts: AppOptions): Server {
           const b = await readJson(req);
           const only = Array.isArray(b.sources) ? b.sources.filter((x): x is string => typeof x === "string") : undefined;
           const withIndex = b.index !== false;
-          if (!collecting) {
-            const srcs = opts.sources;
-            const full = !only || only.length === 0;
-            collecting = (async () => {
-              let report: CollectReportLike | null = null;
-              try {
-                report = await srcs.collect(only, { onProgress: (p) => (progress = p) });
-                lastCollect = { finishedAt: new Date().toISOString(), report };
-              } catch (err) {
-                lastCollect = { finishedAt: new Date().toISOString(), report: [], error: String((err as Error)?.message ?? err) };
-              }
-              let index = "건너뜀";
-              if (withIndex && report) {
-                const now = new Date().toISOString();
-                const steps = (progress?.steps ?? []).map((s) => (s.state === "running" ? { ...s, state: "done" as const } : s));
-                progress = {
-                  startedAt: progress?.startedAt ?? now,
-                  beat: now,
-                  outputAt: now,
-                  current: { name: "index", title: "검색 색인", line: "모은 기록을 검색에 넣는 중", fraction: null },
-                  steps: [...steps, { name: "index", title: "검색 색인", state: "running", line: "모은 기록을 검색에 넣는 중", since: now }],
-                };
-                startRefresh(false);
-                const beat = setInterval(() => {
-                  if (!progress) return;
-                  const t = new Date().toISOString();
-                  progress = { ...progress, beat: t, outputAt: t };
-                }, 5000);
-                try {
-                  await refreshing;
-                } finally {
-                  clearInterval(beat);
-                }
-                index = lastRefresh?.ok ? "완료" : `실패: ${lastRefresh?.error ?? "?"}`;
-              }
-              if (full && report) srcs.recordDaily?.({ ok: report.every((r) => r.ok), index });
-            })().finally(() => {
-              collecting = null;
-              progress = null;
-            });
-          }
+          void startCollect(only, withIndex);
           return send(res, 202, { collecting: true });
         }
 
@@ -778,7 +864,7 @@ export function createApp(opts: AppOptions): Server {
           if (arg === "run") {
             // POST /api/digest/run { scope?: "daily" (default) | "weekly" }
             const b = await readJson(req);
-            const r = await opts.digest.run(b.scope === "weekly" ? "weekly" : "daily");
+            const { done: _done, ...r } = await opts.digest.run(b.scope === "weekly" ? "weekly" : "daily");
             return send(res, r.started ? 202 : 409, r);
           }
           if (arg === "proposals" && parts[3]) {

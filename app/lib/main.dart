@@ -7,6 +7,7 @@ import 'backend/backend.dart';
 import 'l10n/l10n.dart';
 import 'screens/collect_screen.dart';
 import 'screens/index_sheet.dart';
+import 'screens/launch_screen.dart';
 import 'screens/memory_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/projects_screen.dart' show openProject;
@@ -71,14 +72,15 @@ class _ZaevisAppState extends State<ZaevisApp> {
           );
         },
         home: widget.backend == null
-            ? HomeShell(api: widget.api, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs)
+            ? LaunchGate(api: widget.api, enabled: false, child: HomeShell(api: widget.api, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs))
             : _BootGate(api: widget.api, backend: widget.backend!, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: _prefs),
       ),
     );
   }
 }
 
-/// Packaged app: first-run wizard, then make sure the bundled server is up.
+/// Packaged app: first-run wizard, then make sure the bundled server is up, then (once per start of the
+/// app) the launch splash that collects, indexes and digests before the home shell opens.
 class _BootGate extends StatefulWidget {
   const _BootGate({required this.api, required this.backend, required this.prefs, this.recorder, this.desktopIntegration = true});
   final WorklogApi api;
@@ -95,14 +97,27 @@ class _BootGateState extends State<_BootGate> {
   late bool _configured = widget.backend.isConfigured;
   Future<void>? _starting;
 
+  /// No launch run this time: the wizard has just collected and offers the first digest.
+  bool _skipLaunch = false;
+
   Future<void> _start() => _starting ??= widget.backend.ensureServer();
 
   @override
   Widget build(BuildContext context) {
     final b = widget.backend;
-    if (!b.managed) return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs);
+    // the web / a dev run: no launch run (the server is managed elsewhere), but the digest pill still shows
+    if (!b.managed) {
+      return LaunchGate(
+        api: widget.api,
+        enabled: false,
+        child: HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs),
+      );
+    }
     if (!_configured) {
-      return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() => _configured = true));
+      return OnboardingScreen(backend: b, api: widget.api, onDone: () => setState(() {
+            _configured = true;
+            _skipLaunch = true;
+          }));
     }
     return FutureBuilder<void>(
       future: _start(),
@@ -132,7 +147,11 @@ class _BootGateState extends State<_BootGate> {
             ),
           );
         }
-        return HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs);
+        return LaunchGate(
+          api: widget.api,
+          enabled: !_skipLaunch,
+          child: HomeShell(api: widget.api, backend: b, recorder: widget.recorder, desktopIntegration: widget.desktopIntegration, prefs: widget.prefs),
+        );
       },
     );
   }

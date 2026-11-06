@@ -211,6 +211,8 @@ export type CollectState = {
   embedding?: { model: string; builtAt: string };
   /** Last weekly digest run. */
   digest?: { lastRun: string; agent: string; ok: boolean; report: string };
+  /** When a digest last finished well (any scope, "nothing new" included): the schedule's "due" clock. */
+  digestOkAt?: string;
   /** Last daily / weekly / monthly report run per kind, see reports.ts. */
   reports?: ReportsState;
   /** Kiwi arrived after the index was built: a rebuild from scratch is still owed (see kiwi.ts). */

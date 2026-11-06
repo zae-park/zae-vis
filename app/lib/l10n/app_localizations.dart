@@ -4880,6 +4880,120 @@ abstract class AppLocalizations {
   /// In ko, this message translates to:
   /// **'매일 정리'**
   String get settingsDailyDigest;
+
+  /// No description provided for @launchTitle.
+  ///
+  /// In ko, this message translates to:
+  /// **'오늘 기록을 모으고 정리하는 중입니다'**
+  String get launchTitle;
+
+  /// No description provided for @launchCollect.
+  ///
+  /// In ko, this message translates to:
+  /// **'기록 수집'**
+  String get launchCollect;
+
+  /// No description provided for @launchCollectTypical.
+  ///
+  /// In ko, this message translates to:
+  /// **'git·에이전트 세션·셸·전사본 · 보통 10초 안쪽'**
+  String get launchCollectTypical;
+
+  /// No description provided for @launchIndex.
+  ///
+  /// In ko, this message translates to:
+  /// **'검색 색인'**
+  String get launchIndex;
+
+  /// No description provided for @launchIndexTypical.
+  ///
+  /// In ko, this message translates to:
+  /// **'새 기록만 넣습니다 · 보통 30초 안쪽'**
+  String get launchIndexTypical;
+
+  /// No description provided for @launchDigest.
+  ///
+  /// In ko, this message translates to:
+  /// **'지식화 (하루 정리)'**
+  String get launchDigest;
+
+  /// No description provided for @launchDigestTypical.
+  ///
+  /// In ko, this message translates to:
+  /// **'에이전트가 새 기록을 로그 줄로 · 보통 2~3분'**
+  String get launchDigestTypical;
+
+  /// No description provided for @launchSkipped.
+  ///
+  /// In ko, this message translates to:
+  /// **'건너뜀'**
+  String get launchSkipped;
+
+  /// No description provided for @launchSeconds.
+  ///
+  /// In ko, this message translates to:
+  /// **'{n}초'**
+  String launchSeconds(int n);
+
+  /// No description provided for @launchOpenNow.
+  ///
+  /// In ko, this message translates to:
+  /// **'바로 열기'**
+  String get launchOpenNow;
+
+  /// No description provided for @launchSkipNote.
+  ///
+  /// In ko, this message translates to:
+  /// **'끝나면 앱이 열립니다.'**
+  String get launchSkipNote;
+
+  /// No description provided for @launchSkipDigestNote.
+  ///
+  /// In ko, this message translates to:
+  /// **'바로 열어도 정리는 뒤에서 계속됩니다.'**
+  String get launchSkipDigestNote;
+
+  /// No description provided for @launchMinutes.
+  ///
+  /// In ko, this message translates to:
+  /// **'{m}분 {s}초'**
+  String launchMinutes(int m, int s);
+
+  /// No description provided for @launchPillRunning.
+  ///
+  /// In ko, this message translates to:
+  /// **'{step} 중'**
+  String launchPillRunning(String step);
+
+  /// No description provided for @launchPillDone.
+  ///
+  /// In ko, this message translates to:
+  /// **'준비 끝'**
+  String get launchPillDone;
+
+  /// No description provided for @launchPillDoneWith.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리 끝 · {note}'**
+  String launchPillDoneWith(String note);
+
+  /// No description provided for @launchCollapse.
+  ///
+  /// In ko, this message translates to:
+  /// **'접기'**
+  String get launchCollapse;
+
+  /// No description provided for @launchWeekly.
+  ///
+  /// In ko, this message translates to:
+  /// **'주간 정리'**
+  String get launchWeekly;
+
+  /// No description provided for @launchPillFailedWith.
+  ///
+  /// In ko, this message translates to:
+  /// **'정리 실패 · {note}'**
+  String launchPillFailedWith(String note);
 }
 
 class _AppLocalizationsDelegate

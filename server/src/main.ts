@@ -11,10 +11,10 @@ import { AskRunner } from "./ask.ts";
 import { jevJudge } from "./route.ts";
 import { VoiceTranscriber } from "./voice.ts";
 import { AutoRAGMcp } from "./autorag.ts";
-import { createApp } from "./app.ts";
+import { createApp, type DigestStart, type DigestStarted } from "./app.ts";
 import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
 import * as datasources from "./datasources.ts";
-import { DigestRunner, detectAgents, digestDays, lastDigestDate, noAgentReason, pickAgent, type DigestScope } from "./digest.ts";
+import { DigestRunner, LAUNCH_RECENT_MINUTES, detectAgents, digestDays, digestDue, lastDigestDate, lastDigestOk, noAgentReason, pickAgent, type DigestScope } from "./digest.ts";
 import { knowledgeStatus } from "./knowledge.ts";
 import { acceptMemoryPath, indexRoots, readIndexedFile, syncSearchPaths } from "./indexpaths.ts";
 import { agentsInOrder, normalizeAgentOrder, normalizeAgentSkip, plannedRail, DEFAULT_AGENT_ORDER } from "./rail.ts";
@@ -22,7 +22,7 @@ import { EmbeddingDaemon } from "./embedding.ts";
 import { hfStatus, logoutHf, recheckHfModels, startHfLogin } from "./hf.ts";
 import { notify } from "./notify.ts";
 import * as rerank from "./rerank.ts";
-import { KIND_LABEL, ReportRunner, defaultPeriod, isKind, isValidPeriod, mergeReportsSetting, readReport } from "./reports.ts";
+import { KIND_LABEL, ReportRunner, collectBefore, defaultPeriod, isKind, isValidPeriod, mergeReportsSetting, periodRange, readReport } from "./reports.ts";
 import * as review from "./review.ts";
 import { installSchedule, scheduleStatus } from "./schedule.ts";
 import { collect, listSources } from "./sources/index.ts";
@@ -62,19 +62,31 @@ const digest = new DigestRunner({ notify });
  * "지금 정리하기" (app, chat, CLI): a daily run collects first so today's work is in, then digests every day
  * since the last digest; a weekly run is the Monday one now. New log lines are put into search afterwards.
  */
-async function startDigest(scope: DigestScope): Promise<{ started: boolean; reason?: string; scope?: DigestScope }> {
+async function startDigest(scope: DigestScope, how: DigestStart = {}): Promise<DigestStarted> {
+  if (how.launch) {
+    // opening the app: digest once, unless it is switched off or one just finished (a restart, an update)
+    if (!cfg.digest.daily) return { started: false, reason: "매일 정리가 꺼져 있습니다." };
+    const last = lastDigestOk();
+    if (last && !digestDue(LAUNCH_RECENT_MINUTES / 60)) return { started: false, reason: `${Math.max(1, Math.round((Date.now() - last.getTime()) / 60_000))}분 전에 정리했습니다.` };
+  }
   const agents = agentsInOrder(cfg.digest, await detectAgents());
   const chosen = pickAgent(cfg.digest, agents);
   if (!chosen) return { started: false, reason: noAgentReason(agents) };
   if (digest.status(cfg.digest, cfg.worklogDir).running) return { started: false, reason: "이미 정리가 실행 중입니다." };
-  const prepare = async () => {
-    const report = await collect(cfg, { log: (m) => console.log(`[digest] ${m}`) });
-    return digestDays(cfg.worklogDir, report.flatMap((r) => r.days));
-  };
-  void digest.run(cfg, cfg.digest, chosen, agents, scope === "daily" ? { scope, prepare } : { scope }).then((r) => {
-    if (r.changed) void search.refresh(false).catch(() => {});
+  // the launch has just collected: its days; otherwise collect first so today's work is in
+  const touched = how.touched;
+  const prepare = touched
+    ? () => digestDays(cfg.worklogDir, touched)
+    : async () => {
+        const report = await collect(cfg, { log: (m) => console.log(`[digest] ${m}`) });
+        return digestDays(cfg.worklogDir, report.flatMap((r) => r.days));
+      };
+  const done = digest.run(cfg, cfg.digest, chosen, agents, scope === "daily" ? { scope, prepare } : { scope }).then(async (r) => {
+    if (r.changed) await search.refresh(false).catch(() => {});
+    return r;
   });
-  return { started: true, scope };
+  void done.catch(() => {}); // the HTTP and chat callers do not wait for it
+  return { started: true, scope, done };
 }
 const ask = new AskRunner({ log: (m) => console.log(`[ask] ${m}`) });
 const reports = new ReportRunner({ notify, log: (m) => console.log(`[report] ${m}`) });
@@ -216,8 +228,8 @@ const server = createApp({
       notify("정리 적용", `로그 ${applied.lines}줄 · 프로젝트 ${applied.projects.length}개가 worklog에 들어갔습니다.`);
       return { ok: true, status: p.status, applied };
     },
-    async run(scope = "daily") {
-      return startDigest(scope);
+    async run(scope = "daily", how) {
+      return startDigest(scope, how);
     },
   },
   ask: {
@@ -259,7 +271,14 @@ const server = createApp({
       if (!chosen) return { started: false, status: 409, error: "no_agent", reason: noAgentReason(agents) };
       const cur = reports.current;
       if (cur) return { started: false, status: 409, error: "busy", reason: `이미 ${KIND_LABEL[cur.kind]} 리포트 ${cur.period} 를 만드는 중입니다.` };
-      void reports.run(cfg, chosen, kind, p, agents);
+      // records after the last full collect are not in sources/ yet (the report reads those): collect first
+      const prepare = collectBefore(periodRange(kind, p).to, loadState().daily?.lastRun)
+        ? async () => {
+            await collect(cfg, { log: (m) => console.log(`[report] ${m}`) });
+            void search.refresh(false).catch(() => {});
+          }
+        : undefined;
+      void reports.run(cfg, chosen, kind, p, agents, { prepare });
       return { started: true, kind, period: p, agent: chosen.id };
     },
   },

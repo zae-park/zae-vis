@@ -2817,4 +2817,71 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsDailyDigest => '매일 정리';
+
+  @override
+  String get launchTitle => '오늘 기록을 모으고 정리하는 중입니다';
+
+  @override
+  String get launchCollect => '기록 수집';
+
+  @override
+  String get launchCollectTypical => 'git·에이전트 세션·셸·전사본 · 보통 10초 안쪽';
+
+  @override
+  String get launchIndex => '검색 색인';
+
+  @override
+  String get launchIndexTypical => '새 기록만 넣습니다 · 보통 30초 안쪽';
+
+  @override
+  String get launchDigest => '지식화 (하루 정리)';
+
+  @override
+  String get launchDigestTypical => '에이전트가 새 기록을 로그 줄로 · 보통 2~3분';
+
+  @override
+  String get launchSkipped => '건너뜀';
+
+  @override
+  String launchSeconds(int n) {
+    return '$n초';
+  }
+
+  @override
+  String get launchOpenNow => '바로 열기';
+
+  @override
+  String get launchSkipNote => '끝나면 앱이 열립니다.';
+
+  @override
+  String get launchSkipDigestNote => '바로 열어도 정리는 뒤에서 계속됩니다.';
+
+  @override
+  String launchMinutes(int m, int s) {
+    return '$m분 $s초';
+  }
+
+  @override
+  String launchPillRunning(String step) {
+    return '$step 중';
+  }
+
+  @override
+  String get launchPillDone => '준비 끝';
+
+  @override
+  String launchPillDoneWith(String note) {
+    return '정리 끝 · $note';
+  }
+
+  @override
+  String get launchCollapse => '접기';
+
+  @override
+  String get launchWeekly => '주간 정리';
+
+  @override
+  String launchPillFailedWith(String note) {
+    return '정리 실패 · $note';
+  }
 }

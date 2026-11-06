@@ -3010,4 +3010,74 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsDailyDigest => 'Daily digest';
+
+  @override
+  String get launchTitle => 'Gathering and organizing today\'s records';
+
+  @override
+  String get launchCollect => 'Collect records';
+
+  @override
+  String get launchCollectTypical =>
+      'git, agent sessions, shell, transcripts · usually under 10 s';
+
+  @override
+  String get launchIndex => 'Search index';
+
+  @override
+  String get launchIndexTypical => 'only new records · usually under 30 s';
+
+  @override
+  String get launchDigest => 'Knowledge (daily digest)';
+
+  @override
+  String get launchDigestTypical =>
+      'an agent turns new records into log lines · usually 2–3 min';
+
+  @override
+  String get launchSkipped => 'Skipped';
+
+  @override
+  String launchSeconds(int n) {
+    return '${n}s';
+  }
+
+  @override
+  String get launchOpenNow => 'Open now';
+
+  @override
+  String get launchSkipNote => 'The app opens when this is done.';
+
+  @override
+  String get launchSkipDigestNote =>
+      'If you open now, the digest keeps going in the background.';
+
+  @override
+  String launchMinutes(int m, int s) {
+    return '${m}m ${s}s';
+  }
+
+  @override
+  String launchPillRunning(String step) {
+    return '$step in progress';
+  }
+
+  @override
+  String get launchPillDone => 'All set';
+
+  @override
+  String launchPillDoneWith(String note) {
+    return 'Digest done · $note';
+  }
+
+  @override
+  String get launchCollapse => 'Collapse';
+
+  @override
+  String get launchWeekly => 'Weekly digest';
+
+  @override
+  String launchPillFailedWith(String note) {
+    return 'Digest failed · $note';
+  }
 }

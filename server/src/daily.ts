@@ -8,7 +8,7 @@ import { loadConfig, loadState, saveState } from "./config.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { indexRoots, syncSearchPaths } from "./indexpaths.ts";
 import { kiwiEnv } from "./kiwi.ts";
-import { DigestRunner, detectAgents, digestDays, pickAgent, weeklyDue } from "./digest.ts";
+import { DIGEST_DUE_HOURS, DigestRunner, detectAgents, digestDays, digestDue, lastDigestOk, pickAgent, weeklyDue } from "./digest.ts";
 import { EmbeddingDaemon } from "./embedding.ts";
 import { notify } from "./notify.ts";
 import { waitingDays } from "./knowledge.ts";
@@ -95,9 +95,15 @@ async function main(): Promise<void> {
     }
   }
 
-  // Every day: what was just collected becomes log lines (the daily digest). Mondays: the weekly look
-  // back that updates project pages. Both with whatever agent the user has (see digest.ts).
-  const runDaily = !only.length && cfg.digest.daily;
+  // Every day: what was just collected becomes log lines (the daily digest) — unless a digest already ran
+  // in the last day (opening the app runs one, see main.ts launch). Mondays: the weekly look back that
+  // updates project pages. Both with whatever agent the user has (see digest.ts).
+  const dailyDue = digestDue(DIGEST_DUE_HOURS);
+  if (!only.length && cfg.digest.daily && !dailyDue) {
+    const last = lastDigestOk();
+    console.log(`[${ts()}] 하루 정리 건너뜀: 마지막 정리가 ${last ? `${Math.round((Date.now() - last.getTime()) / 3_600_000)}시간 전` : "최근"}입니다 (${DIGEST_DUE_HOURS}시간이 지나야 다시 정리).`);
+  }
+  const runDaily = !only.length && cfg.digest.daily && dailyDue;
   const runWeekly = !only.length && weeklyDue(cfg.digest, cfg.worklogDir);
   if (runDaily || runWeekly) {
     const agents = await detectAgents();

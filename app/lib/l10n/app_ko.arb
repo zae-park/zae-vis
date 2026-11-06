@@ -2139,5 +2139,62 @@
   "settingsWeeklyNow": "주간 정리",
   "settingsWeeklyStarted": "주간 정리를 시작했습니다. 프로젝트 갱신은 검토할 제안으로 남습니다.",
   "knNextAllSetDaily": "모두 정리돼 있습니다. 매일 수집 뒤 그날 치가 로그로 정리됩니다.",
-  "settingsDailyDigest": "매일 정리"
+  "settingsDailyDigest": "매일 정리",
+  "launchTitle": "오늘 기록을 모으고 정리하는 중입니다",
+  "launchCollect": "기록 수집",
+  "launchCollectTypical": "git·에이전트 세션·셸·전사본 · 보통 10초 안쪽",
+  "launchIndex": "검색 색인",
+  "launchIndexTypical": "새 기록만 넣습니다 · 보통 30초 안쪽",
+  "launchDigest": "지식화 (하루 정리)",
+  "launchDigestTypical": "에이전트가 새 기록을 로그 줄로 · 보통 2~3분",
+  "launchSkipped": "건너뜀",
+  "launchSeconds": "{n}초",
+  "@launchSeconds": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "launchOpenNow": "바로 열기",
+  "launchSkipNote": "끝나면 앱이 열립니다.",
+  "launchSkipDigestNote": "바로 열어도 정리는 뒤에서 계속됩니다.",
+  "launchMinutes": "{m}분 {s}초",
+  "@launchMinutes": {
+    "placeholders": {
+      "m": {
+        "type": "int"
+      },
+      "s": {
+        "type": "int"
+      }
+    }
+  },
+  "launchPillRunning": "{step} 중",
+  "@launchPillRunning": {
+    "placeholders": {
+      "step": {
+        "type": "String"
+      }
+    }
+  },
+  "launchPillDone": "준비 끝",
+  "launchPillDoneWith": "정리 끝 · {note}",
+  "@launchPillDoneWith": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "launchCollapse": "접기",
+  "launchWeekly": "주간 정리",
+  "launchPillFailedWith": "정리 실패 · {note}",
+  "@launchPillFailedWith": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -81,9 +81,10 @@ before(async () => {
         calls.push(`digest:${JSON.stringify(p)}`);
         return { setting: { agent: digestAgent, model: p.model ?? "", weekly: p.weekly ?? true } };
       },
-      run: async (scope) => {
-        calls.push(`digest:run:${scope}`);
-        return digestAgent === "gemini" ? { started: false, reason: "없음" } : { started: true };
+      run: async (scope, how) => {
+        calls.push(how?.launch ? `digest:launch:${how.touched?.join(",")}` : `digest:run:${scope}`);
+        if (digestAgent === "gemini") return { started: false, reason: "없음" };
+        return how?.launch ? { started: true, done: Promise.resolve({ ok: true, report: "로그 3줄 적용\n\n자세히" }) } : { started: true };
       },
       proposals: async () => [{ id: "p1", status: "pending", lines: 2 }],
       proposal: async (id) => (id === "p1" ? { id, status: "pending", logLines: [{ month: "2026-10", line: "- 10-20 x" }] } : null),
@@ -260,6 +261,37 @@ test("digest endpoints: status, update, run (202 / 409)", async () => {
   assert.equal(r.status, 409);
   assert.equal(r.body.reason, "없음");
   assert.equal((await call("POST", "/api/digest", {})).status, 404);
+});
+
+test("launch: collect → index → daily digest with the collected days, each step reported; a skipped digest says why", async () => {
+  assert.equal((await call("GET", "/api/launch")).body.launch, null, "nothing before the app asks");
+  digestAgent = "auto";
+  calls.length = 0;
+  const r = await call("POST", "/api/launch", {});
+  assert.equal(r.status, 202);
+  let st = await call("GET", "/api/launch");
+  for (let i = 0; st.body.running && i < 50; i++) {
+    await tick();
+    st = await call("GET", "/api/launch");
+  }
+  assert.equal(st.body.running, false);
+  assert.deepEqual(calls, ["collect:all", "refresh", "daily:true:완료", "digest:launch:2026-10-23"]);
+  const steps = st.body.launch.steps as Array<{ name: string; state: string; note?: string; startedAt?: string; finishedAt?: string }>;
+  assert.deepEqual(steps.map((s) => `${s.name}:${s.state}`), ["collect:done", "index:done", "digest:done"]);
+  assert.equal(steps[0].note, "1일 치 새 기록");
+  assert.equal(steps[2].note, "로그 3줄 적용", "the first line of the digest report");
+  assert.ok(steps.every((s) => s.startedAt && s.finishedAt));
+  assert.ok(st.body.launch.finishedAt);
+
+  digestAgent = "gemini"; // the fake says it cannot run
+  await call("POST", "/api/launch", {});
+  st = await call("GET", "/api/launch");
+  for (let i = 0; st.body.running && i < 50; i++) {
+    await tick();
+    st = await call("GET", "/api/launch");
+  }
+  assert.deepEqual(st.body.launch.steps.map((s: { state: string; note?: string }) => `${s.state}:${s.note ?? ""}`).slice(2), ["skipped:없음"]);
+  digestAgent = "auto";
 });
 
 test("POST /transcripts/relabel queues a speaker pass only when the recording was kept", async () => {

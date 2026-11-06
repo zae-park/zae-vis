@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-digest-state-"));
-const { DigestRunner, buildPrompt, checkLogin, cliArgs, detectAgents, digestDays, findBin, gatherInputs, isFirstMonday, lastDigestDate, noAgentReason, parseCursorAuth, parseLoggedIn, pickAgent, readStateKey, runOpenRouter, setSection, weeklyDue, writeStateKey } = await import("../src/digest.ts");
+const { DIGEST_DUE_HOURS, DigestRunner, buildPrompt, digestDue, lastDigestOk, checkLogin, cliArgs, detectAgents, digestDays, findBin, gatherInputs, isFirstMonday, lastDigestDate, noAgentReason, parseCursorAuth, parseLoggedIn, pickAgent, readStateKey, runOpenRouter, setSection, weeklyDue, writeStateKey } = await import("../src/digest.ts");
 const { listProposals, loadProposal } = await import("../src/review.ts");
 
 // Test doubles for agent CLIs: tiny shell scripts that print a version or append one log line.
@@ -310,4 +310,16 @@ test("digest: OpenRouter daily scope writes log lines only and leaves last_weekl
   assert.equal(existsSync(join(w, "summaries")), false);
   assert.equal(await readFile(join(w, ".state.md"), "utf8"), "last_weekly: 2026-10-19\n");
   void listProposals;
+});
+
+test("digest due: the evening job digests only when the last good digest is older than a day (with slack for yesterday's run)", () => {
+  const now = new Date("2026-11-04T18:30:30+09:00");
+  assert.equal(digestDue(DIGEST_DUE_HOURS, now, null), true, "never digested");
+  assert.equal(digestDue(DIGEST_DUE_HOURS, now, new Date("2026-11-04T09:05:00+09:00")), false, "the app digested this morning");
+  assert.equal(digestDue(DIGEST_DUE_HOURS, now, new Date("2026-11-03T18:33:10+09:00")), true, "yesterday's evening run finished after 18:30");
+  assert.equal(digestDue(1, now, new Date("2026-11-04T18:10:00+09:00")), false, "launch: one just finished");
+  // the stamp: digestOkAt, or an older state's ok run; a failed run alone is no stamp
+  assert.equal(lastDigestOk({ digestOkAt: "2026-11-04T00:00:00.000Z", digest: { lastRun: "2026-11-04T05:00:00.000Z", ok: false } })?.toISOString(), "2026-11-04T00:00:00.000Z");
+  assert.equal(lastDigestOk({ digest: { lastRun: "2026-11-03T09:00:00.000Z", ok: true } })?.toISOString(), "2026-11-03T09:00:00.000Z");
+  assert.equal(lastDigestOk({ digest: { lastRun: "2026-11-03T09:00:00.000Z", ok: false } }), null);
 });

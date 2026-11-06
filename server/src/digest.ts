@@ -72,6 +72,28 @@ export type DigestHow = { scope?: DigestScope; days?: string[]; prepare?: () => 
 /** Days older than this are left to the weekly run, so a long gap does not become one huge daily run. */
 export const DAILY_MAX_DAYS = 14;
 
+/**
+ * The scheduled run digests only when the last good digest is older than this. Opening the app digests
+ * too (the launch run), so on days the app is opened the evening job leaves it alone. 23 rather than 24
+ * hours: yesterday's 18:30 run finishes a few minutes after 18:30, and a strict day would skip every
+ * other evening.
+ */
+export const DIGEST_DUE_HOURS = 23;
+/** The launch run skips the digest when one finished this recently (an app restart, an update). */
+export const LAUNCH_RECENT_MINUTES = 60;
+
+/** The last digest that finished well, from state.json (older states only have `digest`). */
+export function lastDigestOk(state: { digest?: { lastRun: string; ok: boolean }; digestOkAt?: string } = loadState()): Date | null {
+  const at = state.digestOkAt ?? (state.digest?.ok ? state.digest.lastRun : undefined);
+  const d = at ? new Date(at) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+}
+
+/** Is the last good digest older than `hours`? (none yet → due) */
+export function digestDue(hours: number, now = new Date(), last: Date | null = lastDigestOk()): boolean {
+  return !last || now.getTime() - last.getTime() > hours * 3_600_000;
+}
+
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5";
 const RUN_TIMEOUT_MS = 30 * 60_000;
 
@@ -650,6 +672,7 @@ export class DigestRunner {
       const finished = run ?? { lastRun: new Date().toISOString(), agent: list[0].id, ok: false, report: "넘길 서비스가 없습니다.", rail: this.rail, scope, days };
       const state = loadState() as Record<string, unknown>;
       state.digest = finished;
+      if (finished.ok) state.digestOkAt = finished.lastRun;
       saveState(state as never);
       return finished;
     })().finally(() => {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'l10n/l10n.dart';
@@ -143,14 +143,17 @@ class WorklogApi {
   /// Asks; with [conversationId] the question continues that conversation (the server keeps the turns).
   /// One chat line. [shown] is what the chat showed last with its numbers ("[2] 받을래"); [force] skips the router
   /// (the reply to a question back, "답 받기", a retry).
-  Future<AskResult> ask(String question, {int topK = 10, String? conversationId, List<({int n, String path})> shown = const [], bool force = false}) async =>
-      AskResult.fromJson(await _send('POST', '/ask', {
-        'q': question,
-        'topK': topK,
-        if (conversationId != null) 'conversationId': conversationId,
-        if (shown.isNotEmpty) 'shown': [for (final s in shown) {'n': s.n, 'path': s.path}],
-        if (force) 'force': 'answer',
-      }));
+  Future<AskResult> ask(String question, {int topK = 10, String? conversationId, List<({int n, String path})> shown = const [], bool force = false}) async {
+    final r = AskResult.fromJson(await _send('POST', '/ask', {
+      'q': question,
+      'topK': topK,
+      if (conversationId != null) 'conversationId': conversationId,
+      if (shown.isNotEmpty) 'shown': [for (final s in shown) {'n': s.n, 'path': s.path}],
+      if (force) 'force': 'answer',
+    }));
+    if (r.route == 'digest') digestStarted.value++; // "오늘 거 정리해줘" started one
+    return r;
+  }
 
   /// Stops the question in flight; its POST /ask then fails with code `cancelled`. False when none was running.
   Future<bool> cancelAsk() async => (await _send('POST', '/ask/cancel'))['cancelled'] == true;
@@ -416,7 +419,19 @@ class WorklogApi {
   /// `daily` (default): collect first, then every day since the last digest → log lines. `weekly`: the project look back.
   Future<void> runDigest({bool weekly = false}) async {
     await _send('POST', '/digest/run', {'scope': weekly ? 'weekly' : 'daily'});
+    digestStarted.value++;
   }
+
+  /// Ticks whenever this app starts a digest (a button, the chat): the top progress pill (LaunchGate) watches it.
+  final digestStarted = ValueNotifier<int>(0);
+
+  /// Opening the app: collect → index → daily digest on the server (joins one in progress).
+  Future<void> startLaunch() async {
+    await _send('POST', '/launch', const {});
+  }
+
+  /// Where the launch run is; `launch` is null before the app asked for one.
+  Future<LaunchStatus> launchStatus() async => LaunchStatus.fromJson(await _get('/launch'));
 
   // ── reports (daily / weekly / monthly) ──────────────────────────────────
   Future<ReportsStatus> reports() async => ReportsStatus.fromJson(await _get('/reports'));

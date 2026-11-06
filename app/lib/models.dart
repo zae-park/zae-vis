@@ -945,6 +945,8 @@ class DigestStatus {
     this.nextWeekly,
     this.rail = const [],
     this.skip = const [],
+    this.startedAt,
+    this.runningWeekly = false,
   });
 
   factory DigestStatus.fromJson(Json j) {
@@ -963,11 +965,17 @@ class DigestStatus {
       last: j['last'] is Json ? DigestRun.fromJson(j['last'] as Json) : null,
       nextWeekly: _strOrNull(j['nextWeekly']),
       rail: RailStop.list(j['rail']),
+      startedAt: DateTime.tryParse(_str(j['startedAt']))?.toLocal(),
+      runningWeekly: j['scope'] == 'weekly',
     );
   }
 
   final bool running;
   final String? runningAgent;
+
+  /// While running: when it started, and whether it is the weekly look back.
+  final DateTime? startedAt;
+  final bool runningWeekly;
   final String agent; // auto | claude | codex | gemini | openrouter
   final String model;
   final bool weekly;
@@ -1617,4 +1625,58 @@ KnowledgeNext knowledgeNext(KnowledgeStatus s) {
   if (waiting) return KnowledgeNext.digest;
   if (s.logLines > 0 && !s.dailyReports && !s.weeklyReports) return KnowledgeNext.reports;
   return KnowledgeNext.allSet;
+}
+
+/// One step of the launch run (server `LaunchStep`): collect, index, digest.
+class LaunchStep {
+  const LaunchStep({required this.name, required this.state, this.note, this.startedAt, this.finishedAt});
+  final String name; // collect | index | digest
+  final String state; // pending | running | done | skipped | failed
+  final String? note;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+
+  bool get running => state == 'running';
+  bool get over => state == 'done' || state == 'skipped' || state == 'failed';
+
+  /// How long it took, or has taken so far.
+  Duration? elapsed(DateTime now) {
+    final s = startedAt;
+    if (s == null) return null;
+    return (finishedAt ?? now).difference(s);
+  }
+
+  factory LaunchStep.fromJson(Json j) => LaunchStep(
+        name: j['name'] as String? ?? '',
+        state: j['state'] as String? ?? 'pending',
+        note: (j['note'] as String?)?.trim().isEmpty ?? true ? null : (j['note'] as String).trim(),
+        startedAt: DateTime.tryParse(j['startedAt'] as String? ?? '')?.toLocal(),
+        finishedAt: DateTime.tryParse(j['finishedAt'] as String? ?? '')?.toLocal(),
+      );
+}
+
+/// GET /api/launch: the collect → index → digest run the app starts when it opens.
+class LaunchStatus {
+  const LaunchStatus({required this.running, this.steps = const [], this.startedAt, this.finishedAt});
+  final bool running;
+  final List<LaunchStep> steps;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+
+  /// The step in progress, else the last one that started.
+  LaunchStep? get current => steps.where((s) => s.running).firstOrNull ?? steps.where((s) => s.startedAt != null).lastOrNull;
+
+  bool get done => !running && finishedAt != null;
+
+  LaunchStep? step(String name) => steps.where((s) => s.name == name).firstOrNull;
+
+  factory LaunchStatus.fromJson(Json j) {
+    final l = j['launch'] is Json ? j['launch'] as Json : null;
+    return LaunchStatus(
+      running: j['running'] == true,
+      steps: [for (final s in (l?['steps'] as List? ?? const [])) if (s is Json) LaunchStep.fromJson(s)],
+      startedAt: DateTime.tryParse(l?['startedAt'] as String? ?? '')?.toLocal(),
+      finishedAt: DateTime.tryParse(l?['finishedAt'] as String? ?? '')?.toLocal(),
+    );
+  }
 }

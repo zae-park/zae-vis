@@ -8,7 +8,7 @@ import { after, before, test } from "node:test";
 
 process.env.ZAEVIS_HOME = await mkdtemp(join(tmpdir(), "zv-reports-state-"));
 const {
-  ReportRunner, buildReportPrompt, defaultPeriod, dueReports, gatherReportInputs, isValidPeriod, isoWeek, isoWeekStart, listReports, mergeReportsSetting,
+  ReportRunner, buildReportPrompt, collectBefore, defaultPeriod, dueReports, gatherReportInputs, isValidPeriod, isoWeek, isoWeekStart, listReports, mergeReportsSetting,
   normalizeReportsSetting, periodRange, readReport, reportPath, DEFAULT_REPORTS,
 } = await import("../src/reports.ts");
 const { loadState } = await import("../src/config.ts");
@@ -137,6 +137,7 @@ test("reports: a run writes the file with front matter, records state and notifi
   const md = await readFile(join(root, "reports", "daily", "2026-10-27.md"), "utf8");
   assert.match(md, /^---\nkind: daily\nperiod: 2026-10-27\nrange: 2026-10-27\.\.2026-10-27\ncreatedAt: \d{4}.*\nagent: claude\ninputs: 4\n---\n# 2026-10-27 \(화\) 일간 리포트\n/);
   assert.doesNotMatch(md, /```/, "the code fence is stripped");
+  assert.match(md, /일간 리포트\n\n> 참조한 기록: 2026-10-27 \(화\) · 정리된 로그 1줄 · 수집 원본 \d+개 파일.*\n> 마지막 수집 .*\n\n## 한 일\n/, "what it read, under the title");
   assert.equal(loadState().reports?.lastRun.daily?.period, "2026-10-27");
   assert.deepEqual(notes, ["일간 리포트 준비: 2026-10-27 (화) — 리포트 탭에서 보세요."]);
   assert.equal(runner.current, null);
@@ -160,12 +161,42 @@ test("reports: the digest's monthly summary reads too, and a failed run is recor
   assert.equal(r.ok, false);
   assert.match(r.error ?? "", /Not logged in/);
   assert.equal(loadState().reports?.lastRun.daily?.error, r.error);
-  const empty = await runner.run(cfg, claude, "daily", "2026-10-01");
-  assert.match(empty.error ?? "", /기록이 없습니다/);
+  // an empty period is not a failure: a short report says what it read and that nothing was there, no agent call
+  const wl = await mkdtemp(join(tmpdir(), "zv-reports-empty-"));
+  const empty = await runner.run({ ...cfg, worklogDir: wl }, claude, "daily", "2026-10-01");
+  assert.equal(empty.ok, true);
+  assert.equal(empty.empty, true);
+  const emptyMd = await readFile(join(wl, "reports", "daily", "2026-10-01.md"), "utf8");
+  assert.match(emptyMd, /agent: none\ninputs: 0\n---\n# 2026-10-01 \(목\) 일간 리포트\n\n> 참조한 기록: 2026-10-01 \(목\) · 정리된 로그 0줄 · 수집 원본 0개 파일\n> 마지막 수집 .* · 마지막 정리 .*\n\n이 기간에는 새 기록이 없습니다/);
   // a monthly report keeps the summaries/ place: the old summary endpoint hides its front matter
   await writeFile(join(root, "summaries", "2026-10.md"), "---\nkind: monthly\nperiod: 2026-10\ncreatedAt: 2026-11-01T09:00:00.000Z\nagent: claude\n---\n# 2026-10 작업 정리\n\n리포트\n");
   assert.equal(await new Worklog(root).summary("2026-10"), "# 2026-10 작업 정리\n\n리포트\n");
   assert.deepEqual((await listReports(root)).monthly.map((e) => [e.period, e.agent]), [["2026-10", "claude"], ["2026-09", null]]);
+});
+
+test("reports: a period the last collect did not reach collects first, and the report then sees what came in", async () => {
+  // today's report in the morning: the 18:30 collect was yesterday
+  assert.equal(collectBefore("2026-11-05", new Date(2026, 10, 4, 18, 30).toISOString()), true);
+  // yesterday's report after yesterday's 18:30 collect: the evening after it is not in yet
+  assert.equal(collectBefore("2026-11-04", new Date(2026, 10, 4, 18, 30).toISOString()), true);
+  // a finished period: last month, last week
+  assert.equal(collectBefore("2026-10-31", new Date(2026, 10, 4, 18, 30).toISOString()), false);
+  assert.equal(collectBefore("2026-11-04", new Date(2026, 10, 5, 0, 10).toISOString()), false);
+  assert.equal(collectBefore("2026-11-04", undefined), true, "never collected");
+
+  const order: string[] = [];
+  const runner = new ReportRunner({ exec: async () => (order.push("agent"), { ok: true, stdout: "# 2026-10-02 (금) 일간 리포트\n\n## 한 일\n- 수집된 일", stderr: "" }) });
+  const wl = await mkdtemp(join(tmpdir(), "zv-reports-collect-")); // its own worklog: the report it writes stays out of the lists below
+  await mkdir(join(wl, "sources", "git"), { recursive: true });
+  const cfg = { worklogDir: wl, digest: { agent: "auto" as const, model: "", weekly: true, review: true } };
+  const r = await runner.run(cfg, claude, "daily", "2026-10-02", undefined, {
+    prepare: async () => {
+      order.push("collect");
+      await writeFile(join(wl, "sources", "git", "2026-10-02.md"), "# git · 2026-10-02\n\n- 10:00 `def5678` 아침에 한 일\n");
+    },
+  });
+  assert.equal(r.ok, true, "the day was empty until the collect");
+  assert.deepEqual(order, ["collect", "agent"]);
 });
 
 // ── HTTP ───────────────────────────────────────────────────────────────────────
