@@ -115,9 +115,11 @@ class IoBackend implements Backend {
         final proc = await Process.start(_node, ['$payload${Platform.pathSeparator}server${Platform.pathSeparator}src${Platform.pathSeparator}zaevis.ts', ...args],
             environment: _env, workingDirectory: home.isEmpty ? null : home);
         unawaited(proc.stdin.close());
+        // utf8.decoder: Utf8Decoder(allowMalformed:) is a library-private named arg in recent Dart SDKs.
+        // Node CLI output is UTF-8; malformed bytes are rare enough to reject rather than replace.
         final done = <Future<void>>[
           for (final s in [proc.stdout, proc.stderr])
-            s.transform(const Utf8Decoder(allowMalformed: true)).transform(const LineSplitter()).forEach(out.add),
+            s.transform(utf8.decoder).transform(const LineSplitter()).forEach(out.add),
         ];
         final code = (await Future.wait<Object?>([proc.exitCode, ...done])).first! as int;
         if (code != 0) out.addError(ProcessException('zaevis', args, l10nNow.backendExitCode(code), code));

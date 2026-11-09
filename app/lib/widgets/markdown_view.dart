@@ -102,9 +102,9 @@ class MdInline {
 
 // **bold** · *italic* · `code` · $math$ · [[link]] · #tag
 final _inline = RegExp(
-  // math needs no space right inside the dollars, so "$5 and $7" stays text
-  r'\*\*(.+?)\*\*|(?<![\w*])\*([^*\n]+?)\*(?![\w*])|`([^`\n]+)`|\$(?!\s)([^$\n]+?)(?<!\s)\$|\[\[([^\]|]+)(?:\|[^\]]*)?\]\]|(?<=^|\s)#([\p{L}\p{N}_-]+)',
-  unicode: true,
+  // math needs no space right inside the dollars, so "$5 and $7" stays text.
+  // Tag letters use \u escapes (not \p{L}) so analysis on every OS agrees on the pattern.
+  r'\*\*(.+?)\*\*|(?<![\w*])\*([^*\n]+?)\*(?![\w*])|`([^`\n]+)`|\$(?!\s)([^$\n]+?)(?<!\s)\$|\[\[([^\]|]+)(?:\|[^\]]*)?\]\]|(?<=^|\s)#([\w\u00C0-\u024F\uAC00-\uD7A3-]+)',
 );
 
 List<MdInline> parseInline(String text) {

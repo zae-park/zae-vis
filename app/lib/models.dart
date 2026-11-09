@@ -685,6 +685,30 @@ class TranscribeJob {
   final double? fraction;
 }
 
+/// One event from a streaming ASR session (`docs/asr.md`).
+class AsrEvent {
+  const AsrEvent({required this.type, required this.text, this.at});
+  factory AsrEvent.fromJson(Json j) => AsrEvent(type: _str(j['type']), text: _str(j['text']), at: _strOrNull(j['at']));
+  final String type; // partial | final
+  final String text;
+  final String? at;
+}
+
+class AsrPushResult {
+  const AsrPushResult({required this.events, required this.partial, required this.text, this.draft});
+  factory AsrPushResult.fromJson(Json j) => AsrPushResult(
+        events: (j['events'] is List ? j['events'] as List : const <Object?>[]).whereType<Json>().map(AsrEvent.fromJson).toList(),
+        partial: _str(j['partial']),
+        text: _str(j['text']),
+        draft: _strOrNull(j['draft']),
+      );
+  final List<AsrEvent> events;
+  final String partial;
+  final String text;
+  /// Meeting stop only: worklog-relative draft transcript path.
+  final String? draft;
+}
+
 class Inbox {
   const Inbox({required this.transcripts, required this.sessions, required this.audio, required this.jobs});
   factory Inbox.fromJson(Json j) {

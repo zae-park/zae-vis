@@ -3,7 +3,7 @@
 // /worklog-2 in sorted-path order; displayPath uses that same naming so a hit opens the right file.
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, resolve, sep } from "node:path";
+import { basename, isAbsolute, resolve, sep } from "node:path";
 import type { AppConfig } from "./config.ts";
 import { writeJson } from "./config.ts";
 
@@ -53,7 +53,9 @@ export function syncSearchPaths(cfg: Pick<AppConfig, "worklogDir" | "memoryPaths
 
 /** A .md/.txt under one of the index roots. Relative paths are the worklog's job. */
 export function readIndexedFile(rel: string, roots: string[]): { path: string; markdown: string } | null {
-  if (!rel.startsWith("/") || !/\.(md|txt)$/i.test(rel)) return null;
+  // AutoRAG virtual paths start with `/…`; memory hits may be absolute host paths (Windows `C:\…`).
+  if (!/\.(md|txt)$/i.test(rel)) return null;
+  if (!rel.startsWith("/") && !isAbsolute(rel)) return null;
   let abs: string;
   try {
     abs = realpathSync(resolve(rel));

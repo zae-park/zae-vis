@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../l10n/l10n.dart';
 import '../models.dart';
+import '../recording/asr_capture.dart';
 import '../recording/recorder.dart';
 import '../theme.dart';
 import '../widgets/agent_rail.dart';
@@ -290,12 +290,12 @@ class _AskViewState extends State<AskView> {
   final _composer = TextEditingController();
 
   _Voice _voice = _Voice.idle;
-  final List<Uint8List> _chunks = [];
-  StreamSubscription<Uint8List>? _sub;
   Timer? _tick;
   DateTime? _since;
   Duration _elapsed = Duration.zero;
   Recorder? _ownRecorder;
+  AsrCapture? _asr;
+  String _livePartial = '';
 
   Recorder get _recorder => widget.recorder ?? (_ownRecorder ??= PluginRecorder());
 
@@ -321,8 +321,7 @@ class _AskViewState extends State<AskView> {
     c.removeListener(_changed);
     _composer.dispose();
     _tick?.cancel();
-    unawaited(_sub?.cancel() ?? Future.value());
-    if (_voice == _Voice.listening) unawaited(_recorder.stop());
+    unawaited(_asr?.cancel() ?? Future.value());
     unawaited(_ownRecorder?.dispose() ?? Future.value());
     super.dispose();
   }
@@ -359,11 +358,27 @@ class _AskViewState extends State<AskView> {
         if (mounted) toast(context, l.recordMicDenied, error: true);
         return;
       }
-      final stream = await _recorder.startStream();
-      _chunks.clear();
+      _livePartial = '';
       _since = DateTime.now();
       _elapsed = Duration.zero;
-      _sub = stream.listen(_chunks.add);
+      final cap = AsrCapture(
+        api: c.api,
+        recorder: _recorder,
+        mode: 'live',
+        onPartial: (t) {
+          if (!mounted) return;
+          setState(() {
+            _livePartial = t;
+            _composer.text = t;
+            _composer.selection = TextSelection.collapsed(offset: _composer.text.length);
+          });
+        },
+        onError: (e) {
+          if (mounted) toast(context, context.l10n.voiceFailed('$e'), error: true);
+        },
+      );
+      await cap.start();
+      _asr = cap;
       _tick = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (!mounted) return;
         setState(() => _elapsed = DateTime.now().difference(_since!));
@@ -375,19 +390,26 @@ class _AskViewState extends State<AskView> {
     }
   }
 
-  /// Stops listening, has the server turn the speech into text (whisper, nothing kept), and sends it as a typed line.
+  /// Stops listening; live ASR text, or one-shot /voice when the server had no ASR session.
   Future<void> _finishVoice() async {
     if (_voice != _Voice.listening) return;
     _tick?.cancel();
     setState(() => _voice = _Voice.converting);
-    await _recorder.stop(); // the plugin ends the stream here
-    unawaited(_sub?.cancel() ?? Future.value());
-    _sub = null;
-    final wav = wavFromPcm16(_chunks);
-    _chunks.clear();
+    final cap = _asr;
+    _asr = null;
+    if (cap == null) {
+      if (mounted) setState(() => _voice = _Voice.idle);
+      return;
+    }
+    // Remember whether a server session existed — stop() clears [AsrCapture.id].
+    final hadSession = cap.streaming;
     String text;
     try {
-      text = await c.api.voiceToText(wav);
+      text = await cap.stop();
+      if (text.isEmpty) text = _livePartial.trim();
+      if (text.isEmpty && !hadSession && cap.localChunks.isNotEmpty) {
+        text = await c.api.voiceToText(wavFromPcm16(cap.localChunks));
+      }
     } on ApiException catch (e) {
       if (mounted) {
         setState(() => _voice = _Voice.idle);
@@ -395,6 +417,7 @@ class _AskViewState extends State<AskView> {
       }
       return;
     }
+    _livePartial = '';
     if (!mounted) return;
     setState(() => _voice = _Voice.idle);
     if (text.isEmpty) {

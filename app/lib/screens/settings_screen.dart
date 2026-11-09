@@ -1129,12 +1129,10 @@ class _AgentOrder extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         buildDefaultDragHandles: false,
         padding: const EdgeInsets.symmetric(vertical: 4),
-        // Flutter 3.35: onReorder's newIndex is the slot before removal; adjust when moving down.
-        // (3.47+ has onReorderItem which already hands the post-removal index.)
-        onReorder: (oldIndex, newIndex) {
+        // onReorderItem hands over the index after the moved block is taken out (no newIndex - 1).
+        onReorderItem: (oldIndex, newIndex) {
           if (!enabled) return;
           final ids = [for (final a in agents) a.id];
-          if (newIndex > oldIndex) newIndex -= 1;
           final moved = ids.removeAt(oldIndex);
           ids.insert(newIndex, moved);
           onReorder(ids);

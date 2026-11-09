@@ -72,6 +72,34 @@ before(async () => {
         return "가장 최근 회의록 줘";
       },
     },
+    asr: (() => {
+      const sessions = new Map<string, { mode: string; text: string }>();
+      let n = 0;
+      return {
+        create: async (mode: "live" | "meeting", _language?: string, name?: string) => {
+          const id = `s${++n}`;
+          sessions.set(id, { mode, text: name ? `초안:${name}` : "실시간 초안" });
+          calls.push(`asr:create:${mode}:${name ?? "-"}`);
+          return { id, mode };
+        },
+        push: async (id: string, pcm: Buffer) => {
+          if (!sessions.has(id)) throw new Error("세션이 없습니다");
+          calls.push(`asr:push:${id}:${pcm.length}`);
+          return { events: [], partial: "", text: sessions.get(id)!.text };
+        },
+        stop: async (id: string) => {
+          const s = sessions.get(id);
+          if (!s) throw new Error("세션이 없습니다");
+          sessions.delete(id);
+          calls.push(`asr:stop:${id}`);
+          return { events: [{ type: "final", text: s.text, at: new Date().toISOString() }], partial: "", text: s.text, draft: s.mode === "meeting" ? "inbox/transcripts/x.md" : undefined };
+        },
+        cancel: async (id: string) => {
+          calls.push(`asr:cancel:${id}`);
+          return sessions.delete(id);
+        },
+      };
+    })(),
     knowledge: async () => ({ review: [], knowledge: { logLines: 2 } }),
     audio: { dir: () => join(root, "inbox", "audio"), enqueue: (f) => queued.push(f), relabel: (p) => relabeled.push(p), jobs: () => [] },
     digest: {
@@ -352,6 +380,34 @@ test("POST /voice turns speech into text and keeps nothing", async () => {
   assert.equal(existsSync(voiceFiles.at(-1)!), false, "the temporary audio is deleted");
   assert.equal((await fetch(base + "/api/voice?name=a.wav", { method: "POST", headers: { "x-zaevis": "1" }, body: Buffer.alloc(10) })).status, 400, "no sound");
   assert.equal((await fetch(base + "/api/voice?name=a.exe", { method: "POST", headers: { "x-zaevis": "1" }, body: wav })).status, 400);
+});
+
+test("POST /asr opens a session, accepts PCM, and stops with text", async () => {
+  calls.length = 0;
+  const created = await call("POST", "/api/asr", { mode: "live" });
+  assert.equal(created.status, 201);
+  assert.ok(created.body.id);
+  const id = created.body.id as string;
+  const pcm = Buffer.alloc(960, 1);
+  const pushed = await fetch(base + `/api/asr/${id}/audio`, { method: "POST", headers: { "x-zaevis": "1", "content-type": "application/octet-stream" }, body: pcm });
+  assert.equal(pushed.status, 200);
+  const stopped = await call("POST", `/api/asr/${id}/stop`, {});
+  assert.equal(stopped.status, 200);
+  assert.equal(stopped.body.text, "실시간 초안");
+  assert.ok(calls.some((c) => c.startsWith("asr:create:live")));
+  assert.ok(calls.some((c) => c.startsWith(`asr:push:${id}:`)));
+  assert.ok(calls.some((c) => c === `asr:stop:${id}`));
+  assert.equal((await call("POST", "/api/asr", { mode: "nope" })).status, 400);
+  const meet = await call("POST", "/api/asr", { mode: "meeting", name: "2026-11-09_1200_녹음.wav" });
+  assert.equal(meet.status, 201);
+  const meetStop = await call("POST", `/api/asr/${meet.body.id}/stop`, {});
+  assert.equal(meetStop.body.draft, "inbox/transcripts/x.md");
+  const doomed = await call("POST", "/api/asr", { mode: "live" });
+  assert.equal(doomed.status, 201);
+  const cancelled = await fetch(base + `/api/asr/${doomed.body.id}`, { method: "DELETE", headers: { "x-zaevis": "1" } });
+  assert.equal(cancelled.status, 200);
+  assert.equal((await cancelled.json()).ok, true);
+  assert.ok(calls.some((c) => c === `asr:cancel:${doomed.body.id}`));
 });
 
 test("GET /knowledge passes the status through", async () => {

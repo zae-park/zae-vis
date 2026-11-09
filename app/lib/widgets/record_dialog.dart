@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../l10n/l10n.dart';
+import '../recording/asr_capture.dart';
 import '../recording/recorder.dart';
 import 'input_dialogs.dart' show toast;
 
 /// Records from the microphone and uploads the result to the inbox (whisperX transcribes it in the
-/// background when installed). The controls float at the bottom right and can be dragged, so the
-/// rest of the app stays usable. Returns the saved file name, or null when cancelled.
+/// background when installed). While recording, a meeting ASR session fills in a live draft when
+/// available. The controls float at the bottom right and can be dragged. Returns the saved file
+/// name, or null when cancelled.
 Completer<String?>? _recordOpen;
 
 Future<String?> showRecordDialog(BuildContext context, WorklogApi api, {Recorder? recorder, String? watch}) {
@@ -46,7 +48,6 @@ class _RecordFloater extends StatefulWidget {
 
   /// An audio file already in the queue. The floater opens on its progress instead of a new recording.
   final String? watch;
-  /// The file is in the inbox. The floater stays up afterwards while whisperX runs.
   final void Function(String saved) onQueued;
   final void Function(String? saved) onDone;
 
@@ -60,8 +61,6 @@ enum _Job { gone, active, failed }
 
 class _RecordFloaterState extends State<_RecordFloater> {
   _Phase _phase = _Phase.idle;
-  final _chunks = <Uint8List>[];
-  StreamSubscription<Uint8List>? _sub;
   Timer? _tick;
   DateTime? _startedAt;
   Duration _elapsed = Duration.zero;
@@ -75,6 +74,9 @@ class _RecordFloaterState extends State<_RecordFloater> {
   final _cardKey = GlobalKey();
   bool _moved = false;
   Offset _topLeft = Offset.zero;
+  AsrCapture? _asr;
+  String _draft = '';
+  String? _recordingName;
 
   @override
   void initState() {
@@ -107,25 +109,40 @@ class _RecordFloaterState extends State<_RecordFloater> {
   @override
   void dispose() {
     _tick?.cancel();
-    _sub?.cancel();
+    unawaited(_asr?.cancel() ?? Future.value());
     widget.recorder.dispose();
     super.dispose();
   }
 
   Future<void> _start() async {
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _draft = '';
+    });
     try {
       if (!await widget.recorder.hasPermission()) {
         setState(() => _error = context.l10n.recordMicDenied);
         return;
       }
-      final stream = await widget.recorder.startStream();
-      _chunks.clear();
       _startedAt = DateTime.now();
-      _sub = stream.listen((c) {
-        _chunks.add(c);
-        _level = pcm16Level(c);
-      }, onError: (Object e) => setState(() => _error = context.l10n.recordError('$e')));
+      _recordingName = recordingName(_startedAt!);
+      final cap = AsrCapture(
+        api: widget.api,
+        recorder: widget.recorder,
+        mode: 'meeting',
+        name: _recordingName,
+        onFinal: (_, all) {
+          if (mounted) setState(() => _draft = all);
+        },
+        onLevel: (lv) {
+          if (mounted) setState(() => _level = lv);
+        },
+        onError: (e) {
+          if (mounted) setState(() => _error = context.l10n.recordError('$e'));
+        },
+      );
+      await cap.start();
+      _asr = cap;
       _tick = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (mounted) setState(() => _elapsed = DateTime.now().difference(_startedAt!));
       });
@@ -137,13 +154,18 @@ class _RecordFloaterState extends State<_RecordFloater> {
 
   Future<void> _stopAndUpload() async {
     _tick?.cancel();
-    await widget.recorder.stop(); // the plugin ends the stream here; no further chunks arrive
-    // not awaited: a subscription on an already-ended stream may settle its cancel() late
-    unawaited(_sub?.cancel() ?? Future.value());
-    _sub = null;
-    final bytes = wavFromPcm16(_chunks);
-    final name = recordingName(_startedAt ?? DateTime.now());
-    setState(() => _phase = _Phase.uploading);
+    final cap = _asr;
+    _asr = null;
+    if (cap == null) return;
+    final draft = await cap.stop();
+    if (draft.isNotEmpty) _draft = draft;
+    final pcm = List<Uint8List>.from(cap.localChunks);
+    final bytes = wavFromPcm16(pcm);
+    final name = _recordingName ?? recordingName(_startedAt ?? DateTime.now());
+    setState(() {
+      _phase = _Phase.uploading;
+      if (_draft.isNotEmpty) _status = _draft;
+    });
     try {
       final saved = await widget.api.uploadAudio(name: name, size: bytes.length, bytes: bytes);
       if (!mounted) return;
@@ -151,7 +173,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
       setState(() {
         _phase = _Phase.transcribing;
         _saved = saved;
-        _status = context.l10n.recordPreparing;
+        _status = _draft.isNotEmpty ? _draft : context.l10n.recordPreparing;
         _fraction = null;
       });
       final job = await _readJob(saved);
@@ -174,7 +196,6 @@ class _RecordFloaterState extends State<_RecordFloater> {
     }
   }
 
-  /// gone: nothing left to wait for. active: still queued or running. failed: the floater stays so the error can be read.
   Future<_Job> _readJob(String saved) async {
     try {
       final inbox = await widget.api.inbox();
@@ -183,18 +204,25 @@ class _RecordFloaterState extends State<_RecordFloater> {
       if (job == null || job.state == 'done' || job.state == 'cancelled') return _Job.gone;
       final current = job;
       if (current.state == 'failed') {
-        if (mounted) setState(() {
-          _status = context.l10n.recordTranscribeFailed;
-          _error = current.error ?? context.l10n.recordTranscribeFailedLong;
-          _fraction = null;
-        });
+        if (mounted) {
+          setState(() {
+            _status = context.l10n.recordTranscribeFailed;
+            _error = current.error ?? context.l10n.recordTranscribeFailedLong;
+            _fraction = null;
+          });
+        }
         return _Job.failed;
       }
-      if (mounted) setState(() {
-        _status = current.line ?? (current.state == 'queued' ? context.l10n.recordQueued : context.l10n.recordTranscribing);
-        _fraction = current.fraction;
-        _error = null;
-      });
+      if (mounted) {
+        setState(() {
+          // Keep showing the live draft while the high-quality job runs.
+          if (_draft.isEmpty) {
+            _status = current.line ?? (current.state == 'queued' ? context.l10n.recordQueued : context.l10n.recordTranscribing);
+          }
+          _fraction = current.fraction;
+          _error = null;
+        });
+      }
       return _Job.active;
     } catch (_) {
       return _Job.gone;
@@ -231,9 +259,10 @@ class _RecordFloaterState extends State<_RecordFloater> {
 
   Future<void> _cancel() async {
     _tick?.cancel();
-    if (_phase == _Phase.recording) await widget.recorder.stop();
-    unawaited(_sub?.cancel() ?? Future.value());
-    _sub = null;
+    if (_asr != null) {
+      await _asr!.cancel();
+      _asr = null;
+    }
     if (mounted) _close(_phase == _Phase.transcribing ? _saved : null);
   }
 
@@ -268,7 +297,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
           top: _moved ? _topLeft.dy : null,
           right: _moved ? null : 20,
           bottom: _moved ? null : 24,
-          width: 300,
+          width: _draft.isEmpty ? 300 : 360,
           child: Material(
             key: _cardKey,
             elevation: 6,
@@ -294,7 +323,7 @@ class _RecordFloaterState extends State<_RecordFloater> {
                   recording
                       ? mmss
                       : transcribing
-                          ? _status
+                          ? (_draft.isEmpty ? _status : context.l10n.recordHintTranscribing)
                           : (_phase == _Phase.uploading ? context.l10n.recordUploading : context.l10n.recordTapToStart),
                   style: t.titleSmall,
                 ),
@@ -303,11 +332,13 @@ class _RecordFloaterState extends State<_RecordFloater> {
                 const SizedBox(height: 8),
                 Text(
                   recording
-                      ? context.l10n.recordHintRecording
+                      ? (_draft.isEmpty ? context.l10n.recordHintRecording : _draft)
                       : transcribing
-                          ? context.l10n.recordHintTranscribing
+                          ? (_draft.isEmpty ? context.l10n.recordHintTranscribing : _draft)
                           : context.l10n.recordHintIdle,
                   style: t.bodySmall,
+                  maxLines: _draft.isEmpty ? 3 : 8,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 8),

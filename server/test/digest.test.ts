@@ -10,6 +10,8 @@ const { DIGEST_DUE_HOURS, DigestRunner, buildPrompt, digestDue, lastDigestOk, ch
 const { listProposals, loadProposal } = await import("../src/review.ts");
 
 // Test doubles for agent CLIs: tiny shell scripts that print a version or append one log line.
+// Windows cannot exec bash shebangs; CI also skips `npm test` on Windows for this reason.
+const hasBash = process.platform !== "win32";
 async function stubCli(dir: string, name: string, body: string): Promise<string> {
   const p = join(dir, name);
   await writeFile(p, `#!/bin/bash\n${body}\n`);
@@ -32,7 +34,7 @@ async function worklog(): Promise<string> {
   return w;
 }
 
-test("digest: detects CLIs on PATH and OpenRouter by key; auto picks the first available", async () => {
+test("digest: detects CLIs on PATH and OpenRouter by key; auto picks the first available", { skip: !hasBash }, async () => {
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
   await stubCli(bins, "codex", "echo 'codex-cli 0.9.0'");
   const env = { PATH: bins, HOME: bins };
@@ -115,7 +117,7 @@ test("digest: fallback follows the saved order and leaves out a skipped block", 
   assert.equal(pickAgent({ agent: "auto", model: "", weekly: true, review: true, order: ["gemini", "cursor", "claude", "codex"], skip: [] }, agents)?.id, "gemini");
 });
 
-test("digest: a CLI agent runs in the worklog folder and its report is recorded", async () => {
+test("digest: a CLI agent runs in the worklog folder and its report is recorded", { skip: !hasBash }, async () => {
   const w = await worklog();
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
   const bin = await stubCli(bins, "claude", 'echo "cwd=$(pwd)"; echo "- 10-25 [[notes]] #done 정리 분리 (src: git notes bbbbbbb)" >> log/2026-10.md; echo "로그 1줄 추가"');
@@ -176,7 +178,7 @@ test("digest: OpenRouter path gathers inputs since the last run and applies the 
   assert.match(again.output, /새 입력이 없습니다/, "nothing newer than today, inbox emptied");
 });
 
-test("digest: auto skips a quota failure that wrote nothing, and stops once the worklog changed", async () => {
+test("digest: auto skips a quota failure that wrote nothing, and stops once the worklog changed", { skip: !hasBash }, async () => {
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
   const claudeBin = await stubCli(bins, "claude", 'echo "You have hit your usage limit" >&2; exit 1');
   const codexBin = await stubCli(bins, "codex", 'echo "- 10-25 [[notes]] #done 다음 서비스 (src: git notes ccccccc)" >> log/2026-10.md; echo "로그 1줄"');
@@ -234,7 +236,7 @@ test("digest: .state.md keeps last_weekly and last_daily apart; the days a daily
   assert.match(buildPrompt({ worklogDir: w, reposRoot: "/r" }), /주간 작업이다/);
 });
 
-test("digest: a daily run in review mode puts log lines in now and holds project pages for review", async () => {
+test("digest: a daily run in review mode puts log lines in now and holds project pages for review", { skip: !hasBash }, async () => {
   const w = await worklog();
   const bins = await mkdtemp(join(tmpdir(), "zv-bins-"));
   const bin = await stubCli(

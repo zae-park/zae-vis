@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { EmbeddingDaemon, findMinsync } from "../src/embedding.ts";
 
 // A stand-in for `minsync serve`: prints the JSON event(s) MinSync prints, then behaves as told.
+// Bash shebang stubs do not run on Windows (CI skips `npm test` there for the same reason).
 async function fakeMinsync(body: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "zv-emb-"));
   const bin = join(dir, "minsync");
@@ -13,6 +14,8 @@ async function fakeMinsync(body: string): Promise<string> {
   await chmod(bin, 0o755);
   return bin;
 }
+
+const hasBash = process.platform !== "win32";
 
 const serving = (event: string, pid = "$$") =>
   `echo '{"event":"${event}","url":"http://127.0.0.1:1","model_id":"Qwen/Qwen3-Embedding-0.6B","device":"metal","pid":'"${pid}"',"status":"ok"}'`;
@@ -32,7 +35,7 @@ test("embedding: no binary → failed with a clear error, never throws", async (
   assert.match(s.error ?? "", /minsync/);
 });
 
-test("embedding: serving event → ready; stop kills the child → off", async () => {
+test("embedding: serving event → ready; stop kills the child → off", { skip: !hasBash }, async () => {
   const bin = await fakeMinsync(`${serving("serving")}\ntrap 'exit 0' TERM\nwhile true; do sleep 0.2; done`);
   const d = new EmbeddingDaemon({ binary: bin });
   const s = await d.start();
@@ -48,7 +51,7 @@ test("embedding: serving event → ready; stop kills the child → off", async (
   assert.equal(stopped.enabled, false);
 });
 
-test("embedding: adopted event (daemon already running) → ready + external, exit 0 keeps it ready", async () => {
+test("embedding: adopted event (daemon already running) → ready + external, exit 0 keeps it ready", { skip: !hasBash }, async () => {
   const bin = await fakeMinsync(`${serving("adopted", "4242")}\nexit 0`);
   const d = new EmbeddingDaemon({ binary: bin });
   const s = await d.start();
@@ -59,7 +62,7 @@ test("embedding: adopted event (daemon already running) → ready + external, ex
   assert.equal(d.current.state, "ready");
 });
 
-test("embedding: stop() also terminates an adopted daemon by pid", async () => {
+test("embedding: stop() also terminates an adopted daemon by pid", { skip: !hasBash }, async () => {
   const { spawn } = await import("node:child_process");
   const orphan = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
   const bin = await fakeMinsync(`${serving("adopted", String(orphan.pid))}\nexit 0`);
@@ -70,7 +73,7 @@ test("embedding: stop() also terminates an adopted daemon by pid", async () => {
   assert.notEqual(orphan.exitCode ?? orphan.signalCode, null, "orphan should have been signalled");
 });
 
-test("embedding: exits before ready → failed with stderr tail", async () => {
+test("embedding: exits before ready → failed with stderr tail", { skip: !hasBash }, async () => {
   const bin = await fakeMinsync(`echo 'model download failed: no network' >&2\nexit 3`);
   const d = new EmbeddingDaemon({ binary: bin });
   const s = await d.start();
@@ -79,7 +82,7 @@ test("embedding: exits before ready → failed with stderr tail", async () => {
   assert.match(s.error ?? "", /no network/);
 });
 
-test("embedding: health() turns a vanished external daemon off", async () => {
+test("embedding: health() turns a vanished external daemon off", { skip: !hasBash }, async () => {
   const bin = await fakeMinsync(`${serving("adopted", "4242")}\nexit 0`);
   const d = new EmbeddingDaemon({ binary: bin, healthTimeoutMs: 300 });
   await d.start();

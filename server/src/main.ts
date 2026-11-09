@@ -4,11 +4,12 @@
 // Settings: ~/.zaevis/config.json (kit/setup.sh), ~/.zaevis/sources.json (data sources).
 // Env overrides: ZAEVIS_HOME, WORKLOG_DIR, AUTORAG_CONFIG, ZAEVIS_PORT, ZAEVIS_WEB_DIR.
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { AskRunner } from "./ask.ts";
 import { jevJudge } from "./route.ts";
+import { AsrHub, meetingDraftBody, meetingDraftRelPath } from "./asr.ts";
 import { VoiceTranscriber } from "./voice.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp, type DigestStart, type DigestStarted } from "./app.ts";
@@ -55,6 +56,13 @@ const voice = new VoiceTranscriber({
   python: () => speakerPython(transcriptSettings().whisperxBin as string | undefined),
   model: () => String(transcriptSettings().model ?? "large-v3-turbo"),
   log: (m) => console.log(`[voice] ${m}`),
+});
+const asr = new AsrHub({
+  transcribe: (file, opts) =>
+    voice.transcribe(file, opts?.language ?? transcribeLanguageFor(cfg), {
+      beamSize: opts?.beamSize,
+      vadFilter: opts?.vadFilter,
+    }),
 });
 const digest = new DigestRunner({ notify });
 
@@ -325,6 +333,37 @@ const server = createApp({
   },
   voice: {
     transcribe: (file) => voice.transcribe(file, transcribeLanguageFor(cfg)),
+  },
+  asr: {
+    create: async (mode, language, name) => {
+      if (!speakerPython(transcriptSettings().whisperxBin as string | undefined)) {
+        throw new Error("음성으로 말하려면 whisperX가 필요합니다. 설정 → 녹음에서 설치하세요.");
+      }
+      const s = await asr.create(mode, language ?? transcribeLanguageFor(cfg), name);
+      return { id: s.id, mode: s.mode };
+    },
+    push: async (id, pcm) => {
+      const s = asr.get(id);
+      if (!s) throw new Error("세션이 없습니다");
+      return s.pushAudio(pcm);
+    },
+    stop: async (id) => {
+      const s = asr.get(id);
+      if (!s) throw new Error("세션이 없습니다");
+      const out = await s.stop();
+      let draft: string | undefined;
+      // Meeting: leave a readable draft in inbox so the wait for whisperX is not blank.
+      // whisperX overwrites the same stem when the full-file job finishes.
+      if (s.mode === "meeting" && out.text.trim()) {
+        draft = meetingDraftRelPath(s.name, s.id);
+        const stem = basename(draft).replace(/\.md$/, "");
+        mkdirSync(join(cfg.worklogDir, "inbox", "transcripts"), { recursive: true });
+        writeFileSync(join(cfg.worklogDir, draft), meetingDraftBody(stem, out.text));
+      }
+      asr.forget(id);
+      return { ...out, draft };
+    },
+    cancel: (id) => asr.remove(id),
   },
   audio: {
     dir: () => String(transcriptSettings().audioDir ?? join(cfg.worklogDir, "inbox", "audio")),

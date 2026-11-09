@@ -132,7 +132,25 @@ class _FakeBackend implements Backend {
 WorklogApi _fakeApi() => WorklogApi(
       baseUrl: 'http://127.0.0.1:4710',
       client: MockClient((req) async {
-        switch (req.url.path) {
+        final path = req.url.path;
+        // ASR session routes (live chat / meeting draft) — matched before the switch so nested paths work.
+        if (path == '/api/asr' && req.method == 'POST') {
+          posted.add(req);
+          return _json({'id': 'asr-test', 'mode': (jsonDecode(req.body) as Map)['mode'] ?? 'live'}, 201);
+        }
+        if (path.startsWith('/api/asr/') && req.method == 'POST' && path.endsWith('/audio')) {
+          posted.add(req);
+          return _json({'events': <Object>[], 'partial': mockVoiceText.isEmpty ? '' : '…', 'text': ''});
+        }
+        if (path.startsWith('/api/asr/') && req.method == 'POST' && path.endsWith('/stop')) {
+          posted.add(req);
+          return _json({'events': <Object>[], 'partial': '', 'text': mockVoiceText});
+        }
+        if (path.startsWith('/api/asr/') && req.method == 'DELETE') {
+          posted.add(req);
+          return _json({'ok': true});
+        }
+        switch (path) {
           case '/api/logs' when req.method == 'GET':
             return _json({'months': ['2026-10']});
           case '/api/logs/2026-10' when req.method == 'GET':
@@ -461,26 +479,26 @@ WorklogApi _fakeApi() => WorklogApi(
       }),
     );
 
-/// Emits two PCM chunks, then waits to be stopped.
+/// Emits two PCM chunks. Uses [Stream.fromIterable] so cancel/stop never deadlocks a controller.
 class _FakeRecorder implements Recorder {
   bool permission = true;
   bool stopped = false;
-  final _ctrl = StreamController<Uint8List>();
 
   @override
   Future<bool> hasPermission() async => permission;
 
   @override
   Future<Stream<Uint8List>> startStream({int sampleRate = kSampleRate}) async {
-    _ctrl.add(Uint8List.fromList([1, 0, 2, 0]));
-    _ctrl.add(Uint8List.fromList([3, 0]));
-    return _ctrl.stream;
+    stopped = false;
+    return Stream<Uint8List>.fromIterable([
+      Uint8List.fromList([1, 0, 2, 0]),
+      Uint8List.fromList([3, 0]),
+    ]);
   }
 
   @override
   Future<void> stop() async {
     stopped = true;
-    await _ctrl.close();
   }
 
   @override
@@ -1033,11 +1051,13 @@ void main() {
     expect(find.byTooltip('말 끝내기'), findsOneWidget);
 
     await tester.tap(find.byTooltip('말 끝내기'));
-    await tester.pumpAndSettle();
+    // converting / ask spinners — pump frames instead of pumpAndSettle
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     expect(rec.stopped, isTrue);
-    final voice = posted.firstWhere((r) => r.url.path == '/api/voice');
-    expect(voice.headers['x-zaevis'], '1');
-    expect(String.fromCharCodes(voice.bodyBytes.take(4)), 'RIFF', reason: 'a WAV of what was said');
+    expect(posted.where((r) => r.url.path == '/api/asr' && r.method == 'POST'), isNotEmpty, reason: 'opens a live ASR session');
+    expect(posted.where((r) => r.url.path.endsWith('/stop')), isNotEmpty, reason: 'stops the ASR session');
     final ask = jsonDecode(posted.lastWhere((r) => r.url.path == '/api/ask').body) as Map;
     expect(ask['q'], '가장 최근 회의 내용 요약해줘');
     expect(find.text('가장 최근 회의 내용 요약해줘'), findsWidgets, reason: 'the spoken line shows as the question');
@@ -1056,7 +1076,9 @@ void main() {
     await tester.tap(find.byTooltip('말로 하기'));
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byTooltip('말 끝내기'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('알아들은 말이 없습니다. 다시 말해 주세요.'), findsOneWidget);
     expect(posted.where((r) => r.url.path == '/api/ask'), isEmpty);
 
@@ -1085,7 +1107,9 @@ void main() {
     expect(find.text('중지하고 올리기'), findsOneWidget);
 
     await tester.tap(find.text('중지하고 올리기'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
     expect(rec.stopped, isTrue);
     final up = posted.singleWhere((r) => r.url.path == '/api/inbox/audio');
     expect(up.url.queryParameters['name'], endsWith('_녹음.wav'));

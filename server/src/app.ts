@@ -102,6 +102,13 @@ export type AppOptions = {
   voice?: {
     transcribe(file: string): Promise<string>;
   };
+  /** Streaming ASR sessions (live chat / meeting draft) — see asr.ts and docs/asr.md. */
+  asr?: {
+    create(mode: "live" | "meeting", language?: string, name?: string): Promise<{ id: string; mode: string }>;
+    push(id: string, pcm: Buffer): Promise<{ events: unknown[]; partial: string; text: string }>;
+    stop(id: string): Promise<{ events: unknown[]; partial: string; text: string; draft?: string }>;
+    cancel(id: string): Promise<boolean>;
+  };
   audio?: {
     dir(): string;
     enqueue(file: string): void;
@@ -157,6 +164,7 @@ const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const MAX_AUDIO = 1024 * 1024 * 1024; // 1 GB
 const MAX_VOICE = 10 * 1024 * 1024; // about 5 minutes of 16 kHz mono WAV
+const MAX_ASR_CHUNK = 2 * 1024 * 1024; // one PCM push (a few seconds of 16 kHz)
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -191,6 +199,18 @@ async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Record
   if (!body) return {};
   const v = JSON.parse(body);
   return v && typeof v === "object" ? v : {};
+}
+
+async function readBuffer(req: IncomingMessage, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const b = chunk as Buffer;
+    size += b.length;
+    if (size > limit) throw new HttpError(413, "요청이 너무 큽니다");
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function serveStatic(webDir: string, urlPath: string, res: ServerResponse): Promise<boolean> {
@@ -473,8 +493,9 @@ export function createApp(opts: AppOptions): Server {
         case "GET /file": {
           const rel = (url.searchParams.get("path") ?? "").trim();
           if (!rel) return send(res, 400, { error: "missing_path" });
-          // "/obsidian/default/노트.md" is an external datasource source, not a worklog file
-          const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
+          // "/obsidian/default/노트.md" is an external datasource source; absolute paths are memory-folder hits.
+          const absolute = rel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rel);
+          const indexed = absolute && opts.indexedFile ? opts.indexedFile(rel) : null;
           const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
           return f ? send(res, 200, f) : notFound(res);
         }
@@ -526,7 +547,8 @@ export function createApp(opts: AppOptions): Server {
           // GET /api/download?path= → the file itself as an attachment (worklog .md/.txt, or an indexed/external original)
           const rel = (url.searchParams.get("path") ?? "").trim();
           if (!rel) return send(res, 400, { error: "missing_path" });
-          const indexed = rel.startsWith("/") && opts.indexedFile ? opts.indexedFile(rel) : null;
+          const absolute = rel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rel);
+          const indexed = absolute && opts.indexedFile ? opts.indexedFile(rel) : null;
           const f = indexed ?? (rel.startsWith("/") && opts.datasources ? await opts.datasources.file(rel) : await worklog.file(rel));
           if (!f) return notFound(res);
           const name = basename(f.path) || "file.txt";
@@ -651,6 +673,50 @@ export function createApp(opts: AppOptions): Server {
             return send(res, 202, { file: basename(dest), queued: true });
           }
           return notFound(res);
+        }
+
+        case "POST /asr": {
+          // POST /api/asr { mode: live|meeting, language?, name? } → { id, mode }
+          // POST /api/asr/:id/audio  (body: PCM16) → { events[], partial, text }
+          // POST /api/asr/:id/stop → { events[], text, draft? }  (meeting draft under inbox/transcripts/)
+          if (!opts.asr) return send(res, 409, { error: "no_asr", message: "음성 인식이 없습니다. 설정 → 녹음에서 whisperX를 설치하세요." });
+          if (!arg) {
+            const b = await readJson(req);
+            const mode = b.mode === "meeting" ? "meeting" : b.mode === "live" ? "live" : null;
+            if (!mode) throw new HttpError(400, "mode는 live 또는 meeting 이어야 합니다");
+            const language = typeof b.language === "string" && b.language ? b.language : undefined;
+            const name = typeof b.name === "string" && b.name.length <= 120 && !/[\\/:*?"<>|\0]/.test(b.name) ? b.name : undefined;
+            try {
+              return send(res, 201, await opts.asr.create(mode, language, name));
+            } catch (err) {
+              throw new HttpError(409, (err as Error).message);
+            }
+          }
+          const action = parts[3];
+          if (action === "audio") {
+            const pcm = await readBuffer(req, MAX_ASR_CHUNK);
+            if (pcm.length < 2) throw new HttpError(400, "오디오가 비어 있습니다");
+            try {
+              return send(res, 200, await opts.asr.push(arg, pcm));
+            } catch (err) {
+              const msg = (err as Error).message;
+              if (/세션|없습니다|끝났/.test(msg)) return send(res, 404, { error: "no_session", message: msg });
+              throw new HttpError(400, msg);
+            }
+          }
+          if (action === "stop") {
+            try {
+              return send(res, 200, await opts.asr.stop(arg));
+            } catch (err) {
+              return send(res, 404, { error: "no_session", message: (err as Error).message });
+            }
+          }
+          return notFound(res);
+        }
+
+        case "DELETE /asr": {
+          if (!opts.asr || !arg) return notFound(res);
+          return send(res, 200, { ok: await opts.asr.cancel(arg) });
         }
 
         case "POST /voice": {

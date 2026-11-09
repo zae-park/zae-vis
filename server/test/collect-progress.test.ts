@@ -11,7 +11,8 @@ const { collect } = await import("../src/sources/index.ts");
 
 test("collect tells the app which source is running and when it finishes", async () => {
   const work = await mkdtemp(join(tmpdir(), "zv-col-work-"));
-  addCustomSource({ name: "ping", command: "printf ping-ok", description: "ping" });
+  // node -e works on every OS; `printf` is missing on Windows.
+  addCustomSource({ name: "ping", command: `"${process.execPath}" -e "process.stdout.write('ping-ok')"`, description: "ping" });
   const seen: string[] = [];
   const cfg = { worklogDir: work } as AppConfig;
   const report = await collect(cfg, {

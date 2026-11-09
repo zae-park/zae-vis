@@ -114,12 +114,18 @@ function systemModelDirs(platform: NodeJS.Platform): string[] {
     : ["/usr/local/models", "/usr/local/share/kiwi/models", "/usr/share/kiwi/models"];
 }
 
+/** Join under a real install dir: host separators when `dir` is a Windows path, else the probed platform's style. */
+function joinInstall(dir: string, platform: NodeJS.Platform, ...parts: string[]): string {
+  if (/^[A-Za-z]:[\\/]/.test(dir) || dir.includes("\\")) return join(dir, ...parts);
+  return pathFor(platform).join(dir, ...parts);
+}
+
 /** Library candidates in search order, each with where it would come from. */
 function libraryCandidates(e: KiwiEnvironment): Array<{ path: string; source: KiwiSource }> {
   const file = libraryFileName(e.platform);
   const p = pathFor(e.platform);
   return [
-    { path: p.join(e.dir, "lib", file), source: "zaevis" as const },
+    { path: joinInstall(e.dir, e.platform, "lib", file), source: "zaevis" as const },
     ...userRoots(e).map((root) => ({ path: p.join(root, "lib", file), source: "user" as const })),
     ...systemLibraryDirs(e.platform).map((dir) => ({ path: p.join(dir, file), source: "system" as const })),
   ];
@@ -128,7 +134,7 @@ function libraryCandidates(e: KiwiEnvironment): Array<{ path: string; source: Ki
 function modelCandidates(e: KiwiEnvironment): Array<{ path: string; source: KiwiSource }> {
   const p = pathFor(e.platform);
   return [
-    { path: p.join(e.dir, "models", "cong", "base"), source: "zaevis" as const },
+    { path: joinInstall(e.dir, e.platform, "models", "cong", "base"), source: "zaevis" as const },
     ...userRoots(e).map((root) => ({ path: p.join(root, "models", "cong", "base"), source: "user" as const })),
     ...systemModelDirs(e.platform).map((dir) => ({ path: p.join(dir, "cong", "base"), source: "system" as const })),
   ];
@@ -147,7 +153,7 @@ export function probeKiwi(over: Partial<KiwiEnvironment> = {}): KiwiStatus {
   };
   const library = pick(e.env.KIWI_LIBRARY_PATH, libraryCandidates(e));
   const model = pick(e.env.KIWI_MODEL_PATH, modelCandidates(e));
-  const versionFile = pathFor(e.platform).join(e.dir, "VERSION");
+  const versionFile = joinInstall(e.dir, e.platform, "VERSION");
   let version: string | null = null;
   if (e.exists(versionFile)) {
     try {

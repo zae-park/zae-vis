@@ -169,7 +169,7 @@ test("schedule: plist is valid XML with the time; staleness rule", () => {
   assert.equal(isStale(at("2026-10-21T09:00:00"), "18:30", at("2026-10-23T09:00:00")), true); // > 36h
 });
 
-test("collect(): writes day files, appends for event sources, records state; whisperX via fake binary", async () => {
+test("collect(): writes day files, appends for event sources, records state; whisperX via fake binary", { skip: process.platform === "win32" }, async () => {
   const home = await mkdtemp(join(tmpdir(), "zv-home-"));
   const worklog = join(home, "worklog");
   await mkdir(join(worklog, "inbox", "audio"), { recursive: true });

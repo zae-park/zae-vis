@@ -74,8 +74,12 @@ export function displayPath(raw: string, roots: string[]): string {
   const shorten = (root: string, rel: string): string => (resolve(root) === primary ? rel : join(root, rel));
   for (const r of roots) {
     const root = resolve(r);
-    if (raw.startsWith(root + "/")) return shorten(root, raw.slice(root.length + 1));
-    if (raw.startsWith("/private" + root + "/")) return shorten(root, raw.slice("/private".length + root.length + 1));
+    // Match the resolved host path (either separator) and the original root string (tests often pass POSIX paths on Windows).
+    const aliases = [root, r.replace(/\\/g, "/").replace(/\/$/, "")].filter((x, i, a) => a.indexOf(x) === i);
+    for (const base of aliases) {
+      if (raw.startsWith(base + "/") || raw.startsWith(base + "\\")) return shorten(root, raw.slice(base.length + 1).replace(/\\/g, "/"));
+      if (raw.startsWith("/private" + base + "/")) return shorten(root, raw.slice(("/private" + base).length + 1));
+    }
   }
   for (const { root, prefix } of sourcePrefixes(roots)) {
     if (raw !== prefix && !raw.startsWith(prefix + "/")) continue;

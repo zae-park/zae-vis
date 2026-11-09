@@ -157,8 +157,9 @@ List<InboxFile> _pendingTranscripts(Inbox? inbox, IndexStatus? index) {
 }
 
 bool _latinQuery(String query) {
-  final latin = RegExp('[A-Za-z]');
-  final hangul = RegExp('[가-힣]');
+  // Avoid a Hangul range character class — some Windows toolchains mis-parse the source encoding.
+  final latin = RegExp(r'[A-Za-z]');
+  final hangul = RegExp(r'[\uAC00-\uD7A3]');
   return latin.hasMatch(query) && !hangul.hasMatch(query);
 }
 

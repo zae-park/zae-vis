@@ -1,7 +1,8 @@
-# Voice commands for the chat: one faster-whisper model kept in memory, so a few seconds of speech come back as text
-# in about as long (a fresh whisperX process spends most of its time loading the model).
-# argv: model name, CPU threads. stdin: one JSON request per line {"id", "path", "language"|null};
-# stdout: one JSON reply per line {"id", "text"} or {"id", "error"}. Exits when stdin closes (voice.ts idles it out).
+# Voice / ASR daemon: one faster-whisper model kept in memory.
+# argv: model name, CPU threads. stdin: one JSON request per line
+#   {"id", "path", "language"|null, "beam_size"?, "vad_filter"?, "condition_on_previous_text"?}
+# stdout: one JSON reply per line {"id", "text"} or {"id", "error"}.
+# Exits when stdin closes (voice.ts idles it out).
 
 import json
 import sys
@@ -20,13 +21,16 @@ for line in sys.stdin:
     req = {}
     try:
         req = json.loads(line)
+        beam = int(req["beam_size"]) if req.get("beam_size") is not None else 5
+        # beam 1 dropped words on short clips; live partials still pass 1 deliberately
+        vad = True if req.get("vad_filter") is None else bool(req.get("vad_filter"))
+        cond = bool(req.get("condition_on_previous_text")) if req.get("condition_on_previous_text") is not None else False
         segments, _ = model.transcribe(
             load_audio(req["path"]),
             language=req.get("language") or None,
-            # beam 1 dropped words on short clips; 5 costs little at this length
-            beam_size=5,
-            vad_filter=True,
-            condition_on_previous_text=False,
+            beam_size=max(1, beam),
+            vad_filter=vad,
+            condition_on_previous_text=cond,
         )
         text = " ".join(s.text.strip() for s in segments).strip()
         print(json.dumps({"id": req.get("id"), "text": text}, ensure_ascii=False), flush=True)

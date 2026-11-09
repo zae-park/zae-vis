@@ -34,6 +34,10 @@
 | POST | `/api/transcripts/relabel` | 화자 없이 저장된 전사본에 화자 붙이기 `{ path }` → 202 `{ file }`. `processed/audio/`에 남은 원본 녹음(같은 이름, 또는 날짜를 붙이기 전 이름)을 whisperX로 다시 인식해 시간 정보를 얻고 화자 단계를 돌려 머리(제목·whisperX 줄) 아래 본문을 `[A] …` 차례로 바꾼다. 실패하면 파일은 그대로. 진행은 `GET /api/inbox`의 `jobs[]`에서 `kind: "speakers"`, `file`이 전사본 이름. 원본 녹음이 없으면 404 `no_audio` |
 | GET | `/api/knowledge` | 지식화 현황 `{ collect{ lastRun, ok, days, latestDay }, waiting{ transcripts, sessions, sourceDays, lastDigest }, review[ProposalSummary], knowledge{ logLines, latestLogDay, projects, summaries }, reports{ daily|weekly|monthly{ enabled, count } }, digest{ running, agent, weekly, daily, nextWeekly, review } }` (`server/src/knowledge.ts`). sourceDays는 마지막 정리(`.state.md`의 last_weekly·last_daily 중 늦은 날) 뒤의 원본 날짜 수 |
 | POST | `/api/voice?name=voice.wav` | 대화 입력창의 음성: 본문이 녹음(WAV 등, 최대 10MB) → `{ text, ms }`. whisperX venv에서 faster-whisper를 띄워 두고(`voice.ts`, 첫 요청 때 시작, 10분 쉬면 내림) 전사 언어 설정대로 읽는다. 녹음은 임시 파일로만 받고 답하기 전에 지운다. 소리가 거의 없으면 400 |
+| POST | `/api/asr` | 스트리밍 ASR 세션 시작 `{ mode: "live"\|"meeting", language?, name? }` → `{ id, mode }` (201). 설계는 `docs/asr.md`. `name`은 meeting 초안 파일 stem(`…_녹음.wav` → `inbox/transcripts/…_녹음.md`). whisperX 없으면 409 `no_asr`. 디코드 우선순위는 서버 `DecodeQueue`(final high > partial low; meeting은 final만) |
+| POST | `/api/asr/:id/audio` | 본문 = 16kHz mono PCM16 → `{ events[{type,text,at,t0?,t1?}], partial, text }`. live는 partial(~350ms)·final, meeting은 final만 |
+| POST | `/api/asr/:id/stop` | 남은 말을 flush → `{ events, partial, text, draft? }`. meeting이고 글이 있으면 `draft` = worklog 상대 경로의 초안 md(whisperX가 같은 stem을 덮어씀). 세션 제거 |
+| DELETE | `/api/asr/:id` | 세션 취소 `{ ok }`. 진행 중·대기 중 decode는 abort(다른 세션의 긴 decode를 기다리지 않음) |
 | POST | `/api/ask/cancel` | 진행 중인 질문을 멈춘다 `{ cancelled }`. 에이전트 CLI를 끝내고(Windows는 `taskkill /T`), OpenRouter 요청은 abort. 기다리던 `POST /api/ask`는 409 `{ error: "cancelled" }`, 대화에 저장하지 않음 |
 | GET | `/api/file?path=` | worklog 안의 markdown·txt 원문 `{ path, markdown }` (검색 결과·기록 줄의 원문 보기) |
 | GET | `/api/download?path=` | 원문 파일 자체를 첨부로 (`content-disposition`에 UTF-8 파일 이름). `/api/file`과 같은 경로 규칙: worklog 안의 .md·.txt, 추가 색인 폴더, 외부 소스 원문 |

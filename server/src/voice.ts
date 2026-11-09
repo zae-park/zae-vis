@@ -38,7 +38,11 @@ export class VoiceTranscriber {
   }
 
   /** Text of the speech in [wav] (language undefined: whisper detects it). Starts the daemon on first use. */
-  async transcribe(wav: string, language?: string): Promise<string> {
+  async transcribe(
+    wav: string,
+    language?: string,
+    opts?: { beamSize?: number; vadFilter?: boolean; conditionOnPreviousText?: boolean },
+  ): Promise<string> {
     await this.start();
     const child = this.child;
     if (!child?.stdin) throw new Error("음성 인식기를 시작하지 못했습니다");
@@ -50,7 +54,16 @@ export class VoiceTranscriber {
         reject(new Error("음성 인식이 너무 오래 걸립니다"));
       }, RUN_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      child.stdin!.write(JSON.stringify({ id, path: wav, language: language ?? null }) + "\n");
+      child.stdin!.write(
+        JSON.stringify({
+          id,
+          path: wav,
+          language: language ?? null,
+          beam_size: opts?.beamSize,
+          vad_filter: opts?.vadFilter,
+          condition_on_previous_text: opts?.conditionOnPreviousText,
+        }) + "\n",
+      );
     });
   }
 

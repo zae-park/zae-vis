@@ -266,6 +266,45 @@ class WorklogApi {
     return (_decode(res)['text'] as String?)?.trim() ?? '';
   }
 
+  /// Starts a streaming ASR session (`docs/asr.md`). Throws [ApiException] when whisperX is missing (409).
+  Future<({String id, String mode})> asrStart({required String mode, String? language, String? name}) async {
+    final body = <String, Object?>{
+      'mode': mode,
+      if (language != null && language.isNotEmpty) 'language': language,
+      if (name != null && name.isNotEmpty) 'name': name,
+    };
+    final j = await _send('POST', '/asr', body);
+    final id = j['id'];
+    if (id is! String || id.isEmpty) throw ApiException(502, l10nNow.apiBadResponse);
+    return (id: id, mode: (j['mode'] as String?) ?? mode);
+  }
+
+  Future<AsrPushResult> asrPush(String id, List<int> pcm) async {
+    final http.Response res;
+    try {
+      res = await _client.post(
+        _uri('/asr/${Uri.encodeComponent(id)}/audio'),
+        headers: const {'x-zaevis': '1', 'content-type': 'application/octet-stream'},
+        body: pcm,
+      );
+    } catch (_) {
+      throw ApiException(0, l10nNow.apiVoiceFailed(baseUrl));
+    }
+    final j = _decode(res);
+    return AsrPushResult.fromJson(j);
+  }
+
+  Future<AsrPushResult> asrStop(String id) async {
+    final j = await _send('POST', '/asr/${Uri.encodeComponent(id)}/stop', const {});
+    return AsrPushResult.fromJson(j);
+  }
+
+  Future<void> asrCancel(String id) async {
+    try {
+      await _send('DELETE', '/asr/${Uri.encodeComponent(id)}', const {});
+    } catch (_) {}
+  }
+
   /// Stops a queued or running transcription. The recording stays in the inbox.
   Future<void> cancelTranscription(String file) async {
     await _send('DELETE', '/inbox/audio', const {}, {'name': file});
