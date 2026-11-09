@@ -86,7 +86,7 @@ echo "$VERSION+${ZAEVIS_BUILD:-$(date -u +%Y%m%d%H%M%S)}" > "$PAYLOAD/VERSION"
 say "Flutter 빌드"
 cd "$ROOT/app"
 [[ -d web && -d macos ]] || tool/setup_platforms.sh web,macos
-tool/setup_platforms.sh macos >/dev/null   # re-applies entitlements if the folder already existed
+tool/setup_platforms.sh macos >/dev/null   # re-applies entitlements + icon if the folder already existed
 flutter pub get
 flutter build web --release
 cp -R build/web "$PAYLOAD/web"

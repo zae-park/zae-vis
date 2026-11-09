@@ -160,6 +160,28 @@ function child(script: string, args: string[], extraEnv: NodeJS.ProcessEnv = {})
 
 // ── server lifecycle ───────────────────────────────────────────────────────
 
+/** Starts main.ts so it outlives this process. On Windows a plain spawn dies with us
+ *  (and Flutter/Dart's Job Object would kill it even with Node's `detached`), so we
+ *  launch via `cmd /c start` — a grandchild outside the job. */
+function spawnServer(): void {
+  const script = join(SERVER, "src", "main.ts");
+  try {
+    unlinkSync(PID_FILE);
+  } catch {}
+  if (WIN) {
+    const q = (s: string) => `"${s.replace(/"/g, "")}"`;
+    const launcher = join(STATE, "server-launch.cmd");
+    writeFileSync(launcher, ["@echo off", `cd /d ${q(SERVER)}`, `${q(process.execPath)} ${q(script)} >> ${q(LOG_FILE)} 2>&1`, ""].join("\r\n"));
+    spawn("cmd.exe", ["/c", "start", "/b", "", launcher], { cwd: STATE, env: process.env, stdio: "ignore", detached: true, windowsHide: true }).unref();
+    return;
+  }
+  const log = openSync(LOG_FILE, "a");
+  const proc = spawn(process.execPath, [script], { cwd: SERVER, detached: true, stdio: ["ignore", log, log], env: process.env });
+  closeSync(log);
+  proc.unref();
+  if (proc.pid) writeFileSync(PID_FILE, String(proc.pid));
+}
+
 async function serverStart(): Promise<void> {
   const h = await health();
   if (h) {
@@ -169,20 +191,20 @@ async function serverStart(): Promise<void> {
     if (!(stale && pid && pidAlive(pid))) return;
     info("이전 빌드의 서버가 떠 있어 다시 시작합니다");
     killPid(pid);
-    unlinkSync(PID_FILE);
+    try {
+      unlinkSync(PID_FILE);
+    } catch {}
     for (let i = 0; i < 20 && (await health()); i++) await sleep(250);
   }
   needNode();
   mkdirSync(STATE, { recursive: true });
   info(`서버 시작 (${url()})`);
-  const log = openSync(LOG_FILE, "a");
-  const proc = spawn(process.execPath, [join(SERVER, "src", "main.ts")], { cwd: SERVER, detached: !WIN, stdio: ["ignore", log, log], env: process.env, windowsHide: true });
-  closeSync(log);
-  proc.unref();
-  writeFileSync(PID_FILE, String(proc.pid));
+  spawnServer();
   for (let i = 0; i < 40; i++) {
     if (await health()) return;
-    if (proc.exitCode !== null || !pidAlive(proc.pid!)) {
+    const pid = readPid();
+    // main.ts writes the pid once it listens; if it appeared and then died, fail early
+    if (pid && !pidAlive(pid)) {
       console.error(tail(LOG_FILE, 20));
       die(`서버가 시작되지 않았습니다. 처음이라면 'zaevis setup'을 먼저 실행하세요. (로그: ${LOG_FILE})`);
     }

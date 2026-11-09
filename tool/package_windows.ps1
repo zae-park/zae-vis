@@ -79,6 +79,7 @@ Push-Location "$Root\app"
 if (-not (Test-Path "web")) { flutter create --platforms=web --project-name zaevis --org io.github.zaepark . | Out-Null }
 if (-not (Test-Path "windows")) { flutter create --platforms=windows --project-name zaevis --org io.github.zaepark . | Out-Null }
 flutter pub get
+if (Test-Path "assets\icon\icon.png") { dart run flutter_launcher_icons }
 flutter build web --release
 Copy-Item -Recurse "build\web" "$Payload\web"
 flutter build windows --release

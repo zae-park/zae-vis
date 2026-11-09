@@ -131,8 +131,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: ListView(padding: const EdgeInsets.all(28), shrinkWrap: true, children: [
+          constraints: const BoxConstraints(maxWidth: 780),
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 32), shrinkWrap: true, children: [
             Text(_done ? l.onboardingReady : l.onboardingTitle, style: t.headlineMedium),
             const SizedBox(height: 6),
             Text(

@@ -23,6 +23,24 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: false
+  ios: false
+  image_path: assets/icon/icon.png
+  web:
+    generate: true
+    image_path: assets/icon/icon.png
+    background_color: "#F7F6F2"
+    theme_color: "#2F5D7C"
+  windows:
+    generate: true
+    image_path: assets/icon/icon.png
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: assets/icon/icon.png
 
 flutter:
   uses-material-design: true

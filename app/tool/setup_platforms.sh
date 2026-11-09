@@ -15,6 +15,12 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   flutter create --platforms="$(IFS=,; echo "${MISSING[*]}")" --project-name zaevis --org io.github.zaepark .
 fi
 
+# App icon (assets/icon/icon.png) → platform runners. Missing platform folders are skipped with a warning.
+if [[ -f assets/icon/icon.png ]]; then
+  flutter pub get >/dev/null
+  dart run flutter_launcher_icons || true
+fi
+
 # zaevis is a local tool distributed outside the App Store: it starts its own server (bundled
 # Node), reads ~/.claude, git repositories and shell history, and installs a LaunchAgent.
 # None of that works inside the App Sandbox, so the sandbox is turned off.

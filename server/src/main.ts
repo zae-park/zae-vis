@@ -4,7 +4,7 @@
 // Settings: ~/.zaevis/config.json (kit/setup.sh), ~/.zaevis/sources.json (data sources).
 // Env overrides: ZAEVIS_HOME, WORKLOG_DIR, AUTORAG_CONFIG, ZAEVIS_PORT, ZAEVIS_WEB_DIR.
 
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AskRunner } from "./ask.ts";
@@ -12,7 +12,7 @@ import { jevJudge } from "./route.ts";
 import { VoiceTranscriber } from "./voice.ts";
 import { AutoRAGMcp } from "./autorag.ts";
 import { createApp, type DigestStart, type DigestStarted } from "./app.ts";
-import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, transcribeLanguageFor } from "./config.ts";
+import { addCustomSource, expandHome, loadConfig, loadSources, loadState, removeCustomSource, saveAppSettings, saveSourceSettings, saveState, stateDir, transcribeLanguageFor } from "./config.ts";
 import * as datasources from "./datasources.ts";
 import { DigestRunner, LAUNCH_RECENT_MINUTES, detectAgents, digestDays, digestDue, lastDigestDate, lastDigestOk, noAgentReason, pickAgent, type DigestScope } from "./digest.ts";
 import { knowledgeStatus } from "./knowledge.ts";
@@ -366,6 +366,10 @@ const server = createApp({
 });
 
 server.listen(cfg.port, "127.0.0.1", () => {
+  // Windows launches us via `cmd /c start`, so the parent never sees our pid — write it here.
+  try {
+    writeFileSync(join(stateDir(), "server.pid"), String(process.pid));
+  } catch {}
   console.log(`zaevis server  http://127.0.0.1:${cfg.port}`);
   console.log(`  worklog : ${cfg.worklogDir}`);
   console.log(`  autorag : ${cfg.autoragConfig}`);
