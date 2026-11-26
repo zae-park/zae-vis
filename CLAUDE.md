@@ -13,7 +13,7 @@
 - 앱 번들 레이아웃: macOS `zaevis.app/Contents/Resources/zaevis/`, Windows `zaevis.exe` 옆 `zaevis\` — 안에 `{node/(bin/node | node.exe), bin/{zaevis,zaevis.cmd,minsync}, server/, kit/, web/, VERSION}`. 앱(`backend_io.dart`)은 번들 node로 `server/src/zaevis.ts`를 직접 실행
 
 ## 검증 명령
-- 서버: `cd server && npm install && npm test` (163개 통과 상태)
+- 서버: `cd server && npm install && npm test` (185개 통과 상태)
 - 앱: `cd app && tool/setup_platforms.sh && flutter pub get && flutter analyze && flutter test`
 - DMG: `tool/package_macos.sh` → `dist/zaevis-<ver>-<arch>.dmg`
 
@@ -66,6 +66,7 @@
 - 온보딩(2026-10-27): 소스 목록이 `agent-sessions`(옛 `claude-code` 이름은 setup `--disable`에 더는 안 보냄), 첫 수집 뒤 바로 닫지 않고 "준비됐습니다 → 다음에 할 것 3줄(연결 탭 소스 확인 → 메모리 탭 기록 → 리포트 켜기) → 앱 열기". 테스트는 `_FakeBackend implements Backend`로 `OnboardingScreen`을 직접 띄운다
 - 자동 업데이트(2026-10-29): 우상단 알림의 "업데이트"가 릴리스 설치 파일을 받아 교체한다. macOS는 DMG를 마운트해 `ditto`로 `zaevis.app`을 덮고 격리 속성을 지운 뒤 다시 연다(`app/lib/update_apply.dart`). Windows는 Inno `/VERYSILENT`이며 `CloseApplications=force`가 앱을 닫고 다시 연다. 개발 실행(`zaevis run app`)은 VERSION이 없어 알림이 없다
 - 설치 파일 용량: `tool/prune_modules.mjs`가 패키징 때 `onnxruntime-node`의 다른 OS·CPU 바이너리와 tesseract.js의 비-LSTM 코어를 지운다. macOS DMG는 darwin/arm64(또는 x64)만, Windows 설치본은 win32/x64만 남긴다
+- 비밀 마스킹(2026-11-26): `server/src/redact.ts redact()`가 worklog에 쓰기 전·밖으로 보내기 전에 토큰을 가린다. 규칙은 이름 붙은 표(`RULES`: private-key·bearer·jwt·sk(OpenAI/Anthropic/OpenRouter)·stripe·github·gitlab·npm·aws·slack·slack/discord webhook·telegram·databricks·google·ya29·huggingface·`mysql -p`·비밀 이름 key=value·URL 비밀번호), 다시 돌려도 같다(이미 가린 값은 건드리지 않음). 쓰는 곳: 수집 소스 전부, whisperX 전사, 한 줄 기록 추가·수정(`worklog.appendLog/updateLog`), 전사본 업로드(`saveTranscript`), 가져오는 전사본 텍스트(`copyRedacted`: transcripts 소스·`zaevis ingest`), 회의 초안(`meetingDraftBody`), OpenRouter 정리 입력(`gatherInputs`), 질문·리포트 프롬프트(`generateText` — AutoRAG가 직접 읽는 외부 데이터소스 발췌도 여기서 가려짐), Jev 라우팅 줄. 남은 구멍: CLI 에이전트 정리(claude/codex/gemini가 worklog 파일을 직접 읽음 — 원본이 이미 가려져 있어야 함)와 AutoRAG 재정렬(OpenRouter로 외부 데이터소스 발췌가 그대로 감). 예전에 쌓인 것은 `zaevis redact`(찾기)·`--apply`(가림, `findSecrets`는 규칙 이름과 개수만), 그 뒤 `zaevis index --refresh`. 테스트 `test/redact.test.ts` — 토큰 모양은 실행 때 이어 붙인다(공개 저장소 비밀 검사)
 - 위젯 테스트 요령: 설정처럼 lazy하지 않은 ListView는 `scrollUntilVisible`이 바로 끝나므로 `dragUntilVisible(finder.hitTestable(), <ListView 안의 Scrollable>, Offset(0,-250))`로. `find.byType(Scrollable).first`는 TextField의 것일 수 있다. 버튼 안 스피너가 도는 동안은 `pumpAndSettle` 대신 `pump(duration)`
 
 남은 일

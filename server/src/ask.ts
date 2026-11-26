@@ -25,6 +25,7 @@ import { getKey as openrouterKey } from "./rerank.ts";
 import { candidateFiles, candidateLines, foundFile, listWorklogFiles, type Candidate, type CatalogFile, type FoundFile } from "./files.ts";
 import { routeLine, type ChatIntent, type Judge } from "./route.ts";
 import { fallbackCandidates, plannedRail, quotaReason, replyQuota, withStop, type RailStop } from "./rail.ts";
+import { redact } from "./redact.ts";
 
 export type AskSource = { n: number; path: string; label: string; passage: string };
 /** The agent's question back when the request could mean different things in the records. */
@@ -449,7 +450,7 @@ export class AskRunner {
       let named: AskSource[] = [];
       let jevDecided = false;
       if (routing) {
-        const route = await routeLine(opts.judge!, question, { candidates, previous: history });
+        const route = await routeLine(opts.judge!, redact(question), { candidates, previous: history });
         if (abort.signal.aborted) return cancelled();
         this.opts.log?.(`라우팅 (Jev): ${route ? `${route.intent}${route.files.length ? ` ${route.files.join(", ")}` : ""} ${route.ms}ms` : "판단 보류 → 에이전트"}`);
         if (route?.intent === "search") {
@@ -541,7 +542,9 @@ export type GenerateOpts = { exec?: Exec; fetchImpl?: typeof fetch; env?: NodeJS
  * One read-only round trip to the chosen agent: the prompt in, plain text out. Shared by the
  * question mode and the reports (reports.ts). The CLI runs with `cwd` but without tools.
  */
-export async function generateText(agent: AgentInfo, prompt: string, model: string, cwd: string, opts: GenerateOpts = {}): Promise<string> {
+export async function generateText(agent: AgentInfo, rawPrompt: string, model: string, cwd: string, opts: GenerateOpts = {}): Promise<string> {
+  // Excerpts can come from external datasources (Obsidian, Slack …) that AutoRAG reads directly, unmasked.
+  const prompt = redact(rawPrompt);
   if (agent.id === "openrouter") {
     const key = openrouterKey();
     if (!key) throw new Error("OpenRouter 키가 없습니다.");

@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { redact } from "./redact.ts";
 
 export type AsrMode = "live" | "meeting";
 export type AsrPriority = "high" | "low";
@@ -155,7 +156,7 @@ export function meetingDraftRelPath(name: string | undefined, id: string): strin
 }
 
 export function meetingDraftBody(stem: string, text: string): string {
-  return [`# ${stem}`, "", "(zaevis 실시간 초안 — 고품질 전사가 끝나면 이 파일을 덮어씁니다)", "", text.trim(), ""].join("\n");
+  return [`# ${stem}`, "", "(zaevis 실시간 초안 — 고품질 전사가 끝나면 이 파일을 덮어씁니다)", "", redact(text.trim()), ""].join("\n");
 }
 
 export type ChunkerTick =
