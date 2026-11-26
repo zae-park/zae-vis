@@ -17,6 +17,7 @@ import { installSchedule, removeSchedule, scheduleStatus } from "./schedule.ts";
 import { listSources } from "./sources/index.ts";
 import { AUDIO_EXT, TEXT_EXT, transcribeFile, whisperxBin } from "./transcribe.ts";
 import { freePath, safeStem } from "./worklog.ts";
+import { copyRedacted, scanWorklog } from "./redact.ts";
 
 // ── colours ────────────────────────────────────────────────────────────────
 const useColor = stdout.isTTY && !process.env.NO_COLOR;
@@ -235,6 +236,15 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
       if (!st.installed) return `예약 없음. 'zaevis schedule install' 로 매일 ${cfg.dailyAt}에 수집·색인합니다.`;
       return `${st.loaded ? c.green("●") : c.yellow("●")} 매일 ${st.dailyAt} 수집·색인 ${st.loaded ? "" : "(등록됐지만 아직 로드되지 않음)"}\n${c.dim(st.plist)}`;
     }
+    case "redact": {
+      const apply = args.includes("--apply");
+      const hits = await scanWorklog(cfg.worklogDir, { apply });
+      if (!hits.length) return c.green("✓ 비밀로 보이는 문자열이 없습니다.");
+      const lines = hits.map((h) => `  ${h.file}  ${c.dim(Object.entries(h.rules).map(([k, n]) => `${k}×${n}`).join(" "))}`);
+      return apply
+        ? `${c.green("✓")} ${hits.length}개 파일을 가렸습니다.\n${lines.join("\n")}\n${c.dim("색인은 다음 갱신 때 따라옵니다: zaevis index --refresh")}`
+        : `${c.yellow("!")} ${hits.length}개 파일에 비밀로 보이는 문자열이 있습니다.\n${lines.join("\n")}\n${c.dim("가리려면: zaevis redact --apply")}`;
+    }
     case "ingest": {
       if (!args.length) throw new CliError("파일을 지정하세요: zaevis ingest <전사본.txt | 녹음.m4a> …");
       const ts = loadSources(cfg).transcripts ?? { enabled: true };
@@ -245,7 +255,7 @@ export async function runLocal(cmd: string, args: string[]): Promise<string | nu
           const dir = join(cfg.worklogDir, "inbox", "transcripts");
           await mkdir(dir, { recursive: true });
           const dest = freePath(dir, safeStem(basename(f)), ext);
-          await copyFile(f, dest);
+          await copyRedacted(f, dest);
           out.push(`${c.green("✓")} ${basename(dest)}`);
         } else if (AUDIO_EXT.has(ext)) {
           if (!whisperxBin(ts.whisperxBin as string | undefined)) throw new CliError("whisperX가 없습니다: zaevis ext install whisperx");

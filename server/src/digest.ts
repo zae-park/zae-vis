@@ -20,6 +20,7 @@ import { agentsInOrder, fallbackCandidates, plannedRail, replyQuota, withStop, t
 import { getKey as openrouterKey } from "./rerank.ts";
 import { applyProposal, diffSnapshot, isEmptyProposal, newProposalId, restoreSnapshot, saveProposal, takeSnapshot, type Proposal } from "./review.ts";
 import { Worklog } from "./worklog.ts";
+import { redact } from "./redact.ts";
 
 export type AgentId = "claude" | "codex" | "cursor" | "gemini" | "openrouter";
 /**
@@ -424,7 +425,7 @@ export async function gatherInputs(worklogDir: string, since: string | null, cap
   const files: string[] = [];
   for (const f of picked) {
     const rel = f.slice(worklogDir.length + 1).replaceAll("\\", "/");
-    let body = await readFile(f, "utf8");
+    let body = redact(await readFile(f, "utf8"));
     if (body.length > 12_000) body = body.slice(0, 12_000) + "\n…(잘림)";
     const chunk = `\n\n===== ${rel} =====\n${body}`;
     if (text.length + chunk.length > capChars) break;
