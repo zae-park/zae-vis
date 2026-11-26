@@ -79,3 +79,4 @@
 - `~/jaepark` 상위 폴더는 회사 저장소 원격에 연결돼 있다. zaevis·worklog는 `.git/info/exclude`로 제외되어 있으니 그 저장소에 커밋하지 말 것.
 - 사용자 worklog는 `~/jaepark/worklog`. 실험은 `ZAEVIS_HOME=/tmp/zv-test` 같은 별도 상태 폴더로 할 것 (실제 `~/.zaevis` 오염 금지).
 - 커밋 메시지는 한국어.
+- 브랜치는 `dev`에 push하거나 `feat/`로 시작한다. `claude/`로 시작하는 브랜치는 만들지 말 것.
