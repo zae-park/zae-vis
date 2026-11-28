@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, normalize, sep } from "node:path";
+import { redact } from "./redact.ts";
 
 export type LogEntry = {
   date: string;          // "10-06" as written in the log
@@ -162,7 +163,7 @@ export class Worklog {
   }
 
   async appendLog(e: NewLogLine): Promise<{ month: string; line: string }> {
-    const line = formatLogLine(e);
+    const line = formatLogLine({ ...e, text: redact(e.text) });
     const d = e.date ?? new Date();
     const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const file = join(this.root, "log", `${month}.md`);
@@ -190,7 +191,7 @@ export class Worklog {
     const date = patch.date ?? cur.date;
     if (!/^\d{1,2}-\d{1,2}$/.test(date)) throw new Error(`날짜 형식이 올바르지 않습니다: ${date} (예: 10-06)`);
     const [mm, dd] = date.split("-").map(Number);
-    const text = (patch.text ?? cur.text).trim() + (cur.source ? ` (src: ${cur.source})` : "");
+    const text = redact((patch.text ?? cur.text).trim()) + (cur.source ? ` (src: ${cur.source})` : "");
     const line = formatLogLine({ text, tags: patch.tags ?? cur.tags, projects: patch.projects ?? cur.projects, date: new Date(Number(month.slice(0, 4)), mm - 1, dd, 12) });
     lines[i] = line;
     await writeFile(file, lines.join("\n"));
@@ -224,7 +225,8 @@ export class Worklog {
     const dir = join(this.root, "inbox", "transcripts");
     await mkdir(dir, { recursive: true });
     const file = freePath(dir, safeStem(name, date), ".txt");
-    await writeFile(file, text.endsWith("\n") ? text : text + "\n");
+    const masked = redact(text);
+    await writeFile(file, masked.endsWith("\n") ? masked : masked + "\n");
     return file;
   }
 

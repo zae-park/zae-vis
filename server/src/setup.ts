@@ -61,16 +61,36 @@ function gitTop(dir: string): string | null {
   }
 }
 
+/**
+ * The OS's own spelling of a path. On Windows `realpathSync.native` expands 8.3 short names
+ * (`C:\\Users\\RUNNER~1`) to the long ones git prints; the JS `realpathSync` does not.
+ */
+function canonical(p: string): string {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return realpathSync(p);
+  }
+}
+
+/** `relative(from, to)` that ignores case (Windows) but keeps `to`'s own spelling in the result. */
+function relativeKeepCase(from: string, to: string): string {
+  const rel = relative(from.toLowerCase(), to.toLowerCase());
+  if (!rel || rel.startsWith("..") || to.toLowerCase().length !== to.length) return rel;
+  return to.slice(to.length - rel.length);
+}
+
 /** Keeps the personal log out of a repository that happens to contain it (.git/info/exclude). */
 export function excludeFromGit(paths: string[], roots: string[], log: (l: string) => void): void {
   for (const dir of roots) {
     const top = gitTop(dir);
     if (!top || !existsSync(join(top, ".git"))) continue;
     const ex = join(top, ".git", "info", "exclude");
-    const realTop = realpathSync(top);
+    const realTop = canonical(top);
     for (const p of paths) {
-      const real = existsSync(p) ? realpathSync(p) : join(realpathSync(dirname(p)), basename(p)); // CLAUDE.md may not exist yet
-      const relRaw = relative(realTop, real);
+      const real = existsSync(p) ? canonical(p) : join(canonical(dirname(p)), basename(p)); // CLAUDE.md may not exist yet
+      // Windows paths are case-insensitive; git and the caller may disagree on case.
+      const relRaw = WIN ? relativeKeepCase(realTop, real) : relative(realTop, real);
       if (!relRaw || relRaw === ".." || relRaw.startsWith(`..${sep}`) || relRaw.startsWith("../")) continue;
       const rel = relRaw.split(sep).join("/");
       const line = `/${rel}`;

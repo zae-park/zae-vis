@@ -63,6 +63,7 @@ ${B("바로 쓰기")}
 ${B("기록 넣기 (실시간)")}
   zaevis add "#decision [[프로젝트]] 무엇을, 왜"   한 줄 기록
   zaevis ingest <파일…>       전사본(.txt .md .vtt .srt)은 inbox로, 녹음은 whisperX로 바로 전사
+  zaevis redact [--apply]     worklog에 남은 비밀(토큰·비밀번호) 찾기, --apply면 가림
   zaevis inbox                inbox와 전사 작업 보기
 
 ${B("수집 (배치)")}
@@ -561,7 +562,7 @@ async function main(argv: string[]): Promise<void> {
       needNode();
       process.exitCode = await child("cli.ts", [cmd, ...rest]);
       return;
-    case "sources": case "schedule": case "ingest":
+    case "sources": case "schedule": case "ingest": case "redact":
       needNode();
       process.exitCode = await child("cli.ts", [cmd, ...rest]);
       return;

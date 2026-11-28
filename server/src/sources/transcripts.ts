@@ -8,6 +8,7 @@ import { expandHome, transcribeLanguageFor } from "../config.ts";
 import { hfStatus } from "../hf.ts";
 import { AUDIO_EXT, TEXT_EXT, datedStem, transcribeFile, TranscribeCancelled, whisperxBin } from "../transcribe.ts";
 import { addTo, dayKey, type Source } from "./types.ts";
+import { copyRedacted } from "../redact.ts";
 
 async function files(dir: string): Promise<string[]> {
   try {
@@ -50,7 +51,7 @@ export const transcriptsSource: Source = {
         if (TEXT_EXT.has(ext)) {
           const stem = await datedStem(f);
           if (existsSync(join(inbox, stem + ext)) || existsSync(join(config.worklogDir, "processed", "transcripts", stem + ext))) continue;
-          await copyFile(f, join(inbox, stem + ext));
+          await copyRedacted(f, join(inbox, stem + ext));
           addTo(byDay, dayKey(st.mtime), `- 가져옴: \`${stem}${ext}\` ← ${dir}`);
           imported++;
         } else if (AUDIO_EXT.has(ext)) {
